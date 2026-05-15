@@ -1,0 +1,84 @@
+# Pepco.pl UX analysis — Polish market personas
+
+total_personas: 3
+concurrency: 1
+
+demographics:
+  - name: "Typ osoby"
+    choices:
+      - { name: "młoda matka z małymi dziećmi", weight: 1 }
+      - { name: "emeryt lub rencista szukający tanich artykułów domowych", weight: 1 }
+      - { name: "młoda dorosła studentka lub pracownica na dorobku", weight: 1 }
+  - name: "Miasto"
+    choices:
+      - { name: "małe miasto lub wieś (do 50 tys. mieszkańców)", weight: 2 }
+      - { name: "średnie miasto (50–200 tys. mieszkańców)", weight: 2 }
+      - { name: "duże miasto (powyżej 200 tys. mieszkańców)", weight: 1 }
+  - name: "Częstotliwość zakupów online"
+    choices:
+      - { name: "rzadko – woli sklepy stacjonarne", weight: 2 }
+      - { name: "kilka razy w miesiącu", weight: 2 }
+      - { name: "regularnie, głównie przez telefon", weight: 1 }
+
+general_intent: "Wejdź na stronę Pepco, znajdź ubranie dla dziecka lub artykuł domowy i spróbuj dodać go do koszyka."
+
+example_persona: |
+  Persona: Agnieszka
+  Tło:
+  Agnieszka ma 36 lat i mieszka w Rzeszowie. Pracuje jako kasjerka w supermarkecie na pół etatu i wychowuje dwójkę dzieci (5 i 8 lat) z mężem, który jest kierowcą ciężarówki. Pepco to jeden z jej ulubionych sklepów – chodzi tam przynajmniej raz w tygodniu, bo ubrania dla dzieci są tanie i wystarczająco trwałe na co dzień. Nie lubi przepłacać i zawsze szuka promocji.
+
+  Dane demograficzne:
+  Wiek: 36 lat
+  Płeć: kobieta
+  Wykształcenie: średnie zawodowe
+  Zawód: kasjerka (pół etatu)
+  Dochód: niski–średni (gospodarstwo domowe ok. 5 000–6 500 zł netto miesięcznie)
+  Miejsce zamieszkania: Rzeszów (250 tys. mieszkańców)
+
+  Sytuacja finansowa:
+  Agnieszka liczy każdą złotówkę. Kupuje głównie to, co jest potrzebne – ubrania dla dzieci na nowy sezon, podstawowe artykuły domowe. Rzadko kupuje dla siebie. Unika kredytów i stara się nie zadłużać. Kupony i promocje są dla niej bardzo ważne.
+
+  Nawyki zakupowe:
+  Woli zakupy stacjonarne, bo może dotknąć i obejrzeć produkt. Online zamawia głównie przez telefon, gdy coś wyprzeda się w sklepie. Nie lubi skomplikowanych procedur zwrotów. Porównuje ceny przed zakupem. Nie korzysta z kart kredytowych – płaci BLIKiem lub gotówką.
+
+  Zachowanie na stronie:
+  Chce znaleźć szybko to, czego szuka. Gubi się, gdy jest za dużo kategorii. Klika w zdjęcia produktów, żeby zobaczyć szczegóły. Frustruje ją, gdy nie może sprawdzić dostępności rozmiaru. Oczekuje, że proces dodania do koszyka będzie prosty i nie będzie wymagał zakładania konta.
+
+  Cel wizyty:
+  Szuka bluzy lub kurtki dla 8-latka na wiosnę, rozmiar 128. Budżet: do 50 zł.
+
+start_url: "https://www.pepco.pl/"
+
+max_steps: 20
+
+questionnaire:
+  questionnaire_id: pepco_pl_usability_v1
+  title: Ankieta użyteczności strony Pepco
+  questions:
+    - id: q1
+      type: multiple_choice
+      prompt: "Czy łatwo było mi znaleźć interesujący mnie produkt na stronie Pepco? (1 = Zdecydowanie nie, 5 = Zdecydowanie tak)"
+      options: ["1", "2", "3", "4", "5"]
+
+    - id: q2
+      type: multiple_choice
+      prompt: "Czy strona była przejrzysta i czytelna? (1 = Zdecydowanie nie, 5 = Zdecydowanie tak)"
+      options: ["1", "2", "3", "4", "5"]
+
+    - id: q3
+      type: multiple_choice
+      prompt: "Czy proces dodania produktu do koszyka był prosty? (1 = Zdecydowanie nie, 5 = Zdecydowanie tak)"
+      options: ["1", "2", "3", "4", "5"]
+
+    - id: q4
+      type: multiple_choice
+      prompt: "Czy strona działa sprawnie i szybko? (1 = Zdecydowanie nie, 5 = Zdecydowanie tak)"
+      options: ["1", "2", "3", "4", "5"]
+
+    - id: q5
+      type: short_text
+      prompt: "Co było największą trudnością podczas korzystania ze strony Pepco?"
+
+    - id: q6
+      type: short_text
+      prompt: "Czy jest coś, czego szukałeś/szukałaś, a czego nie mogłeś/mogłaś znaleźć na stronie?"

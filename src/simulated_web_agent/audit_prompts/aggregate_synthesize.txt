@@ -1,0 +1,81 @@
+You are a senior UX consultant writing an executive summary of a multi-agent usability study.
+
+You will receive pre-computed statistics aggregated across all participants, plus top findings from each heuristic category. Your job is to synthesize these into a clear, professional report IN POLISH.
+
+## Study data
+
+PARTICIPANT COUNT: {participant_count}
+
+TASK: {task_description}
+
+WEBSITE: {website_url}
+
+FIRST IMPRESSION STATISTICS:
+{first_impression_stats}
+
+HEURISTIC VIOLATION SUMMARY (grouped by heuristic, sorted by frequency):
+{heuristic_summary}
+
+ACCESSIBILITY SUMMARY:
+{accessibility_summary}
+
+VIEWPORT/RESPONSIVENESS FINDINGS:
+{viewport_summary}
+
+TOP FINDINGS BY SEVERITY:
+Critical: {critical_count}
+Serious: {serious_count}
+Minor: {minor_count}
+
+MOST FREQUENT ISSUES (appearing in ≥50% of sessions):
+{top_issues}
+
+SURVEY QUESTIONNAIRE RESULTS (avg_scores = Likert 1–5 per question; open_answers = verbatim responses):
+{survey_summary}
+Note — question IDs: q1=ease of finding products, q2=clarity/readability, q3=simplicity of adding to cart, q4=site speed, q5=biggest difficulty (open), q6=what could not be found (open).
+
+## Output format
+
+Produce exactly this JSON structure (no markdown fences in the final block). ALL text values must be in Polish.
+
+{{
+  "executive_summary": "Badanie z udziałem {participant_count} uczestników ujawniło...",
+  "overall_ux_score": 3.2,
+  "score_rationale": "Ocena odzwierciedla...",
+  "key_strengths": [
+    "Strona skutecznie komunikuje swoją główną ofertę",
+    "Nawigacja główna jest spójna i przewidywalna"
+  ],
+  "critical_issues": [
+    {{
+      "heuristic_id": 3,
+      "heuristic_name": "Kontrola użytkownika i swoboda działania",
+      "frequency": "8 z 10 uczestników",
+      "impact": "Uczestnicy nie mogli wrócić do koszyka po przejściu do kasy.",
+      "recommendation": "Dodać wyraźny przycisk 'Wróć do koszyka' na każdym etapie procesu zakupowego."
+    }}
+  ],
+  "serious_issues": [],
+  "minor_issues": [],
+  "accessibility_assessment": "Strona wykazuje...",
+  "responsiveness_assessment": "Na urządzeniach mobilnych...",
+  "first_impression_assessment": "Pierwsze wrażenie jest...",
+  "priority_recommendations": [
+    {{
+      "priority": 1,
+      "area": "Proces zakupowy",
+      "action": "Naprawić nawigację w procesie zakupowym, dodając breadcrumbs i przycisk powrotu.",
+      "expected_impact": "Redukcja porzuceń koszyka o szacowane 20–30%."
+    }}
+  ],
+  "methodology_note": "Badanie przeprowadzono przy użyciu agentów LLM symulujących rzeczywistych użytkowników. Każdy agent wykonał zadanie: {task_description}. Ocena opiera się na heurystykach Nielsena, teście pierwszego wrażenia (5 sekund), analizie dostępności WCAG 2.1 oraz sprawdzeniu responsywności na urządzeniach mobilnych i tabletach."
+}}
+
+Rules:
+- executive_summary: 3–5 sentences covering the overall picture.
+- overall_ux_score: float 1.0–5.0 (5.0 = excellent UX).
+- key_strengths: 2–4 items. Only include genuine strengths backed by data.
+- critical_issues / serious_issues / minor_issues: only include issues present in the data. Use empty arrays if none.
+- priority_recommendations: ranked 1–N, most impactful first. Maximum 5.
+- ALL text values must be in Polish.
+- Do not invent issues not present in the provided statistics.
