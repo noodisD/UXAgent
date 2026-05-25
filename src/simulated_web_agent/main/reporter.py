@@ -340,6 +340,7 @@ async def generate_aggregated_report(
     stores: list[TraceStore],
     task_description: str,
     website_url: str,
+    site_context: str = "",
 ) -> dict:
     """
     Load all per-agent reports, compute statistics, call large LLM for narrative,
@@ -351,6 +352,10 @@ async def generate_aggregated_report(
     if not reports:
         log.warning("[reporter] No per-agent reports found for aggregation")
         return {}
+
+    # Derive site_context from first store if not supplied by caller
+    if not site_context and stores:
+        site_context = stores[0].read_basic_info().get("site_context", "") or ""
 
     stats = aggregate_statistics(reports)
     n = stats["participant_count"]
@@ -369,6 +374,7 @@ async def generate_aggregated_report(
     survey_summary = json.dumps(stats.get("survey", {}), ensure_ascii=False, indent=2)
 
     prompt = prompt_template.format(
+        site_context=site_context,
         participant_count=n,
         task_description=task_description,
         website_url=website_url,

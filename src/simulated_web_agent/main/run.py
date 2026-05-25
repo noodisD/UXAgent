@@ -43,6 +43,7 @@ async def run_async(
     concurrency: int = 4,
     example_persona: str = None,
     on_progress: Optional[Callable[[dict], None]] = None,
+    site_context: str = "",
 ):
     ping = lambda e: _safe_ping(on_progress, e)
 
@@ -61,6 +62,10 @@ async def run_async(
         example_text=example_persona,
     )
     ping({"phase": "personas", "status": "progress", "current": total_personas, "total": total_personas})
+
+    if site_context:
+        for p in all_personas_intents:
+            p["site_context"] = site_context
 
     with open("personas.json", "w", encoding="utf-8") as f:
         json.dump(all_personas_intents, f, indent=2, ensure_ascii=False)
@@ -118,6 +123,7 @@ async def run_async(
                 stores=stores,
                 task_description=general_intent,
                 website_url=start_url,
+                site_context=site_context,
             )
         except Exception as e:
             log.exception("Aggregated report generation failed: %s", e)
@@ -141,5 +147,6 @@ if __name__ == "__main__":
             example_persona=cfg_dict["example_persona"],
             concurrency=cfg_dict["concurrency"],
             headless=True,
+            site_context=cfg_dict.get("site_context", ""),
         )
     )

@@ -104,7 +104,10 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
         log.warning("[auditor] No memory data found in %s", store.trace_dir)
         return []
 
+    site_context = store.read_basic_info().get("site_context", "") or ""
+
     prompt = _prompts.get("heuristic_evaluate").format(
+        site_context=site_context,
         observations="\n".join(f"- {o}" for o in observations) or "(none)",
         reflections="\n".join(f"- {r}" for r in reflections) or "(none)",
         actions="\n".join(f"- {a}" for a in actions) or "(none)",

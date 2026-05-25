@@ -29,6 +29,18 @@ Work through the evidence step by step IN ENGLISH. For each heuristic, reason ab
 - "poważny" — causes significant difficulty or confusion
 - "drobny" — minor friction, cosmetic or edge-case issue
 
+## Site context — read before evaluating
+
+{site_context}
+
+Calibrate your evaluation against the site's declared purpose above:
+- Do NOT flag absence of features the site never claimed to offer.
+- DO flag violations in features the site actually provides.
+- If a missing capability (e.g. online purchase) causes a meaningful
+  expectation mismatch, you MAY note it as a strategic opportunity
+  with severity "drobny" and explicit framing as a business recommendation.
+- If site_context is empty, apply standard heuristic evaluation.
+
 ## Session data
 
 OBSERVATIONS:

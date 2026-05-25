@@ -4,6 +4,10 @@ You will receive pre-computed statistics aggregated across all participants, plu
 
 ## Study data
 
+SITE CONTEXT:
+{site_context}
+(If empty, treat as a standard evaluation — do not apply any special framing.)
+
 PARTICIPANT COUNT: {participant_count}
 
 TASK: {task_description}

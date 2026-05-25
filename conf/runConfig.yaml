@@ -20,7 +20,7 @@ demographics:
       - { name: "kilka razy w miesiącu", weight: 2 }
       - { name: "regularnie, głównie przez telefon", weight: 1 }
 
-general_intent: "Wejdź na stronę Pepco, znajdź ubranie dla dziecka lub artykuł domowy i spróbuj dodać go do koszyka."
+general_intent: "Wejdź na stronę Pepco, znajdź ubranie dla dziecka lub artykuł domowy, sprawdź szczegóły produktu i dostępność w sklepie."
 
 example_persona: |
   Persona: Agnieszka
@@ -48,6 +48,19 @@ example_persona: |
   Szuka bluzy lub kurtki dla 8-latka na wiosnę, rozmiar 128. Budżet: do 50 zł.
 
 start_url: "https://www.pepco.pl/"
+
+site_context: |
+  Pepco.pl is a product catalog and physical retail companion site.
+  It does NOT offer online purchasing — products are shown with prices
+  and sizing for browsing reference only; purchases happen exclusively
+  in physical Pepco stores via the "Wyszukaj sklep" (Find a store) flow.
+  Evaluate the site against its actual purpose: product discovery,
+  navigation clarity, and information quality.
+  Do NOT flag the absence of a shopping cart or checkout as a usability violation.
+  If the lack of e-commerce represents a meaningful user-expectation mismatch
+  caused by the site's own design patterns (e.g. showing prices and size selectors
+  that imply a purchase flow), note it as a strategic opportunity with severity
+  "drobny", clearly framed as a business recommendation, not a usability failure.
 
 max_steps: 20
 
