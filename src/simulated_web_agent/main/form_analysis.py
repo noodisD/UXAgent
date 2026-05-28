@@ -16,6 +16,7 @@ Saves:  trace_dir/form_funnel.json
 
 from __future__ import annotations
 
+import json
 import logging
 
 from .trace_store import TraceStore
@@ -54,26 +55,45 @@ def run_form_analysis(store: TraceStore) -> dict:
 
     Returns and saves a summary dict.
     """
-    actions: list[dict] = store.read_action_trace()
+    raw_actions: list = store.read_action_trace()
 
     typed_fields: list[dict] = []
     submit_clicks: list[dict] = []
 
-    for action in actions:
-        action_type = (action.get("action_type") or "").lower()
+    for raw in raw_actions:
+        # Entries may be plain dicts OR JSON strings — normalise to dict
+        if isinstance(raw, str):
+            try:
+                action: dict = json.loads(raw)
+            except Exception:
+                continue
+        elif isinstance(raw, dict):
+            action = raw
+        else:
+            continue
+
+        # Field names differ between agent versions:
+        #   new:  action_type / element
+        #   old:  action / target
+        action_type = (
+            action.get("action_type") or action.get("action") or ""
+        ).lower()
+        element_str = str(
+            action.get("element") or action.get("target") or ""
+        ).lower()
+        value = action.get("value") or action.get("text") or ""
 
         if action_type == "type":
             typed_fields.append(
                 {
-                    "element": action.get("element", ""),
-                    "value_length": len(str(action.get("value", ""))),
+                    "element": element_str,
+                    "value_length": len(str(value)),
                 }
             )
 
         elif action_type == "click":
-            element_str = str(action.get("element", "")).lower()
             if any(pat in element_str for pat in _SUBMIT_PATTERNS):
-                submit_clicks.append({"element": action.get("element", "")})
+                submit_clicks.append({"element": element_str})
 
     engaged = len(typed_fields) > 0
     # Submitted = filled at least one field AND clicked something submit-like
