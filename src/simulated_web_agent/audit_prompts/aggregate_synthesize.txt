@@ -26,6 +26,11 @@ ACCESSIBILITY SUMMARY:
 VIEWPORT/RESPONSIVENESS FINDINGS:
 {viewport_summary}
 
+PAGE SPEED (Google PageSpeed Insights — mobile + desktop):
+{pagespeed_summary}
+Note — Speed Index thresholds: mobile good <3.4s / poor >5.8s; desktop good <1.3s / poor >2.3s.
+Performance score: 90–100 = good, 50–89 = needs improvement, 0–49 = poor.
+
 TOP FINDINGS BY SEVERITY:
 Critical: {critical_count}
 Serious: {serious_count}

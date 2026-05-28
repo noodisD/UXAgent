@@ -30,7 +30,7 @@ SEVERITY_LABELS = {
 QUESTION_LABELS = {
     "q1": "Łatwość znalezienia produktu",
     "q2": "Przejrzystość i czytelność",
-    "q3": "Prostota dodania do koszyka",
+    "q3": "Łatwość sprawdzenia dostępności / znalezienia sklepu",
     "q4": "Sprawność działania strony",
     "q5": "Największa trudność",
     "q6": "Czego nie udało się znaleźć",
@@ -185,6 +185,21 @@ body {
 .vp-card .vp-label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-bottom: 6px; color: #6c757d; }
 .vp-ok { color: #28a745; font-weight: 700; }
 .vp-warn { color: #dc3545; font-weight: 700; }
+
+/* ── Page speed ── */
+.ps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.ps-card { border-radius: 8px; padding: 20px 24px; border: 1px solid #e9ecef; }
+.ps-card .ps-device { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: #6c757d; margin-bottom: 8px; }
+.ps-card .ps-score { font-size: 42px; font-weight: 800; line-height: 1; }
+.ps-card .ps-label { font-size: 12px; font-weight: 600; margin-top: 2px; margin-bottom: 14px; }
+.ps-metric { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 5px 0; border-bottom: 1px solid #f0f0f0; }
+.ps-metric:last-child { border-bottom: none; }
+.ps-metric .ps-mname { color: #495057; }
+.ps-metric .ps-mval { font-weight: 600; }
+.ps-status-good   { color: #28a745; }
+.ps-status-needs_improvement { color: #ffc107; }
+.ps-status-poor   { color: #dc3545; }
+.ps-status-unknown { color: #6c757d; }
 
 /* ── Footer ── */
 .footer { font-size: 12px; color: #6c757d; text-align: center; margin-top: 40px; }
@@ -430,6 +445,69 @@ def _render_recommendations(narr: dict) -> str:
     return _section("Priorytetowe rekomendacje", f'<div class="rec-list">{items}</div>')
 
 
+def _render_pagespeed(ps: dict | None) -> str:
+    if not ps or ps.get("skipped") or ps.get("error"):
+        return ""
+
+    def _score_color_ps(score: int | None) -> str:
+        if score is None:
+            return "#6c757d"
+        if score >= 90:
+            return "#28a745"
+        if score >= 50:
+            return "#ffc107"
+        return "#dc3545"
+
+    def _status_class(status: str) -> str:
+        return f"ps-status-{status}" if status else "ps-status-unknown"
+
+    def _card(strategy: str) -> str:
+        data = ps.get(strategy) or {}
+        if data.get("error"):
+            return f"""
+            <div class="ps-card">
+              <div class="ps-device">{strategy.capitalize()}</div>
+              <div style="color:#dc3545;font-size:13px;">Błąd: {_esc(data['error'])}</div>
+            </div>"""
+
+        score = data.get("performance_score")
+        label_map = {"good": "Dobry", "needs_improvement": "Do poprawy", "poor": "Słaby"}
+        label = label_map.get(data.get("performance_label", ""), "—")
+        color = _score_color_ps(score)
+
+        def metric(name: str, m: dict) -> str:
+            status = m.get("status", "")
+            css = _status_class(status)
+            indicator = {"good": "✓", "needs_improvement": "⚠", "poor": "✗"}.get(status, "")
+            return f"""
+            <div class="ps-metric">
+              <span class="ps-mname">{_esc(name)}</span>
+              <span class="ps-mval {css}">{indicator} {_esc(m.get('display','—'))}</span>
+            </div>"""
+
+        si  = data.get("speed_index") or {}
+        fcp = data.get("fcp") or {}
+        lcp = data.get("lcp") or {}
+        tbt = data.get("tbt") or {}
+        cls_ = data.get("cls") or {}
+
+        return f"""
+        <div class="ps-card">
+          <div class="ps-device">{strategy.capitalize()}</div>
+          <div class="ps-score" style="color:{color};">{score if score is not None else '—'}</div>
+          <div class="ps-label" style="color:{color};">{_esc(label)}</div>
+          {metric("Speed Index", si)}
+          {metric("LCP", lcp)}
+          {metric("FCP", fcp)}
+          {metric("TBT", {**tbt, "status": ""})}
+          {metric("CLS", {**cls_, "status": ""})}
+        </div>"""
+
+    body = f'<div class="ps-grid">{_card("mobile")}{_card("desktop")}</div>'
+    body += f'<p style="font-size:11px;color:#6c757d;margin-top:8px;">Źródło: Google PageSpeed Insights &nbsp;·&nbsp; {_esc(ps.get("url",""))}</p>'
+    return _section("Szybkość strony (PageSpeed Insights)", body)
+
+
 def _render_stats_table(stats: dict) -> str:
     n = stats.get("participant_count", 0)
     heur = stats.get("heuristic") or {}
@@ -484,6 +562,7 @@ def _render_methodology(narr: dict) -> str:
 def generate_html_report(agg: dict) -> str:
     stats = agg.get("statistics") or {}
     narr = agg.get("narrative") or {}
+    ps = agg.get("pagespeed")
 
     from .reporter import _narrative_from_stats  # avoid circular at module level
     if not narr or "error" in narr or not narr.get("executive_summary"):
@@ -496,6 +575,7 @@ def generate_html_report(agg: dict) -> str:
         _render_strengths(narr) +
         _render_all_issues(narr) +
         _render_recommendations(narr) +
+        _render_pagespeed(ps) +
         _render_first_impression(stats, narr) +
         _render_survey(stats) +
         _render_accessibility(stats, narr) +

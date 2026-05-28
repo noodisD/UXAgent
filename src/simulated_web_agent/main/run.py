@@ -10,6 +10,7 @@ from ..agent import gpt
 from ..config import load_cfg
 from .analysis_runner import run_all_analyses
 from .experiment import experiment_async
+from .pagespeed import run_pagespeed_check
 from .persona import generate_personas
 from .reporter import generate_aggregated_report
 from .trace_store import TraceStore
@@ -115,7 +116,15 @@ async def run_async(
     await asyncio.gather(*[post_one(s) for s in stores], return_exceptions=True)
     ping({"phase": "analysis", "status": "progress", "current": total_post, "total": total_post})
 
-    # ── 4) Aggregated report ──────────────────────────────────────────────────
+    # ── 4) Page speed check (once, for start_url) ────────────────────────────
+    if stores:
+        runs_dir = stores[0].trace_dir.parent
+        try:
+            await run_pagespeed_check(start_url, runs_dir)
+        except Exception as e:
+            log.exception("Page speed check failed (non-fatal): %s", e)
+
+    # ── 5) Aggregated report ──────────────────────────────────────────────────
     if stores:
         ping({"phase": "report", "status": "start", "total": 1})
         try:

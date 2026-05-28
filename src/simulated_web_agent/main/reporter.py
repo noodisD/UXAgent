@@ -17,6 +17,7 @@ from typing import Any
 
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
+from .pagespeed import format_pagespeed_summary, read_pagespeed
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -360,6 +361,11 @@ async def generate_aggregated_report(
     stats = aggregate_statistics(reports)
     n = stats["participant_count"]
 
+    # Determine runs/ dir and read page speed (must happen before prompt build)
+    runs_dir = stores[0].trace_dir.parent if stores else Path("runs")
+    pagespeed_data = read_pagespeed(runs_dir)
+    pagespeed_summary = format_pagespeed_summary(pagespeed_data)
+
     # Build LLM prompt
     prompt_template = _prompts.get("aggregate_synthesize")
 
@@ -382,6 +388,7 @@ async def generate_aggregated_report(
         heuristic_summary=heuristic_summary,
         accessibility_summary=a11y_summary,
         viewport_summary=vp_summary,
+        pagespeed_summary=pagespeed_summary,
         critical_count=sc.get("krytyczny", 0),
         serious_count=sc.get("poważny", 0),
         minor_count=sc.get("drobny", 0),
@@ -403,12 +410,10 @@ async def generate_aggregated_report(
     aggregated = {
         "statistics": stats,
         "narrative": narrative,
+        "pagespeed": pagespeed_data,
         "task": task_description,
         "website": website_url,
     }
-
-    # Determine runs/ dir (parent of first trace_dir)
-    runs_dir = stores[0].trace_dir.parent if stores else Path("runs")
 
     (runs_dir / "aggregated_report.json").write_text(
         json.dumps(aggregated, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -577,6 +582,31 @@ def _render_aggregated_md(agg: dict) -> str:
             label = _QUESTION_LABELS.get(qid, qid)
             h(3, label)
             ul([f'„{a}"' for a in answers])
+
+    # Page speed
+    ps = agg.get("pagespeed")
+    if ps and not ps.get("skipped"):
+        h(2, "Szybkość strony (PageSpeed Insights)")
+        for strategy in ("mobile", "desktop"):
+            data = ps.get(strategy) or {}
+            if data.get("error"):
+                continue
+            label = strategy.capitalize()
+            score = data.get("performance_score", "—")
+            perf_label = data.get("performance_label", "").upper()
+            si = data.get("speed_index") or {}
+            fcp = data.get("fcp") or {}
+            lcp = data.get("lcp") or {}
+            tbt = data.get("tbt") or {}
+            cls_ = data.get("cls") or {}
+            p(f"**{label}** — Performance score: **{score}/100** [{perf_label}]")
+            p(f"| Metryka | Wartość | Status |")
+            p(f"|---|---|---|")
+            p(f"| Speed Index | {si.get('display','—')} | {si.get('status','').upper()} |")
+            p(f"| LCP (Largest Contentful Paint) | {lcp.get('display','—')} | {lcp.get('status','').upper()} |")
+            p(f"| FCP (First Contentful Paint) | {fcp.get('display','—')} | {fcp.get('status','').upper()} |")
+            p(f"| TBT (Total Blocking Time) | {tbt.get('display','—')} | — |")
+            p(f"| CLS (Cumulative Layout Shift) | {cls_.get('display','—')} | — |")
 
     # Statistics table
     h(2, "Statystyki zbiorcze")
