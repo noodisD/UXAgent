@@ -62,6 +62,12 @@ site_context: |
   that imply a purchase flow), note it as a strategic opportunity with severity
   "drobny", clearly framed as a business recommendation, not a usability failure.
 
+analytics_context: |
+  (Paste real GA4 / Clarity / Hotjar metrics here to give the LLM grounding
+  in actual user behaviour.  Example fields: bounce rate, avg session duration,
+  top exit pages, funnel drop-off rates, heatmap observations.
+  Leave this block empty to rely solely on simulated session data.)
+
 max_steps: 20
 
 questionnaire:

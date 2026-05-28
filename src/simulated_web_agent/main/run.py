@@ -45,6 +45,7 @@ async def run_async(
     example_persona: str = None,
     on_progress: Optional[Callable[[dict], None]] = None,
     site_context: str = "",
+    analytics_context: str = "",
 ):
     ping = lambda e: _safe_ping(on_progress, e)
 
@@ -67,6 +68,9 @@ async def run_async(
     if site_context:
         for p in all_personas_intents:
             p["site_context"] = site_context
+    if analytics_context:
+        for p in all_personas_intents:
+            p["analytics_context"] = analytics_context
 
     with open("personas.json", "w", encoding="utf-8") as f:
         json.dump(all_personas_intents, f, indent=2, ensure_ascii=False)
@@ -133,6 +137,7 @@ async def run_async(
                 task_description=general_intent,
                 website_url=start_url,
                 site_context=site_context,
+                analytics_context=analytics_context,
             )
         except Exception as e:
             log.exception("Aggregated report generation failed: %s", e)
@@ -157,5 +162,6 @@ if __name__ == "__main__":
             concurrency=cfg_dict["concurrency"],
             headless=True,
             site_context=cfg_dict.get("site_context", ""),
+            analytics_context=cfg_dict.get("analytics_context", ""),
         )
     )

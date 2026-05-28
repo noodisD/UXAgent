@@ -337,11 +337,127 @@ def _top_issues_text(stats: dict, threshold: float = 0.5) -> str:
     )
 
 
+def _aggregate_scroll(stores: list[TraceStore]) -> tuple[dict, str]:
+    """Return (data_dict, plain_text_summary) for scroll depth across all sessions."""
+    summaries = [s.read_scroll_summary() for s in stores]
+    summaries = [s for s in summaries if s]
+
+    max_depths = [s["max_depth_pct"] for s in summaries if s.get("max_depth_pct") is not None]
+    max_pxs = [s["max_scroll_px"] for s in summaries if s.get("max_scroll_px") is not None]
+
+    def _avg(lst: list) -> float | None:
+        return round(sum(lst) / len(lst), 1) if lst else None
+
+    data = {
+        "sessions_with_depth_pct": len(max_depths),
+        "avg_max_depth_pct": _avg(max_depths),
+        "min_max_depth_pct": round(min(max_depths), 1) if max_depths else None,
+        "max_max_depth_pct": round(max(max_depths), 1) if max_depths else None,
+        "avg_max_scroll_px": _avg(max_pxs),
+    }
+
+    if max_depths:
+        text = (
+            f"avg max depth: {data['avg_max_depth_pct']}% "
+            f"(range {data['min_max_depth_pct']}–{data['max_max_depth_pct']}%) "
+            f"across {len(max_depths)} sessions"
+        )
+    elif max_pxs:
+        text = f"avg max scroll: {_avg(max_pxs):.0f}px (depth % unavailable — old trace format)"
+    else:
+        text = "(no scroll data available)"
+
+    return data, text
+
+
+def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
+    """Return (data_dict, plain_text_summary) for broken links across all sessions."""
+    all_broken: list[str] = []
+    total_checked = 0
+    sessions_with_broken = 0
+
+    for store in stores:
+        findings = store.read_link_findings()
+        session_broken = set()
+        for page_result in findings:
+            checked = page_result.get("links_checked", 0)
+            total_checked += checked
+            for b in page_result.get("broken") or []:
+                url = b.get("url", "")
+                session_broken.add(url)
+                if url not in all_broken:
+                    all_broken.append(url)
+        if session_broken:
+            sessions_with_broken += 1
+
+    data = {
+        "total_links_checked": total_checked,
+        "unique_broken_urls": len(all_broken),
+        "sessions_with_broken_links": sessions_with_broken,
+        "broken_urls": all_broken[:20],
+    }
+
+    if not total_checked:
+        text = "(link check not available — run with new traces)"
+    elif not all_broken:
+        text = f"No broken links detected across {total_checked} links checked."
+    else:
+        text = (
+            f"{len(all_broken)} unique broken link(s) found "
+            f"in {sessions_with_broken}/{len(stores)} sessions "
+            f"({total_checked} total links checked). "
+            f"Broken: {', '.join(all_broken[:5])}"
+            + (" …" if len(all_broken) > 5 else "")
+        )
+
+    return data, text
+
+
+def _aggregate_forms(stores: list[TraceStore]) -> tuple[dict, str]:
+    """Return (data_dict, plain_text_summary) for form funnel across all sessions."""
+    engaged = 0
+    submitted = 0
+    total_fields: list[int] = []
+
+    for store in stores:
+        ff = store.read_form_funnel()
+        if not ff:
+            continue
+        if ff.get("engaged_form"):
+            engaged += 1
+        if ff.get("submitted_form"):
+            submitted += 1
+        fields = ff.get("fields_filled", 0)
+        total_fields.append(fields)
+
+    n = len(stores)
+    avg_fields = round(sum(total_fields) / len(total_fields), 1) if total_fields else None
+
+    data = {
+        "sessions_engaged_form": engaged,
+        "sessions_submitted_form": submitted,
+        "avg_fields_filled": avg_fields,
+        "total_sessions": n,
+    }
+
+    if not total_fields:
+        text = "(form funnel data not available — run with new traces)"
+    else:
+        text = (
+            f"{engaged}/{n} sessions engaged with a form field; "
+            f"{submitted}/{n} sessions reached a submit action; "
+            f"avg fields filled per session: {avg_fields}"
+        )
+
+    return data, text
+
+
 async def generate_aggregated_report(
     stores: list[TraceStore],
     task_description: str,
     website_url: str,
     site_context: str = "",
+    analytics_context: str = "",
 ) -> dict:
     """
     Load all per-agent reports, compute statistics, call large LLM for narrative,
@@ -354,9 +470,11 @@ async def generate_aggregated_report(
         log.warning("[reporter] No per-agent reports found for aggregation")
         return {}
 
-    # Derive site_context from first store if not supplied by caller
+    # Derive site_context / analytics_context from first store if not supplied by caller
     if not site_context and stores:
         site_context = stores[0].read_basic_info().get("site_context", "") or ""
+    if not analytics_context and stores:
+        analytics_context = stores[0].read_basic_info().get("analytics_context", "") or ""
 
     stats = aggregate_statistics(reports)
     n = stats["participant_count"]
@@ -365,6 +483,11 @@ async def generate_aggregated_report(
     runs_dir = stores[0].trace_dir.parent if stores else Path("runs")
     pagespeed_data = read_pagespeed(runs_dir)
     pagespeed_summary = format_pagespeed_summary(pagespeed_data)
+
+    # Aggregate new data passes
+    scroll_data, scroll_text = _aggregate_scroll(stores)
+    link_data, link_text = _aggregate_links(stores)
+    form_data, form_text = _aggregate_forms(stores)
 
     # Build LLM prompt
     prompt_template = _prompts.get("aggregate_synthesize")
@@ -381,6 +504,7 @@ async def generate_aggregated_report(
 
     prompt = prompt_template.format(
         site_context=site_context,
+        analytics_context=analytics_context or "(not provided)",
         participant_count=n,
         task_description=task_description,
         website_url=website_url,
@@ -389,6 +513,9 @@ async def generate_aggregated_report(
         accessibility_summary=a11y_summary,
         viewport_summary=vp_summary,
         pagespeed_summary=pagespeed_summary,
+        scroll_summary=scroll_text,
+        link_summary=link_text,
+        form_summary=form_text,
         critical_count=sc.get("krytyczny", 0),
         serious_count=sc.get("poważny", 0),
         minor_count=sc.get("drobny", 0),
@@ -411,6 +538,9 @@ async def generate_aggregated_report(
         "statistics": stats,
         "narrative": narrative,
         "pagespeed": pagespeed_data,
+        "scroll": scroll_data,
+        "links": link_data,
+        "forms": form_data,
         "task": task_description,
         "website": website_url,
     }
@@ -607,6 +737,44 @@ def _render_aggregated_md(agg: dict) -> str:
             p(f"| FCP (First Contentful Paint) | {fcp.get('display','—')} | {fcp.get('status','').upper()} |")
             p(f"| TBT (Total Blocking Time) | {tbt.get('display','—')} | — |")
             p(f"| CLS (Cumulative Layout Shift) | {cls_.get('display','—')} | — |")
+
+    # Scroll depth
+    scroll = agg.get("scroll") or {}
+    avg_max = scroll.get("avg_max_depth_pct")
+    if avg_max is not None:
+        h(2, "Głębokość przewijania")
+        mn = scroll.get("min_max_depth_pct", "—")
+        mx = scroll.get("max_max_depth_pct", "—")
+        p(f"Średnia maks. głębokość przewijania: **{avg_max}%** (zakres {mn}–{mx}%)")
+        if avg_max < 30:
+            p("⚠ Uczestnicy rzadko przewijali poniżej 30% strony — treści below-the-fold mogą być pomijane.")
+
+    # Broken links
+    links = agg.get("links") or {}
+    broken_urls = links.get("broken_urls") or []
+    total_checked = links.get("total_links_checked", 0)
+    if total_checked:
+        h(2, "Uszkodzone linki")
+        if broken_urls:
+            p(f"Znaleziono **{len(broken_urls)}** uszkodzony(ch) link(ów) spośród {total_checked} sprawdzonych:")
+            for u in broken_urls[:10]:
+                lines.append(f"- {u}")
+            lines.append("")
+        else:
+            p(f"Nie wykryto uszkodzonych linków (sprawdzono {total_checked} linków).")
+
+    # Form funnel
+    forms = agg.get("forms") or {}
+    sessions_engaged = forms.get("sessions_engaged_form")
+    sessions_submitted = forms.get("sessions_submitted_form")
+    total_sessions = forms.get("total_sessions")
+    if sessions_engaged is not None:
+        h(2, "Lejek formularzy")
+        p(f"Sesje, które wypełniły pole formularza: **{sessions_engaged}/{total_sessions}**")
+        p(f"Sesje, które dotarły do akcji submit: **{sessions_submitted}/{total_sessions}**")
+        avg_fields = forms.get("avg_fields_filled")
+        if avg_fields is not None:
+            p(f"Średnia liczba pól wypełnionych na sesję: **{avg_fields}**")
 
     # Statistics table
     h(2, "Statystyki zbiorcze")

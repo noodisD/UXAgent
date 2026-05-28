@@ -8,6 +8,11 @@ SITE CONTEXT:
 {site_context}
 (If empty, treat as a standard evaluation — do not apply any special framing.)
 
+ANALYTICS CONTEXT (real user behavioral data — GA4 / Clarity / Hotjar etc.):
+{analytics_context}
+(If empty, rely solely on simulated session data. If present, cross-reference
+ with simulated findings and note where they agree or diverge.)
+
 PARTICIPANT COUNT: {participant_count}
 
 TASK: {task_description}
@@ -35,6 +40,19 @@ TOP FINDINGS BY SEVERITY:
 Critical: {critical_count}
 Serious: {serious_count}
 Minor: {minor_count}
+
+SCROLL DEPTH SUMMARY (avg max scroll depth per session):
+{scroll_summary}
+Note — depth_pct is how far down the page the agent scrolled (0% = top, 100% = bottom).
+Sessions that never scroll past 30% likely didn't engage with below-the-fold content.
+
+BROKEN LINKS SUMMARY:
+{link_summary}
+Note — broken = non-2xx/3xx HTTP status after following redirects.
+
+FORM FUNNEL SUMMARY:
+{form_summary}
+Note — engaged_form = agent typed into at least one field; submitted_form = also clicked a submit-like element.
 
 MOST FREQUENT ISSUES (appearing in ≥50% of sessions):
 {top_issues}

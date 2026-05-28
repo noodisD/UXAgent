@@ -69,9 +69,18 @@ async def _run_for_persona_and_intent(
             return
         await env.page.screenshot(path=store.screenshot_path(steps_taken, full_page=True), full_page=True)
         await env.page.screenshot(path=store.screenshot_path(steps_taken))
-        scroll_top = await env.page.evaluate("window.scrollY")
+        scroll_data = await env.page.evaluate(
+            "() => ({ scrollTop: window.scrollY,"
+            " pageHeight: document.documentElement.scrollHeight,"
+            " viewportHeight: window.innerHeight })"
+        )
+        dpr = cfg.environment.browser.context_options.device_scale_factor
         store.scroll_top_path(steps_taken).write_text(
-            str(scroll_top * cfg.environment.browser.context_options.device_scale_factor)
+            json.dumps({
+                "scroll_top": scroll_data["scrollTop"] * dpr,
+                "page_height": scroll_data["pageHeight"] * dpr,
+                "viewport_height": scroll_data["viewportHeight"] * dpr,
+            })
         )
         try:
             # aria_snapshot() replaced page.accessibility.snapshot() in Playwright 1.49+

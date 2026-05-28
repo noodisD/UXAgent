@@ -209,6 +209,77 @@ class TraceStore:
     def read_viewport_findings(self) -> list:
         return self._read_json(self.trace_dir / "viewport_findings.json", fallback=[])
 
+    def write_link_findings(self, data: list) -> None:
+        (self.trace_dir / "link_findings.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_link_findings(self) -> list:
+        return self._read_json(self.trace_dir / "link_findings.json", fallback=[])
+
+    def write_scroll_summary(self, data: dict) -> None:
+        (self.trace_dir / "scroll_summary.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_scroll_summary(self) -> dict | None:
+        return self._read_json(self.trace_dir / "scroll_summary.json")
+
+    def write_form_funnel(self, data: dict) -> None:
+        (self.trace_dir / "form_funnel.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_form_funnel(self) -> dict | None:
+        return self._read_json(self.trace_dir / "form_funnel.json")
+
+    def read_scroll_depths(self) -> list[dict]:
+        """Read all scroll_top_*.txt files.
+
+        Handles both the legacy format (plain float string written by the old
+        experiment hook) and the new JSON format {scroll_top, page_height,
+        viewport_height}.  Returns a list of dicts ordered by step, each
+        containing scroll_top, page_height, viewport_height, depth_pct.
+        """
+        result: list[dict] = []
+        screenshot_dir = self.trace_dir / "screenshot"
+        if not screenshot_dir.exists():
+            return result
+        for f in sorted(
+            screenshot_dir.glob("scroll_top_*.txt"),
+            key=lambda p: int(p.stem.rsplit("_", 1)[-1])
+            if p.stem.rsplit("_", 1)[-1].isdigit()
+            else 0,
+        ):
+            try:
+                step = int(f.stem.rsplit("_", 1)[-1])
+                text = f.read_text(encoding="utf-8").strip()
+                try:
+                    data = json.loads(text)
+                    scroll_top = float(data.get("scroll_top") or 0)
+                    page_height = float(data.get("page_height") or 0)
+                    viewport_height = float(data.get("viewport_height") or 0)
+                    scrollable = max(page_height - viewport_height, 1)
+                    depth_pct = round(min(100.0, scroll_top / scrollable * 100), 1)
+                except (json.JSONDecodeError, ValueError):
+                    # Legacy format: plain number
+                    scroll_top = float(text)
+                    page_height = None
+                    viewport_height = None
+                    depth_pct = None
+                result.append(
+                    {
+                        "step": step,
+                        "scroll_top": scroll_top,
+                        "page_height": page_height,
+                        "viewport_height": viewport_height,
+                        "depth_pct": depth_pct,
+                    }
+                )
+            except Exception:
+                pass
+        return result
+
     def write_survey_result(self, data: dict) -> None:
         (self.trace_dir / "survey_result.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"

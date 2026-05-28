@@ -508,6 +508,100 @@ def _render_pagespeed(ps: dict | None) -> str:
     return _section("Szybkość strony (PageSpeed Insights)", body)
 
 
+def _render_scroll_depth(scroll: dict | None) -> str:
+    if not scroll:
+        return ""
+    avg = scroll.get("avg_max_depth_pct")
+    if avg is None:
+        return ""
+    lo = scroll.get("min_max_depth_pct", "—")
+    hi = scroll.get("max_max_depth_pct", "—")
+    sessions = scroll.get("sessions_with_depth_pct", "—")
+    pct = min(100, int(avg))
+    color = "#28a745" if pct >= 60 else ("#ffc107" if pct >= 30 else "#dc3545")
+    warning = ""
+    if pct < 30:
+        warning = '<p style="margin-top:10px;color:#dc3545;font-size:13px;">⚠ Uczestnicy rzadko przewijali poniżej 30% strony — treści below-the-fold mogą być pomijane.</p>'
+    body = f"""
+    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:14px;">
+      <div>
+        <div style="font-size:42px;font-weight:800;color:{color};">{avg}%</div>
+        <div style="font-size:12px;color:#6c757d;">Avg. maks. głębokość przewijania</div>
+      </div>
+      <div style="flex:1;min-width:180px;">
+        <div style="background:#e9ecef;border-radius:6px;height:14px;overflow:hidden;">
+          <div style="width:{pct}%;background:{color};height:100%;border-radius:6px;"></div>
+        </div>
+        <div style="font-size:12px;color:#6c757d;margin-top:4px;">zakres {lo}–{hi}% &nbsp;·&nbsp; {sessions} sesji</div>
+      </div>
+    </div>
+    {warning}"""
+    return _section("Głębokość przewijania", body)
+
+
+def _render_broken_links(links: dict | None) -> str:
+    if not links:
+        return ""
+    total = links.get("total_links_checked", 0)
+    if not total:
+        return ""
+    broken_urls = links.get("broken_urls") or []
+    sessions_broken = links.get("sessions_with_broken_links", 0)
+
+    if not broken_urls:
+        status_html = '<p style="color:#28a745;font-weight:700;">✓ Nie wykryto uszkodzonych linków.</p>'
+    else:
+        items = "".join(
+            f'<li style="padding:4px 0;font-size:12px;color:#721c24;"><code>{_esc(u)}</code></li>'
+            for u in broken_urls[:10]
+        )
+        more = f"<li style='color:#6c757d;font-size:12px;'>…i {len(broken_urls) - 10} więcej</li>" if len(broken_urls) > 10 else ""
+        status_html = f"""
+        <p style="color:#dc3545;font-weight:700;margin-bottom:8px;">
+          ✗ {len(broken_urls)} uszkodzony(ch) link(ów) w {sessions_broken} sesjach
+        </p>
+        <ul style="list-style:none;padding-left:0;">{items}{more}</ul>"""
+
+    body = f"""
+    <p style="font-size:13px;color:#6c757d;margin-bottom:12px;">Sprawdzono {total} linków na odwiedzonych stronach.</p>
+    {status_html}"""
+    return _section("Uszkodzone linki", body)
+
+
+def _render_form_funnel(forms: dict | None) -> str:
+    if not forms:
+        return ""
+    n = forms.get("total_sessions", 0)
+    engaged = forms.get("sessions_engaged_form", 0)
+    submitted = forms.get("sessions_submitted_form", 0)
+    avg_fields = forms.get("avg_fields_filled")
+
+    if engaged is None:
+        return ""
+
+    def _step(label: str, count: int, color: str) -> str:
+        pct = round(count / max(n, 1) * 100)
+        return f"""
+        <div style="margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+            <span>{_esc(label)}</span>
+            <span style="font-weight:700;color:{color};">{count}/{n} &nbsp;({pct}%)</span>
+          </div>
+          <div style="background:#e9ecef;border-radius:4px;height:10px;">
+            <div style="width:{pct}%;background:{color};height:100%;border-radius:4px;"></div>
+          </div>
+        </div>"""
+
+    body = (
+        _step("Wszyscy uczestnicy", n, "#6c757d") +
+        _step("Wypełnili pole formularza", engaged, "#17a2b8") +
+        _step("Dotarli do akcji submit", submitted, "#28a745")
+    )
+    if avg_fields is not None:
+        body += f'<p style="font-size:13px;color:#6c757d;margin-top:12px;">Średnio {avg_fields} pól na sesję.</p>'
+    return _section("Lejek formularzy", body)
+
+
 def _render_stats_table(stats: dict) -> str:
     n = stats.get("participant_count", 0)
     heur = stats.get("heuristic") or {}
@@ -568,6 +662,10 @@ def generate_html_report(agg: dict) -> str:
     if not narr or "error" in narr or not narr.get("executive_summary"):
         narr = _narrative_from_stats(stats)
 
+    scroll = agg.get("scroll")
+    links = agg.get("links")
+    forms = agg.get("forms")
+
     body = (
         _render_header(agg, stats) +
         '<div class="page">' +
@@ -576,6 +674,9 @@ def generate_html_report(agg: dict) -> str:
         _render_all_issues(narr) +
         _render_recommendations(narr) +
         _render_pagespeed(ps) +
+        _render_scroll_depth(scroll) +
+        _render_broken_links(links) +
+        _render_form_funnel(forms) +
         _render_first_impression(stats, narr) +
         _render_survey(stats) +
         _render_accessibility(stats, narr) +
