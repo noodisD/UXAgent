@@ -36,7 +36,7 @@ MOST FREQUENT ISSUES (appearing in ≥50% of sessions):
 
 SURVEY QUESTIONNAIRE RESULTS (avg_scores = Likert 1–5 per question; open_answers = verbatim responses):
 {survey_summary}
-Note — question IDs: q1=ease of finding products, q2=clarity/readability, q3=simplicity of adding to cart, q4=site speed, q5=biggest difficulty (open), q6=what could not be found (open).
+Note — question IDs: q1=ease of finding products, q2=clarity/readability, q3=ease of checking store availability/finding nearest store, q4=site speed, q5=biggest difficulty (open), q6=what could not be found (open).
 
 ## Output format
 

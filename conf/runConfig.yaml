@@ -80,7 +80,7 @@ questionnaire:
 
     - id: q3
       type: multiple_choice
-      prompt: "Czy proces dodania produktu do koszyka był prosty? (1 = Zdecydowanie nie, 5 = Zdecydowanie tak)"
+      prompt: "Czy łatwo było mi sprawdzić dostępność produktu lub znaleźć najbliższy sklep Pepco? (1 = Zdecydowanie nie, 5 = Zdecydowanie tak)"
       options: ["1", "2", "3", "4", "5"]
 
     - id: q4

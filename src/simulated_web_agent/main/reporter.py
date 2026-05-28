@@ -566,7 +566,7 @@ def _render_aggregated_md(agg: dict) -> str:
         _QUESTION_LABELS = {
             "q1": "Łatwość znalezienia produktu",
             "q2": "Przejrzystość i czytelność strony",
-            "q3": "Prostota dodania do koszyka",
+            "q3": "Łatwość sprawdzenia dostępności / znalezienia sklepu",
             "q4": "Sprawność działania strony",
         }
         for qid, avg in sorted(avg_scores.items()):

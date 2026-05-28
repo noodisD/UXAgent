@@ -23,6 +23,16 @@ async def run_survey(
     """
     survey_prompt = _prompts.get("survey")
 
+    # Prepend site_context so the persona answers calibrated to the site's purpose
+    site_context = store.read_basic_info().get("site_context", "") or ""
+    if site_context:
+        site_context_block = (
+            "SITE CONTEXT (read before answering — calibrate your answers accordingly):\n"
+            + site_context.strip()
+            + "\n\n"
+        )
+        survey_prompt = site_context_block + survey_prompt
+
     memories = store.read_memory_trace()
     memory_str = json.dumps(memories, ensure_ascii=False)
 
