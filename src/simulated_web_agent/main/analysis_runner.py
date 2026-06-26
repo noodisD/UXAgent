@@ -25,7 +25,7 @@ from typing import Any
 from .auditor import run_audit_analysis
 from .form_analysis import run_form_analysis
 from .link_checker import run_link_check
-from .reporter import generate_per_agent_report
+from .reporter import generate_objective_reflection, generate_per_agent_report
 from .scroll_depth import run_scroll_analysis
 from .survey import run_survey
 from .trace_store import TraceStore
@@ -59,5 +59,6 @@ async def run_all_analyses(
     run_form_analysis(store)
 
     report = await generate_per_agent_report(store)
+    await generate_objective_reflection(store)
     log.info("[analysis_runner] Done for %s", store.trace_dir)
     return report

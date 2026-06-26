@@ -18,6 +18,34 @@ from .trace_store import TraceStore
 log = logging.getLogger("simulated_web_agent.main.experiment")
 logging.basicConfig(level=logging.INFO)
 
+_RESERVED_KEYS = {"persona", "intent", "site_context", "analytics_context"}
+
+
+def build_persona_card(persona_info: dict) -> dict:
+    """Build a structured persona card from the raw persona_info dict.
+
+    Extracts a display name from the first "Persona: <Name>" line and separates
+    the freeform demographic fields from the reserved pipeline keys.
+    """
+    import re
+
+    raw = persona_info.get("persona", "")
+    match = re.search(r"^Persona:\s*(\S+)", raw, re.MULTILINE | re.IGNORECASE)
+    name = match.group(1).rstrip(".,;:") if match else "Unknown"
+
+    demographics = {
+        k: v for k, v in persona_info.items() if k not in _RESERVED_KEYS
+    }
+
+    return {
+        "name": name,
+        "description": raw,
+        "objective": persona_info.get("intent", ""),
+        "demographics": demographics,
+        "site_context": persona_info.get("site_context", ""),
+    }
+
+
 _FONT_SIZE_JS = """
 () => {
   const results = [];
@@ -38,6 +66,7 @@ async def _run_for_persona_and_intent(
     persona_info: Dict,
     start_url: str,
     max_steps: int,
+    runs_dir: Optional[pathlib.Path] = None,
     wait_for_login: bool = False,
     env_setup_hook: Callable = None,
     env_wait_hook: Callable = None,
@@ -58,9 +87,11 @@ async def _run_for_persona_and_intent(
     }
 
     run_name = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{uuid.uuid4().hex[:4]}"
-    base_dir = pathlib.Path().resolve()
-    store = TraceStore(base_dir / "runs" / run_name)
+    if runs_dir is None:
+        runs_dir = pathlib.Path().resolve() / "runs"
+    store = TraceStore(runs_dir / run_name)
     store.write_basic_info(persona_info)
+    store.write_persona_card(build_persona_card(persona_info))
     context.run_path.set(store.trace_dir)
     steps_taken = 0
 
@@ -169,6 +200,7 @@ async def experiment_async(
     config_name: str = "base",
     config_path: str = ".",
     concurrency: int = 4,
+    runs_dir: Optional[pathlib.Path] = None,
     on_progress: Optional[Callable[[int, int], None]] = None,
 ) -> list:
     cfg = load_cfg(config_name=config_name)
@@ -190,6 +222,7 @@ async def experiment_async(
                 persona_info=entry,
                 start_url=start_url,
                 max_steps=max_steps,
+                runs_dir=runs_dir,
             )
         async with lock:
             done += 1

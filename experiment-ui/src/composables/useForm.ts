@@ -5,7 +5,7 @@ import type { WizardForm } from '../types'
 export function getWizardDefaults(): WizardForm {
   return {
     persona: {
-      numSubjects: 20,
+      numSubjects: 3,
       generalIntent: 'Buy a jacket',
       examplePersona: `Persona: Clara
 Background:
@@ -59,8 +59,8 @@ Clara prefers comfortable, functional clothing, often choosing items that are ea
     experiment: {
       startUrl: '',
       headless: true,
-      maxSteps: 50,
-      concurrency: 1, 
+      maxSteps: 25,
+      concurrency: 1,
     },
     survey: {
       questionnaire: ''

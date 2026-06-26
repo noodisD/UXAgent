@@ -45,3 +45,98 @@ export interface WizardNav {
 
 export const FORM_KEY: InjectionKey<WizardForm> = Symbol('WizardForm')
 export const NAV_KEY: InjectionKey<WizardNav> = Symbol('WizardNav')
+
+// ---- Results dashboard payloads (mirror backend results_api.py) ----
+
+export type Outcome = 'success' | 'partial' | 'failed'
+export type Severity = 'critical' | 'serious' | 'minor'
+
+export type ObjectiveReflection = {
+  summary: string
+  blockers: string[]
+  wins: string[]
+  priorityFix: string
+}
+
+export type PersonaResult = {
+  id: string
+  name: string
+  objective: string
+  demographics: Record<string, unknown>
+  metaParts: string[]
+  outcome: Outcome
+  steps: number
+  duration: string | null
+  reflection: ObjectiveReflection
+  firstImpression: { purpose: number | null; navigation: number | null; cta: number | null; hierarchy: number | null; trust: number | null }
+  accessibility: { score: number | null; findings: string[] }
+  viewport: { findings: { device: string; issue: string; severity: Severity }[] }
+  heuristics: { severity: Severity; id: number; evidence: string; recommendation: string }[]
+  survey: { q: string; answer: string; reasoning: string }[]
+}
+
+export type RunMeta = {
+  site: string
+  startUrl: string
+  intent: string
+  date: string
+  duration: string | null
+  personaCount: number
+  maxSteps: number | null
+  status: string
+  pagespeed: { performance: number | null; accessibility: number | null; bestPractices: number | null; seo: number | null }
+}
+
+export type AggIssue = {
+  heuristic_id: number
+  heuristic_name: string
+  frequency: string
+  impact: string
+  recommendation: string
+}
+export type AggRecommendation = {
+  priority: number
+  area: string
+  action: string
+  expected_impact: string
+}
+export type AggNarrative = {
+  executive_summary?: string
+  overall_ux_score?: number
+  score_rationale?: string
+  key_strengths?: string[]
+  critical_issues?: AggIssue[]
+  serious_issues?: AggIssue[]
+  minor_issues?: AggIssue[]
+  accessibility_assessment?: string
+  responsiveness_assessment?: string
+  first_impression_assessment?: string
+  priority_recommendations?: AggRecommendation[]
+  methodology_note?: string
+}
+export type AggReport = {
+  narrative?: AggNarrative
+  statistics?: Record<string, any>
+  pagespeed?: any
+  scroll?: Record<string, any> | null
+  links?: Record<string, any> | null
+  forms?: Record<string, any> | null
+  task?: string
+  website?: string
+}
+
+export type RunDetail = { meta: RunMeta; personas: PersonaResult[]; report?: AggReport | null }
+
+export type RunHistoryRow = {
+  id: string
+  site: string
+  date: string
+  personas: number
+  status: string
+  success: number
+  partial: number
+  failed: number
+  critical: number
+  score: number
+  current?: boolean
+}

@@ -1,8 +1,12 @@
 import asyncio
 import json
 import logging
+import re
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 import yaml
 
@@ -33,6 +37,34 @@ def _safe_ping(cb: Optional[Callable[[dict], None]], evt: dict):
         pass
 
 
+def site_slug(url: str) -> str:
+    """Derive a readable host label from a URL, e.g. https://www.t-mobile.pl/ -> t-mobile.pl."""
+    host = urlparse(url).hostname or "site"
+    return re.sub(r"^www\.", "", host)
+
+
+def new_run_id() -> str:
+    """A run-group id used as the runs/<run_id>/ folder name."""
+    return f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{uuid.uuid4().hex[:4]}"
+
+
+def _write_manifest(run_dir: Path, data: dict) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def read_manifest(run_dir: Path) -> dict | None:
+    path = Path(run_dir) / "run_manifest.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 async def run_async(
     total_personas: int,
     demographics: list[dict[str, Any]],
@@ -46,11 +78,46 @@ async def run_async(
     on_progress: Optional[Callable[[dict], None]] = None,
     site_context: str = "",
     analytics_context: str = "",
+    run_id: Optional[str] = None,
 ):
     ping = lambda e: _safe_ping(on_progress, e)
 
     cfg = load_cfg()
     gpt.configure(cfg.llm_provider)
+
+    # ── 0) Run-group directory + manifest ────────────────────────────────────
+    if run_id is None:
+        run_id = new_run_id()
+    run_dir = Path("runs") / run_id
+    started_at = datetime.now(timezone.utc)
+    _write_manifest(
+        run_dir,
+        {
+            "run_id": run_id,
+            "site": site_slug(start_url),
+            "start_url": start_url,
+            "intent": general_intent,
+            "max_steps": max_steps,
+            "persona_count": total_personas,
+            "questionnaire": questionnaire,
+            "started_at": started_at.isoformat(),
+            "ended_at": None,
+            "duration_seconds": None,
+            "status": "running",
+        },
+    )
+
+    def _finalize(status: str) -> None:
+        ended_at = datetime.now(timezone.utc)
+        manifest = read_manifest(run_dir) or {}
+        manifest.update(
+            {
+                "ended_at": ended_at.isoformat(),
+                "duration_seconds": round((ended_at - started_at).total_seconds(), 1),
+                "status": status,
+            }
+        )
+        _write_manifest(run_dir, manifest)
 
     # ── 1) Personas ──────────────────────────────────────────────────────────
     ping({"phase": "personas", "status": "start", "total": total_personas})
@@ -87,6 +154,7 @@ async def run_async(
         config_path=".",
         concurrency=concurrency,
         headless=headless,
+        runs_dir=run_dir,
         on_progress=lambda k, n: ping(
             {"phase": "agents", "status": "progress", "current": k, "total": n}
         ),
@@ -143,9 +211,24 @@ async def run_async(
             log.exception("Aggregated report generation failed: %s", e)
         ping({"phase": "report", "status": "progress", "current": 1, "total": 1})
 
+    _finalize("done")
+    return run_id
+
+
+def mark_run_status(run_id: str, status: str) -> None:
+    """Update a run's manifest status out-of-band (e.g. on error from the caller)."""
+    run_dir = Path("runs") / run_id
+    manifest = read_manifest(run_dir)
+    if manifest is None:
+        return
+    manifest["status"] = status
+    if manifest.get("ended_at") is None:
+        manifest["ended_at"] = datetime.now(timezone.utc).isoformat()
+    _write_manifest(run_dir, manifest)
+
 
 def run(*args, **kwargs):
-    asyncio.run(run_async(*args, **kwargs))
+    return asyncio.run(run_async(*args, **kwargs))
 
 
 if __name__ == "__main__":

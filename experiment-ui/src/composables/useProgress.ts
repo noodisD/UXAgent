@@ -2,7 +2,15 @@ import { ref, onUnmounted } from 'vue'
 
 type Snapshot =
   | { status: 'idle'; message: string }
-  | { phase: string; label: string; current: number; total: number; message: string }
+  | {
+      run_id: string
+      status: 'running' | 'done' | 'error'
+      phase: string
+      label: string
+      current: number
+      total: number
+      message: string
+    }
 
 export function useProgress(pollMs = 1000) {
   const data = ref<Snapshot>({ status: 'idle', message: 'No run started yet.' })

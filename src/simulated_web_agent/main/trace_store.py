@@ -289,6 +289,30 @@ class TraceStore:
         return self._read_json(self.trace_dir / "survey_result.json")
 
     # ------------------------------------------------------------------
+    # Persona card (structured persona fields for the dashboard)
+    # ------------------------------------------------------------------
+
+    def write_persona_card(self, data: dict) -> None:
+        (self.trace_dir / "persona_card.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_persona_card(self) -> dict | None:
+        return self._read_json(self.trace_dir / "persona_card.json")
+
+    # ------------------------------------------------------------------
+    # Objective reflection (structured: outcome, summary, blockers, wins, fix)
+    # ------------------------------------------------------------------
+
+    def write_objective_reflection(self, data: dict) -> None:
+        (self.trace_dir / "objective_reflection.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_objective_reflection(self) -> dict | None:
+        return self._read_json(self.trace_dir / "objective_reflection.json")
+
+    # ------------------------------------------------------------------
     # UX report
     # ------------------------------------------------------------------
 

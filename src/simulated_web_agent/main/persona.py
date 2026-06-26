@@ -133,6 +133,52 @@ async def _generate_one(
     return {"persona": persona, "intent": general_intent, **sampled}
 
 
+async def generate_example_persona(
+    general_intent: str,
+    start_url: str = "",
+    demographics: Optional[list[dict[str, Any]]] = None,
+    site_context: str = "",
+    chat_fn: Callable[..., Awaitable[str]] = gpt.async_chat,
+) -> str:
+    """Generate ONE example persona tailored to the audit context, in the config format.
+
+    Used by the wizard's "generate with AI" button. Returns the freeform persona text
+    that populates the example_persona field.
+    """
+    cfg = load_cfg()
+    gpt.configure(cfg.llm_provider)
+    base_example = cfg.example_persona
+
+    dims: list[str] = []
+    for d in demographics or []:
+        names = [str(c.get("name")) for c in d.get("choices", []) if c.get("name")]
+        if d.get("name") and names:
+            dims.append(f"- {d['name']}: e.g. {', '.join(names[:6])}")
+    dims_text = "\n".join(dims) if dims else "(no demographic dimensions specified)"
+
+    system = (
+        "You generate ONE realistic, richly-detailed example persona for UX research. "
+        "Follow EXACTLY the format, section headings, and language of this example:\n\n"
+        f"{base_example}"
+    )
+    user = (
+        f"Website under test: {start_url or 'N/A'}\n"
+        f"Task the persona will attempt: {general_intent or 'N/A'}\n"
+        + (f"Site context: {site_context}\n" if site_context else "")
+        + f"\nDemographic dimensions to draw plausible values from:\n{dims_text}\n\n"
+        "Write ONE persona tailored to this website and task. Keep the same section "
+        "headings and the same language as the example. Output ONLY the persona text."
+    )
+
+    persona = await chat_fn(
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+    )
+    return persona.strip()
+
+
 async def generate_personas(
     demographics: list[dict[str, Any]],
     general_intent: str,

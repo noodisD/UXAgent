@@ -205,6 +205,118 @@ async def generate_per_agent_report(store: TraceStore) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Objective reflection (structured, dashboard-facing)
+# ---------------------------------------------------------------------------
+
+_REFLECTION_SYSTEM = """\
+Jesteś starszym badaczem UX. Otrzymasz dane z sesji symulowanego użytkownika (persony)
+na stronie internetowej: jej cel, oceny heurystyczne, pierwsze wrażenie, dostępność,
+responsywność oraz odpowiedzi ankietowe.
+
+Oceń z perspektywy CELU persony, czy udało się go osiągnąć, i zwróć WYŁĄCZNIE obiekt JSON
+(bez markdown, bez komentarzy) o następującej strukturze:
+
+{
+  "outcome": "success | partial | failed",
+  "summary": "2-4 zdania po polsku: czy persona osiągnęła swój cel i dlaczego",
+  "blockers": ["konkretna bariera związana z celem", "..."],
+  "wins": ["co realnie pomogło personie", "..."],
+  "priorityFix": "jedna najważniejsza rzecz do naprawienia, konkretna (UI/przepływ/treść)"
+}
+
+Zasady:
+- "outcome" MUSI być dokładnie jedną z wartości: success, partial, failed.
+- "success" = cel w pełni osiągnięty; "partial" = częściowo / z dużym tarciem;
+  "failed" = cel nieosiągnięty.
+- blockers i wins: maksymalnie po 4 pozycje, krótkie i konkretne. Mogą być puste ([]).
+- Pisz rzeczowo. Nie opisuj metodologii. Zwróć tylko poprawny JSON.\
+"""
+
+_VALID_OUTCOMES = {"success", "partial", "failed"}
+
+
+def _coerce_reflection(data: Any, persona_name: str) -> dict:
+    """Validate/normalize the LLM reflection payload into the dashboard shape."""
+    d = data if isinstance(data, dict) else {}
+    outcome = str(d.get("outcome", "")).strip().lower()
+    if outcome not in _VALID_OUTCOMES:
+        outcome = "partial"
+
+    def _str_list(v: Any) -> list[str]:
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()][:4]
+        return []
+
+    return {
+        "outcome": outcome,
+        "summary": str(d.get("summary", "")).strip(),
+        "blockers": _str_list(d.get("blockers")),
+        "wins": _str_list(d.get("wins")),
+        "priorityFix": str(d.get("priorityFix", "")).strip(),
+    }
+
+
+async def generate_objective_reflection(store: TraceStore) -> dict:
+    """Call the LLM to produce a structured objective_reflection.json for one agent."""
+    persona_card = store.read_persona_card() or {}
+    basic = store.read_basic_info()
+    heuristic_findings = store.read_heuristic_findings()
+    first_impression = store.read_first_impression() or {}
+    accessibility = store.read_accessibility_findings() or {}
+    survey = store.read_survey_result() or {}
+    scroll = store.read_scroll_summary() or {}
+    form = store.read_form_funnel() or {}
+    persona_name = persona_card.get("name", "Unknown")
+
+    payload = {
+        "persona_name": persona_name,
+        "objective": persona_card.get("objective", basic.get("intent", "")),
+        "demographics": persona_card.get("demographics", {}),
+        "first_impression_score": first_impression.get("overall_score"),
+        "first_impression_summary": first_impression.get("clarity_summary", ""),
+        "heuristic_findings": [
+            {
+                "heuristic_id": f.get("heuristic_id"),
+                "severity": f.get("severity"),
+                "evidence": f.get("evidence", ""),
+                "recommendation": f.get("recommendation", ""),
+            }
+            for f in heuristic_findings
+        ],
+        "accessibility_score": accessibility.get("overall_score"),
+        "accessibility_summary": accessibility.get("summary", ""),
+        "scroll_summary": scroll,
+        "form_engagement": form,
+        "survey_answers": survey.get("answers", []),
+    }
+
+    try:
+        result = await async_chat(
+            [
+                {"role": "system", "content": _REFLECTION_SYSTEM},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            json_mode=True,
+            model="large",
+        )
+        parsed = json.loads(result)
+        reflection = _coerce_reflection(parsed, persona_name)
+    except Exception as exc:
+        log.warning("[reflection] LLM call failed for %s: %s", store.trace_dir, exc)
+        reflection = {
+            "outcome": "partial",
+            "summary": "",
+            "blockers": [],
+            "wins": [],
+            "priorityFix": "",
+        }
+
+    store.write_objective_reflection(reflection)
+    log.info("[reflection] Saved objective_reflection.json for %s", store.trace_dir)
+    return reflection
+
+
+# ---------------------------------------------------------------------------
 # Aggregated report
 # ---------------------------------------------------------------------------
 
