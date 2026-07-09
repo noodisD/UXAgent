@@ -52,6 +52,29 @@ def test_normal_session_has_no_suspects(tmp_path):
     assert harness_suspect_steps(_store(tmp_path, actions)) == set()
 
 
+def test_search_broken_claim_flagged_when_search_actually_ran(tmp_path):
+    # trace proves the search worked (reached /search) → "search broken" is a
+    # contradiction and must be flagged, even with no stuck-loop steps.
+    store = _store(tmp_path, [{"action": "type", "target": "wyszukaj_produkt",
+                               "description": "search"}])
+    store.append_observation({"tabs": [{"url": "https://pepco.pl/search?searchString=poduszki"}]})
+    findings = [{"heuristic_id": 2, "severity": "poważny", "step": 0,
+                 "evidence": "Wyszukiwarka nie przetwarza zapytań i nie zwraca wyników."}]
+    flag_harness_suspects(store, findings)
+    assert findings[0]["harness_suspect"] is True
+
+
+def test_search_broken_claim_not_flagged_when_search_never_ran(tmp_path):
+    # no /search URL in the trace → nothing to contradict; leave it for a human.
+    store = _store(tmp_path, [{"action": "type", "target": "wyszukaj_produkt",
+                               "description": "search"}])
+    store.append_observation({"tabs": [{"url": "https://pepco.pl/"}]})
+    findings = [{"heuristic_id": 2, "severity": "poważny", "step": 0,
+                 "evidence": "Wyszukiwarka nie przetwarza zapytań."}]
+    flag_harness_suspects(store, findings)
+    assert "harness_suspect" not in findings[0]
+
+
 def test_flag_marks_findings_on_suspect_steps(tmp_path):
     actions = [
         {"action": "type", "target": "wyszukaj_lok", "description": "type X"},

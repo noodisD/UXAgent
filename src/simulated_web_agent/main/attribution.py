@@ -70,6 +70,30 @@ def harness_suspect_steps(store: TraceStore) -> set[int]:
     return suspect
 
 
+# Phrases a finding uses to claim the product search itself failed. If the
+# trace proves the search *did* run (reached a /search results URL), such a
+# claim is contradicted by the agent's own navigation and is harness-suspect.
+_SEARCH_FAIL_MARKERS = (
+    "nie przetwarza", "nie rozumie", "nie zwraca", "nie wyświetl",
+    "brak wyników", "wyszukiwarka nie", "wyszukiwarki nie",
+    "nie przetworzy", "nie zadział",
+)
+
+
+def _search_ran(store: TraceStore) -> bool:
+    """True if the session ever reached a product-search results URL."""
+    try:
+        urls = store.visited_urls()
+    except Exception:
+        urls = []
+    return any("/search" in (u or "").lower() for u in urls)
+
+
+def _claims_search_broken(finding: dict) -> bool:
+    text = f"{finding.get('evidence', '')} {finding.get('recommendation', '')}".lower()
+    return "wyszukiwar" in text and any(m in text for m in _SEARCH_FAIL_MARKERS)
+
+
 def _suspect_targets(store: TraceStore, suspect: set[int]) -> set[str]:
     """Element targets (parser-semantic-ids) involved in the failed interactions.
     Findings often anchor on a later step (e.g. the terminate) but name the
@@ -89,9 +113,10 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     lands on one, or its evidence text names an element that was stuck in one.
     Returns the same list (findings mutated in place); non-dicts pass through."""
     suspect = harness_suspect_steps(store)
-    if not suspect:
-        return findings
     targets = _suspect_targets(store, suspect)
+    # If the search demonstrably ran, any "search is broken" claim is
+    # contradicted by the agent's own navigation.
+    search_contradicted = _search_ran(store)
 
     def _is_suspect(f: dict) -> bool:
         step = f.get("step")
@@ -102,7 +127,11 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         if step is not None and step in suspect:
             return True
         text = f"{f.get('evidence', '')} {f.get('recommendation', '')}"
-        return any(t and t in text for t in targets)
+        if any(t and t in text for t in targets):
+            return True
+        if search_contradicted and _claims_search_broken(f):
+            return True
+        return False
 
     for f in findings or []:
         if isinstance(f, dict) and _is_suspect(f):
