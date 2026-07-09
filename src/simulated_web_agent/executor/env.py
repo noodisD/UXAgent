@@ -11,6 +11,77 @@ from typing import Any, Awaitable, Callable, ClassVar, Optional
 import numpy
 from omegaconf import DictConfig, OmegaConf
 from playwright.async_api import Playwright, async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+
+def resolve_url(url: str, base_url: str) -> str:
+    """Resolve a possibly-relative URL against the current page URL.
+
+    The action model often emits site-relative paths ("/collections/dom") or
+    scheme-less hosts ("pepco.pl/x"); Playwright's page.goto rejects both as
+    "Cannot navigate to invalid URL".
+    """
+    from urllib.parse import urljoin, urlparse
+
+    candidate = (url or "").strip()
+    if not candidate:
+        return candidate
+    if urlparse(candidate).scheme in ("http", "https"):
+        return candidate
+    # "pepco.pl/x" style — has a dot before the first slash, no scheme
+    head = candidate.split("/", 1)[0]
+    if not candidate.startswith("/") and "." in head:
+        return "https://" + candidate
+    return urljoin(base_url or "", candidate)
+
+
+async def select_places_suggestion(page, timeout: int = 2500) -> bool:
+    """Select the first Google Places Autocomplete suggestion, if the dropdown
+    is visible. Returns True if a suggestion was selected.
+
+    Google Places (inputs with class "pac-target-input") only updates the
+    map/results after a suggestion is *chosen* — this fires the place_changed
+    event. Typing the query text alone, even with Enter, does nothing (observed
+    on pepco.pl's store locator: the store list stayed unfiltered no matter how
+    many times "Warszawa" was typed). Selecting the first suggestion via
+    ArrowDown+Enter triggers the filter.
+    """
+    try:
+        await page.locator(".pac-container .pac-item").first.wait_for(
+            state="visible", timeout=timeout
+        )
+    except Exception:
+        return False
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("Enter")
+    return True
+
+
+async def click_semantic_element(page, semantic_id: str, timeout: int = 5000) -> None:
+    """Click the element with the given parser-semantic-id, recovering from
+    sticky-overlay interception.
+
+    Playwright scrolls the target the minimal distance into the viewport, so
+    on pages with a sticky header the element lands right at the top edge,
+    underneath the overlay — every retry then fails with "... intercepts
+    pointer events" until the timeout (observed on pepco.pl, run
+    2026-07-09_11-29-52: 20 steps burned re-clicking a sidebar link). A human
+    would scroll the element into open view, so on timeout we center it in
+    the viewport and try once more. Elements that are genuinely hidden (e.g.
+    inside a closed hover flyout) still fail both attempts and the error
+    propagates to the agent.
+    """
+    selector = f'[parser-semantic-id="{semantic_id}"]'
+    element = page.locator(selector)
+    if await element.count() == 0:
+        raise ValueError(f"Element '{semantic_id}' not found on page")
+    try:
+        await element.click(timeout=timeout)
+    except PlaywrightTimeoutError:
+        await element.evaluate(
+            "el => el.scrollIntoView({block: 'center', inline: 'nearest'})"
+        )
+        await element.click(timeout=timeout)
 
 
 class ElementHighlight:
@@ -763,9 +834,12 @@ class WebAgentEnv:
             await env.click("menu.settings")
         """
         async with ElementHighlight(semantic_id, sleep=0.5, center=False):
-            selector = f'[parser-semantic-id="{semantic_id}"]'
-            element = self.page.locator(selector)
-            await element.click()
+            try:
+                await click_semantic_element(self.page, semantic_id)
+            except ValueError:
+                # id likely stripped by an SPA re-render — re-parse and retry once
+                await self._reparse()
+                await click_semantic_element(self.page, semantic_id)
             self.logger.info(f"Clicked element: {semantic_id}")
 
     async def mouse_move(self, x: int, y: int) -> None:
@@ -798,6 +872,40 @@ class WebAgentEnv:
 
         self.logger.info(f"Performed a raw click at [{at_x}, {at_y}]")
 
+    async def _reparse(self) -> None:
+        """Re-run the parser to re-inject parser-semantic-id attributes onto the
+        live DOM.
+
+        SPA re-renders (e.g. pepco.pl's store locator loading ~2000 stores +
+        Google Maps between perceive and act) replace DOM nodes and strip the
+        parser-* ids injected during the last observation. An element that was
+        in the observation is then "not found" by the time the action runs.
+        The parser assigns ids deterministically, so re-parsing restores the
+        same id on the re-rendered element and the selector resolves again.
+        """
+        code = getattr(self, "_parser_code", None)
+        if code is None:
+            try:
+                code = Path(self.config.parser_script_path).read_text()
+            except Exception:
+                code = ""
+            self._parser_code = code
+        if code:
+            try:
+                await self.page.evaluate(code)
+            except Exception as e:
+                self.logger.warning(f"reparse failed: {e}")
+
+    async def _locate_or_reparse(self, semantic_id: str):
+        """Locate an element by parser-semantic-id; if it vanished (SPA
+        re-render stripped the id), re-parse once and retry before giving up."""
+        selector = f'[parser-semantic-id="{semantic_id}"]'
+        element = self.page.locator(selector)
+        if await element.count() == 0:
+            await self._reparse()
+            element = self.page.locator(selector)
+        return element
+
     async def type(
         self, semantic_id: str, text: str, press_enter: bool = False
     ) -> None:
@@ -814,15 +922,60 @@ class WebAgentEnv:
             await env.type("username", "john_doe", press_enter=True)
         """
         async with ElementHighlight(semantic_id, sleep=0.5, center=True):
-            selector = f'[parser-semantic-id="{semantic_id}"]'
-            element = self.page.locator(selector)
+            element = await self._locate_or_reparse(semantic_id)
+            if await element.count() == 0:
+                raise ValueError(f"Element '{semantic_id}' not found on page")
 
             # Short timeout scroll - fail fast on hallucinated elements
             await element.scroll_into_view_if_needed(timeout=500)
-            await element.fill(text, force=True)  # Clear and type
+
+            # Click the target, then type via the PAGE keyboard, not the element:
+            # some sites (e.g. Pepco) move focus to a different overlay input on
+            # click — element-bound typing would land in the decoy input and be
+            # ignored, while page-level keystrokes follow the real focus. This
+            # also fixes JS-driven inputs that ignore values set by fill().
+            await element.click()
+            await asyncio.sleep(0.3)  # let the site shift focus (overlays, modals)
+
+            # Ensure the real input actually holds focus. In SPA/overlay states a
+            # click can be swallowed (focus stays on <body>), so page-level
+            # keystrokes land nowhere and the value never changes — observed on
+            # pepco.pl's store locator, where every "type" left value="".
+            try:
+                focused = await element.evaluate("el => el === document.activeElement")
+                if not focused:
+                    await element.focus()
+            except Exception:
+                pass
+
+            await self.page.keyboard.press("Control+a")
+            await self.page.keyboard.press("Delete")
+            await self.page.keyboard.type(text, delay=40)
+
+            # Google Places Autocomplete (class "pac-target-input"): the map/list
+            # only updates once a *suggestion* is chosen, which fires the
+            # place_changed event. Typing the text — even with Enter — does
+            # nothing on its own. For such inputs, select the first suggestion.
+            # This is the store-locator "search does nothing" fix. Gated on the
+            # Places class so normal inputs don't pay the dropdown-wait latency.
+            try:
+                is_places = await element.evaluate(
+                    "el => el.classList.contains('pac-target-input')"
+                )
+            except Exception:
+                is_places = False
+            if is_places and await select_places_suggestion(self.page):
+                await asyncio.sleep(0.8)  # let place_changed re-render results
+                self.logger.info(
+                    f"Selected Google Places suggestion for '{text}' ({semantic_id})"
+                )
+                return
 
             if press_enter:
-                await element.press("Enter")
+                # Give debounced JS (suggestion dropdowns, query state) a moment
+                # to register the text before submitting.
+                await asyncio.sleep(0.5)
+                await self.page.keyboard.press("Enter")
 
             self.logger.info(f"Typed '{text}' into element: {semantic_id}")
 
@@ -876,8 +1029,9 @@ class WebAgentEnv:
             await env.hover("tooltip_trigger")
         """
         async with ElementHighlight(semantic_id, sleep=0.5, center=True):
-            selector = f'[parser-semantic-id="{semantic_id}"]'
-            element = self.page.locator(selector)
+            element = await self._locate_or_reparse(semantic_id)
+            if await element.count() == 0:
+                raise ValueError(f"Element '{semantic_id}' not found on page")
 
             # Short timeout scroll - fail fast on hallucinated elements
             await element.scroll_into_view_if_needed(timeout=500)
@@ -897,8 +1051,9 @@ class WebAgentEnv:
             await env.select("language_select", "en")
         """
         async with ElementHighlight(semantic_id, sleep=0.5, center=True):
-            selector = f'[parser-semantic-id="{semantic_id}"]'
-            element = self.page.locator(selector)
+            element = await self._locate_or_reparse(semantic_id)
+            if await element.count() == 0:
+                raise ValueError(f"Element '{semantic_id}' not found on page")
 
             # Short timeout scroll - fail fast on hallucinated elements
             await element.scroll_into_view_if_needed(timeout=500)
@@ -917,8 +1072,9 @@ class WebAgentEnv:
             await env.clear("comment_textarea")
         """
         async with ElementHighlight(semantic_id, sleep=0.5, center=True):
-            selector = f'[parser-semantic-id="{semantic_id}"]'
-            element = self.page.locator(selector)
+            element = await self._locate_or_reparse(semantic_id)
+            if await element.count() == 0:
+                raise ValueError(f"Element '{semantic_id}' not found on page")
 
             # Short timeout scroll - fail fast on hallucinated elements
             await element.scroll_into_view_if_needed(timeout=500)
@@ -959,12 +1115,15 @@ class WebAgentEnv:
         Navigate to a specific URL in the current tab.
 
         Args:
-            url: URL to navigate to
+            url: URL to navigate to. Relative URLs (e.g. "/collections/dom")
+                are resolved against the current page — the model often emits
+                site-relative paths, which Playwright rejects as invalid.
 
         Example:
             await env.goto_url("https://google.com")
             await env.goto_url("http://localhost:3000/login")
         """
+        url = resolve_url(url, self.page.url)
         async with ElementHighlight(sleep=0.5):
             await self.page.goto(url, wait_until="domcontentloaded")
             self.logger.info(f"Navigated to: {url}")
