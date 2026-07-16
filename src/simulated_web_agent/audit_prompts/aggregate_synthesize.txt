@@ -77,7 +77,7 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
     {{
       "heuristic_id": 3,
       "heuristic_name": "Kontrola użytkownika i swoboda działania",
-      "frequency": "8 z 10 uczestników",
+      "frequency": "hipoteza syntetyczna: zaobserwowano u 8 z 10 symulowanych person",
       "impact": "Uczestnicy nie mogli wrócić do koszyka po przejściu do kasy.",
       "recommendation": "Dodać wyraźny przycisk 'Wróć do koszyka' na każdym etapie procesu zakupowego."
     }}
@@ -95,10 +95,11 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
       "expected_impact": "Redukcja porzuceń koszyka o szacowane 20–30%."
     }}
   ],
-  "methodology_note": "Badanie przeprowadzono przy użyciu agentów LLM symulujących rzeczywistych użytkowników. Każdy agent wykonał zadanie: {task_description}. Ocena opiera się na heurystykach Nielsena, teście pierwszego wrażenia (5 sekund), analizie dostępności WCAG 2.1 oraz sprawdzeniu responsywności na urządzeniach mobilnych i tabletach."
+  "methodology_note": "Badanie przeprowadzono przy użyciu agentów LLM symulujących rzeczywistych użytkowników. Każdy agent wykonał zadanie: {task_description}. Ocena opiera się na heurystykach Nielsena, teście pierwszego wrażenia (5 sekund), analizie dostępności WCAG 2.1 oraz sprawdzeniu responsywności. UWAGA METODOLOGICZNA: to badanie jakościowe (wykrywanie hipotez problemów), a NIE ilościowy pomiar populacji. Liczby person to symulowane przebiegi, nie reprezentatywna próba użytkowników — nie należy interpretować ich jako odsetka rzeczywistych użytkowników. Wyniki wymagają walidacji z realnymi użytkownikami przed decyzjami produktowymi."
 }}
 
 Rules:
+- REGUŁA JĘZYKOWA (obowiązkowa): NIGDY nie podawaj częstotliwości jako procentu „użytkowników" (np. „72% użytkowników porzuci koszyk"). Odnoś się do „symulowanych person" lub „przebiegów"; traktuj częstotliwości jako hipotezy syntetyczne, nie statystykę populacyjną.
 - executive_summary: 3–5 sentences covering the overall picture.
 - overall_ux_score: float 1.0–5.0 (5.0 = excellent UX).
 - key_strengths: 2–4 items. Only include genuine strengths backed by data.
@@ -106,3 +107,4 @@ Rules:
 - priority_recommendations: ranked 1–N, most impactful first. Maximum 5.
 - ALL text values must be in Polish.
 - Do not invent issues not present in the provided statistics.
+- Every issue's heuristic_id MUST correspond to a heuristic present in the heuristic_summary input. Issues about heuristics absent from the input data will be discarded as unverifiable.
