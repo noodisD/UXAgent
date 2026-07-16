@@ -3,10 +3,16 @@ import type { InjectionKey, Ref } from 'vue'
 export type RangeBin = { id: number; min: number; max: number; mass: number };
 export type GenderBin = { id: number; label: string; mass: number };
 
+export type PersonaSlot = {
+  mode: 'auto' | 'manual';
+  description: string;
+};
+
 export type PersonaConfig = {
   numSubjects: number; // >= 1
   generalIntent: string; // non-empty
   examplePersona: string;
+  slots: PersonaSlot[];
   // Unified demographics schema
   demographics: {
     name: string;
@@ -58,10 +64,24 @@ export type ObjectiveReflection = {
   priorityFix: string
 }
 
+export type FindingEvidence = {
+  step: number | null
+  url: string
+  hasScreenshot: boolean
+  observationQuote: string
+  verified: boolean
+}
+
+export type AccessibilityFinding = FindingEvidence & { detail: string }
+export type HeuristicFinding = FindingEvidence & {
+  severity: Severity; id: number; evidence: string; recommendation: string
+}
+
 export type PersonaResult = {
   id: string
   name: string
   objective: string
+  homeLocation?: string | null
   demographics: Record<string, unknown>
   metaParts: string[]
   outcome: Outcome
@@ -69,9 +89,9 @@ export type PersonaResult = {
   duration: string | null
   reflection: ObjectiveReflection
   firstImpression: { purpose: number | null; navigation: number | null; cta: number | null; hierarchy: number | null; trust: number | null }
-  accessibility: { score: number | null; findings: string[] }
+  accessibility: { score: number | null; findings: AccessibilityFinding[] }
   viewport: { findings: { device: string; issue: string; severity: Severity }[] }
-  heuristics: { severity: Severity; id: number; evidence: string; recommendation: string }[]
+  heuristics: HeuristicFinding[]
   survey: { q: string; answer: string; reasoning: string }[]
 }
 
@@ -87,12 +107,25 @@ export type RunMeta = {
   pagespeed: { performance: number | null; accessibility: number | null; bestPractices: number | null; seo: number | null }
 }
 
+export type AggIssueExample = {
+  persona_dir: string
+  persona_name: string
+  step: number | null
+  url: string
+  screenshot: string | null
+  observation_quote: string
+  evidence: string
+  verified: boolean
+}
+
 export type AggIssue = {
   heuristic_id: number
   heuristic_name: string
   frequency: string
   impact: string
   recommendation: string
+  examples?: AggIssueExample[]
+  verified?: boolean
 }
 export type AggRecommendation = {
   priority: number

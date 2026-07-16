@@ -124,6 +124,7 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
         "id": trace_dir.name,
         "name": card.get("name", "Unknown"),
         "objective": card.get("objective") or basic.get("intent", ""),
+        "homeLocation": card.get("home_location"),
         "demographics": demographics,
         "metaParts": [str(v) for v in demographics.values()],
         "outcome": reflection.get("outcome", "partial"),

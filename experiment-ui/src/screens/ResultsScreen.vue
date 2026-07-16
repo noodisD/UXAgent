@@ -139,6 +139,11 @@
               <div class="objective-box">
                 <span class="ux-label">{{ t('pd.objective') }}</span>
                 <div class="obj-text">{{ detail.objective }}</div>
+                <div v-if="detail.homeLocation" class="home-loc">
+                  <span class="home-ico">⌂</span>
+                  <span class="home-label">{{ t('pd.homeLocation') }}:</span>
+                  <span class="home-val">{{ detail.homeLocation }}</span>
+                </div>
               </div>
             </div>
 
@@ -575,6 +580,10 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .dh-name { font-weight: 700; font-size: 18px; }
 .dh-meta { font: 500 12.5px var(--mono); color: var(--muted-2); margin-top: 4px; line-height: 1.5; }
 .objective-box { background: #fcfcfd; border: 1px solid var(--border-soft); border-radius: 9px; padding: 13px 15px; }
+.home-loc { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); font-size: 13px; }
+.home-ico { color: var(--ac); font-size: 14px; }
+.home-label { color: var(--muted-2); }
+.home-val { color: var(--ink); font-weight: 600; }
 .obj-text { font-size: 14px; color: var(--ink-2); margin-top: 5px; }
 .refl-summary { font-size: 14px; color: var(--ink-2); line-height: 1.6; margin-bottom: 18px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }

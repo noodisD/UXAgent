@@ -214,6 +214,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'ov.personaSummary': '{crit} krytycznych · {total} problemów',
     // personas
     'pd.objective': 'Cel',
+    'pd.homeLocation': 'Miejsce zamieszkania',
     'pd.reflection': 'Refleksja nad celem',
     'pd.blockers': 'Bariery',
     'pd.wins': 'Co zadziałało',
@@ -461,6 +462,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'ov.viewAll': 'View all details →',
     'ov.personaSummary': '{crit} critical · {total} findings',
     'pd.objective': 'Objective',
+    'pd.homeLocation': 'Home location',
     'pd.reflection': 'Objective reflection',
     'pd.blockers': 'Blockers',
     'pd.wins': 'What worked',

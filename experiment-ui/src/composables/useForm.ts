@@ -1,12 +1,17 @@
 // src/composables/useForm.ts
 import { reactive, watch } from 'vue'
-import type { WizardForm } from '../types'
+import type { PersonaSlot, WizardForm } from '../types'
 
 export function getWizardDefaults(): WizardForm {
   return {
     persona: {
       numSubjects: 3,
       generalIntent: 'Buy a jacket',
+      slots: [
+        { mode: 'auto', description: '' },
+        { mode: 'auto', description: '' },
+        { mode: 'auto', description: '' },
+      ],
       examplePersona: `Persona: Clara
 Background:
 Clara is a PhD student in Computer Science at a prestigious university. She is deeply engaged in research focusing on artificial intelligence and machine learning, aiming to contribute to advancements in technology that can benefit society.
@@ -54,6 +59,17 @@ Clara prefers comfortable, functional clothing, often choosing items that are ea
             { name: 'option 3', weight: 1 },
           ]
         },
+        // Where the persona lives. Without it, tasks like "check availability in
+        // a nearby store" have no anchor and the agent invents a city.
+        {
+          name: 'Miejsce zamieszkania',
+          choices: [
+            { name: 'Warszawa', weight: 2 },
+            { name: 'Kraków', weight: 1 },
+            { name: 'średnie miasto (50–200 tys.)', weight: 2 },
+            { name: 'małe miasto lub wieś (do 50 tys.)', weight: 1 },
+          ]
+        },
       ]
     },
     experiment: {
@@ -66,6 +82,18 @@ Clara prefers comfortable, functional clothing, often choosing items that are ea
       questionnaire: ''
     }
   }
+}
+
+/** Grow/shrink the persona slots array to match numSubjects (grow with auto slots). */
+export function syncPersonaSlots(form: WizardForm) {
+  const n = Math.max(1, Number(form.persona.numSubjects) || 1)
+  const slots = form.persona.slots
+  while (slots.length < n) slots.push({ mode: 'auto', description: '' })
+  if (slots.length > n) slots.splice(n)
+}
+
+function isValidSlot(s: any): s is PersonaSlot {
+  return s && typeof s === 'object' && (s.mode === 'auto' || s.mode === 'manual') && typeof s.description === 'string'
 }
 
 export function createWizardForm() {
@@ -85,6 +113,15 @@ export function createWizardForm() {
     } catch {}
   }
 
+  // Backward-compat: older saved forms have no slots (or malformed ones) — rebuild.
+  if (!Array.isArray(form.persona.slots) || !form.persona.slots.every(isValidSlot)) {
+    form.persona.slots = []
+  }
+  syncPersonaSlots(form)
+
+  // Keep slot count in lockstep with the participant stepper.
+  watch(() => form.persona.numSubjects, () => syncPersonaSlots(form))
+
   watch(form, (val) => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(val)) } catch {}
   }, { deep: true })
@@ -98,6 +135,7 @@ export type RunPayload = {
   demographics: { name: string; choices: { name: string; weight: number }[] }[]
   general_intent: string
   example_persona?: string
+  persona_slots?: { mode: 'auto' | 'manual'; description: string }[]
   start_url: string
   max_steps: number
   concurrency: number
@@ -121,6 +159,10 @@ export function buildRunPayload(form: WizardForm): RunPayload {
     })),
     general_intent: String(form?.persona?.generalIntent ?? ''),
     example_persona: form?.persona?.examplePersona ?? '',
+    persona_slots: (form?.persona?.slots ?? []).map(s => ({
+      mode: s.mode,
+      description: s.mode === 'manual' ? String(s.description ?? '').trim() : '',
+    })),
     start_url:      String(form?.experiment?.startUrl ?? ''),
     max_steps:      Number(form?.experiment?.maxSteps ?? 0),
     concurrency:    Number(form?.experiment?.concurrency ?? 1),

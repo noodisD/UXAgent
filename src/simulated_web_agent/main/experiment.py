@@ -57,6 +57,43 @@ def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Opt
     return thought, None
 
 
+# Demographic keys that carry where the persona lives. Without one, a task like
+# "check availability in a nearby store" has no anchor — the agent invents a
+# city (observed: Julia typed "Warszawa", later "Kraków", arbitrarily).
+_LOCATION_KEYS = ("miejsce zamieszkania", "miasto", "lokalizacja", "location", "city", "region")
+
+# Fallbacks parsed straight from the persona description.
+_LOCATION_PATTERNS = (
+    r"Miejsce zamieszkania:\s*([^\n]+)",
+    r"Mieszka w\s+([^\n,.;]+)",
+    r"Lokalizacja:\s*([^\n]+)",
+)
+
+
+def extract_home_location(persona_info: dict) -> str | None:
+    """Where the persona lives — explicit field, a location-ish demographic, or
+    a line in the persona text. Returns None when genuinely unknown (never
+    guesses a city)."""
+    import re
+
+    explicit = persona_info.get("home_location")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+
+    for k, v in persona_info.items():
+        if k in _RESERVED_KEYS or not isinstance(v, str) or not v.strip():
+            continue
+        if any(loc in k.lower() for loc in _LOCATION_KEYS):
+            return v.strip()
+
+    raw = persona_info.get("persona", "") or ""
+    for pat in _LOCATION_PATTERNS:
+        m = re.search(pat, raw, re.IGNORECASE)
+        if m and m.group(1).strip():
+            return m.group(1).strip()
+    return None
+
+
 def build_persona_card(persona_info: dict) -> dict:
     """Build a structured persona card from the raw persona_info dict.
 
@@ -94,6 +131,7 @@ def build_persona_card(persona_info: dict) -> dict:
         "description": raw,
         "objective": persona_info.get("intent", ""),
         "demographics": demographics,
+        "home_location": extract_home_location(persona_info),
         "site_context": persona_info.get("site_context", ""),
         "status": status,
         "evidence_sources": evidence_sources,
