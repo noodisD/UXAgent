@@ -25,6 +25,36 @@
             </div>
           </div>
 
+          <!-- vs previous run -->
+          <div v-if="comparison" class="ux-card">
+            <div class="cmp-head">{{ t('cmp.title') }} <span class="cmp-date mono">· {{ comparison.vsDate }}</span></div>
+            <div class="cmp-metrics">
+              <div v-for="m in comparison.metrics" :key="m.label" class="cmp-metric">
+                <div class="cmp-label mono">{{ m.label }}</div>
+                <div class="cmp-vals">
+                  <span class="cmp-now mono">{{ m.now }}</span>
+                  <span class="cmp-prev mono" :style="{ color: m.trend === 'up' || m.trend === 'better' ? 'var(--success-text)' : 'var(--ac)' }">
+                    {{ m.trend === 'up' || m.trend === 'better' ? '▲' : '▼' }} {{ t('cmp.from') }} {{ m.prev }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="cmp-cols">
+              <div>
+                <div class="cmp-col-h mono" style="color: var(--ac)">{{ t('cmp.new') }} ({{ comparison.fresh.length }})</div>
+                <div v-for="(x, i) in comparison.fresh" :key="i" class="cmp-item"><span style="color: var(--ac)">+</span>{{ x }}</div>
+              </div>
+              <div>
+                <div class="cmp-col-h mono" style="color: var(--warn-text)">{{ t('cmp.persisting') }} ({{ comparison.persisting.length }})</div>
+                <div v-for="(x, i) in comparison.persisting" :key="i" class="cmp-item"><span style="color: var(--warn-text)">=</span>{{ x }}</div>
+              </div>
+              <div>
+                <div class="cmp-col-h mono" style="color: var(--success-text)">{{ t('cmp.resolved') }} ({{ comparison.resolved.length }})</div>
+                <div v-for="(x, i) in comparison.resolved" :key="i" class="cmp-item"><span style="color: var(--success-text)">✓</span>{{ x }}</div>
+              </div>
+            </div>
+          </div>
+
           <div class="score-cards">
             <div v-for="s in scoreCards" :key="s.label" class="score-card">
               <div class="score-label mono">{{ s.label }}</div>
@@ -82,8 +112,12 @@
         </div>
 
         <!-- PERSONAS -->
-        <div v-else-if="tab === 'personas'" class="personas-layout">
-          <div class="persona-list">
+        <div v-else-if="tab === 'personas'" class="personas-layout" :class="{ 'list-hidden': plistHidden }">
+          <div v-if="!plistHidden" class="persona-list">
+            <div class="plist-head">
+              <span class="plist-title mono">{{ t('pd.personasList') }}</span>
+              <button class="plist-toggle" :title="t('pd.hideList')" @click="plistHidden = true">«</button>
+            </div>
             <button v-for="(p, i) in personas" :key="p.id" class="plist-item" :class="{ sel: i === selPersona }" @click="selPersona = i">
               <div class="plist-avatar mono" :class="{ sel: i === selPersona }">{{ initials(p.name) }}</div>
               <div class="plist-info"><div class="plist-name">{{ p.name }}</div>
@@ -92,6 +126,7 @@
           </div>
 
           <div v-if="detail" class="persona-detail">
+            <button v-if="plistHidden" class="plist-show" @click="plistHidden = false">» {{ t('pd.showList') }}</button>
             <div class="ux-card">
               <div class="detail-head">
                 <div class="dh-left">
@@ -147,7 +182,13 @@
                 <div class="row-between"><div class="ct nomb">{{ t('pd.accessibility') }}</div>
                   <div class="a11y-score mono" :style="{ color: scoreColor(detail.accessibility.score || 0) }">{{ detail.accessibility.score ?? '—' }}<span class="of5">/5</span></div></div>
                 <div class="col gap8 mt14">
-                  <div v-for="(a, i) in detail.accessibility.findings" :key="i" class="bullet sm"><span class="b-grey">·</span>{{ a }}</div>
+                  <div v-for="(a, i) in detail.accessibility.findings" :key="i" class="bullet sm">
+                    <span class="b-grey">·</span>{{ typeof a === 'string' ? a : a.detail }}
+                    <template v-if="typeof a !== 'string'">
+                      <span v-if="!a.verified" class="unverified-badge">{{ t('ev.unverified') }}</span>
+                      <a v-else-if="a.url" class="ev-url sm" :href="a.url" target="_blank">{{ t('ev.page') }}</a>
+                    </template>
+                  </div>
                 </div>
                 <div class="ux-label mt16">{{ t('pd.viewport') }}</div>
                 <div class="col gap7">
@@ -167,10 +208,36 @@
                   <div class="heur-head">
                     <span class="heur-tag mono" :style="{ background: SEV[h.severity].chipBg, color: SEV[h.severity].chipFg }">{{ sevLabel(h.severity) }}</span>
                     <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
+                    <span v-if="!h.verified" class="unverified-badge">{{ t('ev.unverified') }}</span>
                   </div>
                   <div class="heur-ev">{{ h.evidence }}</div>
                   <div class="heur-fix"><span class="fix-lead">{{ t('pd.fix') }}</span>{{ h.recommendation }}</div>
+                  <div v-if="h.verified" class="ev-block">
+                    <a v-if="h.hasScreenshot" :href="shotUrl(detail.id, h.step)" target="_blank">
+                      <img class="ev-thumb" :src="shotUrl(detail.id, h.step)" :alt="t('ev.step', { n: h.step })" />
+                    </a>
+                    <div class="ev-meta">
+                      <span class="step-chip mono">{{ t('ev.step', { n: h.step }) }}</span>
+                      <a class="ev-url" :href="h.url" target="_blank">{{ h.url }}</a>
+                      <div v-if="h.observationQuote" class="ev-quote">„{{ h.observationQuote }}"</div>
+                    </div>
+                  </div>
                 </div>
+              </div>
+            </div>
+
+            <div class="ux-card">
+              <div class="ct">{{ t('pd.survey') }}</div>
+              <div class="col gap14">
+                <div v-for="(s, i) in detail.survey" :key="i" class="psurvey-item">
+                  <div class="psurvey-head">
+                    <span class="psurvey-num mono">{{ String(i + 1).padStart(2, '0') }}</span>
+                    <span class="psurvey-q">{{ s.q }}</span>
+                    <span class="psurvey-answer mono">{{ s.answer }}</span>
+                  </div>
+                  <div v-if="s.reasoning" class="psurvey-reason">{{ s.reasoning }}</div>
+                </div>
+                <div v-if="!detail.survey.length" class="muted sm">{{ t('pd.noSurvey') }}</div>
               </div>
             </div>
           </div>
@@ -182,6 +249,7 @@
             <button v-for="c in sevChips" :key="c.key" class="chip" :class="{ on: sevFilter === c.key }" @click="sevFilter = c.key">
               {{ c.label }}<span class="chip-count mono">{{ c.count }}</span>
             </button>
+            <button class="btn small csv-btn" @click="exportCSV">⤓ {{ t('find.exportCsv') }}</button>
           </div>
           <div class="col gap11">
             <div v-for="(h, i) in filteredFindings" :key="i" class="finding" :style="{ borderLeftColor: SEV[h.severity].color }">
@@ -189,9 +257,23 @@
                 <span class="heur-tag mono" :style="{ background: SEV[h.severity].chipBg, color: SEV[h.severity].chipFg }">{{ sevLabel(h.severity) }}</span>
                 <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
                 <span class="finding-persona mono">{{ h.persona }}</span>
+                <button class="copy-btn" :class="{ copied: copiedIdx === i }" @click="copyFinding(h, i)">
+                  {{ copiedIdx === i ? t('find.copied') : t('find.copy') }}
+                </button>
               </div>
               <div class="heur-ev">{{ h.evidence }}</div>
               <div class="heur-fix"><span class="fix-lead">{{ t('find.recommendation') }}</span>{{ h.recommendation }}</div>
+              <div v-if="h.verified" class="ev-block">
+                <a v-if="h.hasScreenshot" :href="shotUrl(h.personaId, h.step)" target="_blank">
+                  <img class="ev-thumb" :src="shotUrl(h.personaId, h.step)" :alt="t('ev.step', { n: h.step })" />
+                </a>
+                <div class="ev-meta">
+                  <span class="step-chip mono">{{ t('ev.step', { n: h.step }) }}</span>
+                  <a class="ev-url" :href="h.url" target="_blank">{{ h.url }}</a>
+                  <div v-if="h.observationQuote" class="ev-quote">„{{ h.observationQuote }}"</div>
+                </div>
+              </div>
+              <div v-else class="ev-none"><span class="unverified-badge">{{ t('ev.unverified') }}</span></div>
             </div>
             <div v-if="filteredFindings.length === 0" class="muted">{{ t('find.empty') }}</div>
           </div>
@@ -218,6 +300,13 @@
                 <div class="resp-persona mono">— {{ r.persona }}</div>
               </div>
             </div>
+            <div v-if="surveySummaries[qi]" class="ai-summary">
+              <div class="ai-badge mono">AI</div>
+              <div class="ai-body">
+                <div class="ai-label mono">{{ t('survey.aiSummary') }}</div>
+                <div class="ai-text">{{ surveySummaries[qi] }}</div>
+              </div>
+            </div>
           </div>
           <div v-if="surveyRows.length === 0" class="muted">{{ t('survey.empty') }}</div>
         </div>
@@ -231,7 +320,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useResults } from '../composables/useResults'
 import { useApp } from '../composables/useApp'
 import { SEV, OUTCOME, SEV_ORDER, initials, scoreColor, pageSpeedColor, outcomeOf, sevLabel, outcomeLabel, heuristicName, type Severity } from '../theme'
-import type { PersonaResult } from '../types'
+import type { HeuristicFinding, PersonaResult } from '../types'
 import ReportView from './ReportView.vue'
 import { useI18n } from '../i18n'
 
@@ -239,14 +328,14 @@ const { state: app } = useApp()
 const { data, loading, error, load } = useResults()
 const { t } = useI18n()
 
-const tab = ref<'report' | 'overview' | 'personas' | 'findings' | 'survey'>('report')
+const tab = ref<'overview' | 'personas' | 'findings' | 'survey' | 'report'>('overview')
 const selPersona = ref(0)
 const sevFilter = ref<'all' | Severity>('all')
 
 const oc = (o: string) => OUTCOME[outcomeOf(o)]
 
 onMounted(() => { if (app.viewRunId) load(app.viewRunId) })
-watch(() => app.viewRunId, (id) => { if (id) { tab.value = 'report'; selPersona.value = 0; load(id) } })
+watch(() => app.viewRunId, (id) => { if (id) { tab.value = 'overview'; selPersona.value = 0; load(id) } })
 
 const personas = computed<PersonaResult[]>(() => data.value?.personas ?? [])
 const meta = computed(() => data.value?.meta)
@@ -299,11 +388,46 @@ const sevBars = computed(() => {
 })
 
 const flatFindings = computed(() => {
-  const out: { severity: Severity; id: number; evidence: string; recommendation: string; persona: string }[] = []
-  personas.value.forEach(p => p.heuristics.forEach(h => out.push({ ...h, persona: p.name })))
+  const out: (HeuristicFinding & { persona: string; personaId: string })[] = []
+  personas.value.forEach(p => p.heuristics.forEach(h => out.push({ ...h, persona: p.name, personaId: p.id })))
   out.sort((a, b) => SEV_ORDER[a.severity] - SEV_ORDER[b.severity])
   return out
 })
+
+function shotUrl(personaId: string, step: number | null): string {
+  return `/runs/${app.viewRunId}/screenshot/${personaId}/${step ?? 0}`
+}
+
+// Backend-supplied extras (present once the run detail includes them)
+const comparison = computed(() => (data.value as any)?.comparison ?? null)
+const surveySummaries = computed<string[]>(() => (data.value as any)?.report?.survey_summaries ?? [])
+
+// --- findings toolbox (design: copy finding + CSV export) ---------------
+const plistHidden = ref(false)
+const copiedIdx = ref(-1)
+let copyTimer: number | undefined
+function copyFinding(h: HeuristicFinding & { persona: string }, i: number) {
+  const txt = `[${h.severity.toUpperCase()}] H${h.id} — ${heuristicName(h.id)}\n` +
+    `Persona: ${h.persona}\nEvidence (step ${h.step} · ${h.url}): ${h.evidence}\nRecommendation: ${h.recommendation}`
+  try { navigator.clipboard.writeText(txt) } catch {}
+  copiedIdx.value = i
+  clearTimeout(copyTimer)
+  copyTimer = window.setTimeout(() => { copiedIdx.value = -1 }, 1600)
+}
+
+function exportCSV() {
+  const esc = (v: unknown) => '"' + String(v ?? '').replace(/"/g, '""') + '"'
+  const rows = [['severity', 'heuristic_id', 'heuristic', 'persona', 'step', 'url', 'evidence', 'recommendation', 'verified'].join(',')]
+  flatFindings.value.forEach(h => rows.push(
+    [h.severity, h.id, heuristicName(h.id), h.persona, h.step ?? '', h.url, h.evidence, h.recommendation, h.verified].map(esc).join(',')
+  ))
+  const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `uxagent-findings-${app.viewRunId ?? 'run'}.csv`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
 const topFixes = computed(() => flatFindings.value.slice(0, 4).map(h => ({
   label: sevLabel(h.severity), chipBg: SEV[h.severity].chipBg, chipFg: SEV[h.severity].chipFg, text: h.recommendation,
 })))
@@ -358,11 +482,11 @@ const surveyRows = computed(() => {
 })
 
 const tabs = computed(() => [
-  { key: 'report', label: t('tab.report'), count: null as number | null },
   { key: 'overview', label: t('tab.overview'), count: null as number | null },
   { key: 'personas', label: t('tab.personas'), count: personas.value.length },
   { key: 'findings', label: t('tab.findings'), count: counts.value.total },
   { key: 'survey', label: t('tab.survey'), count: null as number | null },
+  { key: 'report', label: t('tab.report'), count: null as number | null },
 ])
 
 function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
@@ -370,14 +494,14 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 
 <style scoped lang="scss">
 .results { width: 100%; }
-.state { max-width: 1080px; margin: 0 auto; padding: 60px 36px; color: var(--muted-2); }
+.state { width: 100%; padding: 60px 36px; color: var(--muted-2); }
 .state.err { color: #b5564f; }
 .tabs { padding: 0 36px; border-bottom: 1px solid var(--border); display: flex; gap: 4px; background: #fff; }
 .tab { padding: 14px 16px; border: none; background: transparent; font: 600 14px var(--sans); cursor: pointer; border-bottom: 2.5px solid transparent; margin-bottom: -1px; color: var(--muted-2); }
 .tab.on { color: var(--ac); border-bottom-color: var(--ac); }
 .tab-count { font-size: 11px; margin-left: 7px; padding: 2px 7px; border-radius: 20px; background: #f1f2f4; color: #9aa0a8; }
 .tab-count.on { background: #eef3fc; color: var(--ac); }
-.tab-body { max-width: 1080px; margin: 0 auto; padding: 28px 36px 60px; }
+.tab-body { width: 100%; padding: 28px 36px 60px; }
 .col { display: flex; flex-direction: column; gap: 18px; }
 .gap14 { gap: 14px; } .gap12 { gap: 12px; } .gap11 { gap: 11px; } .gap8 { gap: 8px; } .gap7 { gap: 7px; }
 .mb16 { margin-bottom: 16px; } .mt14 { margin-top: 14px; } .mt16 { margin-top: 16px; }
@@ -429,8 +553,15 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .strip-sum { font-size: 12.5px; color: var(--muted-2); margin-top: 11px; }
 
-.personas-layout { display: grid; grid-template-columns: 230px 1fr; gap: 22px; }
+.personas-layout { display: grid; grid-template-columns: 230px 1fr; gap: 22px; transition: grid-template-columns .2s ease; }
+.personas-layout.list-hidden { grid-template-columns: 1fr; }
 .persona-list { display: flex; flex-direction: column; gap: 8px; }
+.plist-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 2px; }
+.plist-title { font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.plist-toggle { width: 24px; height: 24px; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; color: var(--text-muted); cursor: pointer; font: 600 12px var(--mono); display: flex; align-items: center; justify-content: center; }
+.plist-toggle:hover { border-color: var(--ac); color: var(--ac); }
+.plist-show { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; padding: 8px 13px; border: 1px solid var(--border-input); background: var(--surface); border-radius: 8px; color: var(--text-3); font: 600 12.5px var(--sans); cursor: pointer; }
+.plist-show:hover { border-color: var(--ac); color: var(--ac); }
 .plist-item { text-align: left; background: #fff; border: 1px solid var(--border); border-radius: 11px; padding: 14px; cursor: pointer; display: flex; align-items: center; gap: 11px; }
 .plist-item.sel { border-color: var(--ac); box-shadow: 0 0 0 3px rgba(42,111,219,.1); }
 .plist-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font: 700 13px var(--mono); flex: none; background: #eef1f6; color: var(--muted); }
@@ -475,6 +606,14 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .heur-fix { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
 .fix-lead { color: var(--ac); font-weight: 600; }
 
+/* per-persona survey answers */
+.psurvey-item { border: 1px solid var(--border-soft); border-radius: 9px; padding: 13px 15px; }
+.psurvey-head { display: flex; align-items: baseline; gap: 10px; }
+.psurvey-num { font: 700 11px var(--mono); color: var(--faint); flex: none; }
+.psurvey-q { font-weight: 600; font-size: 13.5px; flex: 1; line-height: 1.45; }
+.psurvey-answer { font: 700 12.5px var(--mono); color: var(--ac); background: var(--accent-tint, #fdecec); padding: 4px 10px; border-radius: 6px; flex: none; }
+.psurvey-reason { margin-top: 8px; padding-left: 26px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+
 .sev-chips { display: flex; gap: 8px; margin-bottom: 18px; }
 .chip { display: inline-flex; align-items: center; gap: 8px; padding: 9px 15px; border-radius: 8px; font: 600 13px var(--sans); cursor: pointer; background: #fff; color: var(--muted); border: 1px solid #e0e3e9; }
 .chip.on { background: #1c2024; color: #fff; border-color: #1c2024; }
@@ -493,4 +632,42 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .response { background: #fcfcfd; border: 1px solid var(--border-soft); border-radius: 9px; padding: 13px 15px; }
 .resp-answer { font-size: 13.5px; color: var(--ink); line-height: 1.5; margin-bottom: 6px; }
 .resp-persona { font: 500 11.5px var(--mono); color: #9aa0a8; }
+
+/* finding evidence */
+.unverified-badge { font: 700 10.5px var(--mono); color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 1px 7px; white-space: nowrap; }
+.ev-block { display: flex; gap: 12px; align-items: flex-start; margin-top: 9px; background: #fafbfc; border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px; }
+.ev-thumb { width: 130px; height: auto; border: 1px solid var(--border-soft); border-radius: 5px; display: block; }
+.ev-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.ev-url { font-size: 12px; color: var(--ac); word-break: break-all; text-decoration: none; }
+.ev-url:hover { text-decoration: underline; }
+.ev-url.sm { margin-left: 6px; }
+.ev-quote { font-size: 12px; font-style: italic; color: var(--muted-2); line-height: 1.45; }
+.ev-none { margin-top: 8px; }
+.step-chip { font-size: 11px; background: var(--accent-tint); color: var(--ac); border-radius: 5px; padding: 1px 7px; }
+
+/* comparison vs previous run */
+.cmp-head { font-weight: 700; font-size: 15px; margin-bottom: 16px; }
+.cmp-date { font: 500 12.5px var(--mono); color: var(--text-muted); }
+.cmp-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+.cmp-metric { background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 10px; padding: 14px; }
+.cmp-label { font: 600 10px/1.2 var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 9px; }
+.cmp-vals { display: flex; align-items: baseline; gap: 8px; }
+.cmp-now { font: 700 20px var(--mono); }
+.cmp-prev { font: 600 12px var(--mono); }
+.cmp-cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.cmp-col-h { font: 600 10.5px var(--mono); letter-spacing: .05em; text-transform: uppercase; margin-bottom: 8px; }
+.cmp-item { display: flex; gap: 7px; font-size: 12.5px; color: var(--text-3); line-height: 1.45; margin-bottom: 7px; }
+
+/* AI survey summary */
+.ai-summary { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-2); display: flex; gap: 12px; align-items: flex-start; }
+.ai-badge { width: 26px; height: 26px; border-radius: 7px; background: var(--accent-tint); flex: none; display: flex; align-items: center; justify-content: center; font: 700 11px var(--mono); color: var(--ac); }
+.ai-body { flex: 1; min-width: 0; }
+.ai-label { font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 7px; }
+.ai-text { font-size: 13.5px; color: var(--text-2); line-height: 1.6; }
+
+/* findings toolbox */
+.csv-btn { margin-left: auto; }
+.copy-btn { margin-left: 8px; padding: 5px 11px; border-radius: 6px; border: 1px solid var(--border-input); background: transparent; font: 600 11.5px var(--sans); color: var(--text-3); cursor: pointer; flex: none; }
+.copy-btn:hover { border-color: var(--ac); color: var(--ac); }
+.copy-btn.copied { border-color: var(--success-text); color: var(--success-text); }
 </style>
