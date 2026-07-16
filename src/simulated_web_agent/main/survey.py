@@ -8,6 +8,25 @@ from .trace_store import TraceStore
 
 logger = logging.getLogger(__name__)
 
+# Fixed synthetic post-task questions (§4.3): SEQ and confidence on a 1–7 scale,
+# asked of every persona regardless of the user's questionnaire. Stored as
+# synthetic self-report and never presented as real-user SEQ (MeasuringU
+# benchmark 5.5 is context only).
+_POST_TASK_QUESTIONS = [
+    {
+        "id": "synthetic_seq",
+        "type": "multiple_choice",
+        "prompt": "Jak łatwe było wykonanie zadania? (1 = bardzo trudne, 7 = bardzo łatwe)",
+        "options": ["1", "2", "3", "4", "5", "6", "7"],
+    },
+    {
+        "id": "synthetic_confidence",
+        "type": "multiple_choice",
+        "prompt": "Na ile jesteś pewien/pewna, że zadanie zostało wykonane poprawnie? (1 = wcale, 7 = całkowicie)",
+        "options": ["1", "2", "3", "4", "5", "6", "7"],
+    },
+]
+
 
 async def run_survey(
     store: TraceStore,
@@ -23,6 +42,10 @@ async def run_survey(
     """
     survey_prompt = _prompts.get("survey")
 
+    # Append the fixed synthetic post-task questions (SEQ + confidence).
+    questionnaire = dict(questionnaire or {})
+    questionnaire["questions"] = list(questionnaire.get("questions", [])) + _POST_TASK_QUESTIONS
+
     # Prepend site_context so the persona answers calibrated to the site's purpose
     site_context = store.read_basic_info().get("site_context", "") or ""
     if site_context:
@@ -36,11 +59,22 @@ async def run_survey(
     memories = store.read_memory_trace()
     memory_str = json.dumps(memories, ensure_ascii=False)
 
+    # Session end-state grounds the answers: a session that died after a few
+    # steps must not produce confident scores about unexperienced features.
+    session = store.read_session_result()
+    session_block = (
+        "\nSESSION RESULT (how my browsing session actually ended):\n"
+        + json.dumps(session, ensure_ascii=False)
+        + "\n"
+        if session
+        else ""
+    )
+
     request = [
         {"role": "system", "content": survey_prompt},
         {
             "role": "user",
-            "content": json.dumps(questionnaire) + "\n" + memory_str,
+            "content": json.dumps(questionnaire) + "\n" + session_block + memory_str,
         },
     ]
     try:

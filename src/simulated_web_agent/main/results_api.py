@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .run import read_manifest
+from .severity import severity_score
 from .trace_store import TraceStore
 
 RUNS_ROOT = Path("runs")
@@ -166,6 +167,8 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
                 "requiresHumanCheck": bool(h.get("requires_human_check")),
                 "confidence": h.get("confidence", "medium"),
                 "requiresRealUserValidation": bool(h.get("requires_real_user_validation", True)),
+                "severityScore": severity_score(h),
+                "severityHumanConfirmed": h.get("severity_human_confirmed"),
             }
             for h in heuristics
         ],

@@ -65,7 +65,8 @@ After your English reasoning, output a JSON array. Each element must follow this
     "url": "https://example.com/cart",
     "step": 4,
     "evidence": "Po kliknięciu przycisku 'Dodaj do koszyka' nie pojawił się żaden komunikat potwierdzający dodanie produktu.",
-    "recommendation": "Dodać animację lub komunikat potwierdzający, że produkt został dodany do koszyka."
+    "recommendation": "Dodać animację lub komunikat potwierdzający, że produkt został dodany do koszyka.",
+    "confidence": "high"
   }}
 ]
 ```
@@ -85,7 +86,9 @@ Polish names for all 10 heuristics:
 Rules:
 - Only include findings where there is concrete evidence in the session data.
 - If a heuristic has no violation, omit it entirely.
-- "url" should be the URL where the issue was observed; use the most specific URL available.
-- "step" is the step number from the session (integer).
+- "step" is REQUIRED for every finding. Observations and actions are prefixed with "[step N]" markers — cite the exact step number where the issue is visible. A finding without a real step citation will be discarded as unverifiable.
+- "url" is REQUIRED — copy the URL shown in the "[step N]" line you are citing.
+- "evidence" must quote or closely paraphrase the observation text of the cited step — never describe things that are not present in the session data.
 - All string values — heuristic_name, evidence, recommendation — must be written in Polish.
+- "confidence" is REQUIRED: "high" only when the evidence directly and unambiguously shows the problem; "medium" when it is a reasonable inference; "low" when the interaction may have failed for reasons other than the site (e.g. the element did not respond). Do not claim "high" for a problem you inferred rather than observed.
 - Output valid JSON only after your reasoning. Do not wrap it in markdown fences in the final JSON block.

@@ -22,9 +22,16 @@ _OUTCOME_MAP = {
 }
 
 
+# The fixed post-task questions use a 1–7 scale; keep them out of the SUS/Likert
+# (1–5) average.
+_POST_TASK_IDS = {"synthetic_seq", "synthetic_confidence"}
+
+
 def _numeric_survey_avg(survey: dict) -> float | None:
     vals: list[float] = []
     for a in (survey or {}).get("answers", []) or []:
+        if a.get("question_id") in _POST_TASK_IDS:
+            continue
         v = a.get("value")
         try:
             f = float(v)
@@ -61,6 +68,18 @@ def compute_iso_metrics(store: TraceStore) -> dict:
     synth_score = _numeric_survey_avg(survey)
     frustration_signals = backtracks + len(suspect)
 
+    def _answer(qid: str) -> float | None:
+        for a in (survey or {}).get("answers", []) or []:
+            if a.get("question_id") == qid:
+                try:
+                    return float(a.get("value"))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    synthetic_seq = _answer("synthetic_seq")           # 1–7
+    synthetic_confidence = _answer("synthetic_confidence")  # 1–7
+
     return {
         "effectiveness": {
             "task_success": task_success,
@@ -78,6 +97,8 @@ def compute_iso_metrics(store: TraceStore) -> dict:
         "satisfaction": {
             "source": "synthetic_self_report",
             "synthetic_score_1_5": synth_score,
+            "synthetic_seq_1_7": synthetic_seq,
+            "synthetic_confidence_1_7": synthetic_confidence,
             "frustration_signals": frustration_signals,
             "requires_real_user_validation": True,
         },
