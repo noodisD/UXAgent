@@ -4,14 +4,17 @@ import logging
 import pathlib
 import traceback
 import uuid
+from collections import Counter
 from datetime import datetime
 from typing import Callable, Dict, List, Optional
 
 from omegaconf import DictConfig
 
 from ..agent import context, gpt
+from ..agent.memory import Thought
 from ..executor.env import WebAgentEnv
 from ..config import load_cfg
+from .abort import abandon_threshold
 from .model import AgentPolicy  # noqa
 from .trace_store import TraceStore
 
@@ -19,6 +22,39 @@ log = logging.getLogger("simulated_web_agent.main.experiment")
 logging.basicConfig(level=logging.INFO)
 
 _RESERVED_KEYS = {"persona", "intent", "site_context", "analytics_context"}
+
+
+def _parse_action_dict(action_json: str) -> dict:
+    """Parse an action-trace JSON string into a dict ({} on any failure)."""
+    try:
+        a = json.loads(action_json)
+        a = a[0] if isinstance(a, list) and a else a
+        return a if isinstance(a, dict) else {}
+    except Exception:
+        return {}
+
+
+def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Optional[str]]:
+    """Warnings for re-clicking a target already clicked this session.
+
+    The consecutive-repeat guard misses A-B-A-B loops (open product, go back,
+    open the same product again), which wasted ~20% of steps in real runs.
+    Returns (memory_thought, error_message); either may be None. Escalation is
+    advisory only — repeated clicks on navigation or "load more" are legitimate.
+    """
+    if prior_clicks < 1:
+        return None, None
+    thought = (
+        f"I already clicked '{target}' earlier in this session. If this is deliberate "
+        "navigation (returning to a listing, loading more products), that's fine — "
+        "but if I meant to inspect a new product, I should pick one I have not opened yet."
+    )
+    if prior_clicks >= 2:
+        return thought, (
+            f"You have clicked '{target}' {prior_clicks + 1} times this session. "
+            "Do not open it again — choose a product or link you have not visited yet."
+        )
+    return thought, None
 
 
 def build_persona_card(persona_info: dict) -> dict:
@@ -37,13 +73,77 @@ def build_persona_card(persona_info: dict) -> dict:
         k: v for k, v in persona_info.items() if k not in _RESERVED_KEYS
     }
 
+    # §2.1 structured schema fields. Evidence status defaults to "synthetic"
+    # unless the persona was built from declared evidence sources; behavioral
+    # fields carry through if the generator provided them, else safe defaults.
+    lower = raw.lower()
+    if any(w in lower for w in ("niecierpliw", "impatient", "w pośpiechu", "presja czasu")):
+        patience = "low"
+    elif any(w in lower for w in ("cierpliw", "spokojn", "dokładn", "metodyczn")):
+        patience = "high"
+    else:
+        patience = "medium"
+
+    evidence_sources = persona_info.get("evidence_sources") or []
+    status = "evidence_based" if evidence_sources else "synthetic"
+
+    behavioral_profile = persona_info.get("behavioral_profile") or {"patience": patience}
+
     return {
         "name": name,
         "description": raw,
         "objective": persona_info.get("intent", ""),
         "demographics": demographics,
         "site_context": persona_info.get("site_context", ""),
+        "status": status,
+        "evidence_sources": evidence_sources,
+        "behavioral_profile": behavioral_profile,
+        "barriers": persona_info.get("barriers") or [],
+        "mental_models": persona_info.get("mental_models") or [],
+        "evaluation_focus": persona_info.get("evaluation_focus") or [],
+        "abort_max_confusing_steps": persona_info.get("abort_max_confusing_steps"),
     }
+
+
+_COOKIE_SELECTORS = [
+    # Generic "accept all" patterns (text-based, case-insensitive)
+    "button:has-text('Accept all')",
+    "button:has-text('Zaakceptuj wszystkie')",
+    "button:has-text('Zaakceptuj')",
+    "button:has-text('Akceptuj')",
+    "button:has-text('Accept cookies')",
+    "button:has-text('Accept')",
+    "button:has-text('Agree')",
+    "button:has-text('OK')",
+    "button:has-text('Zgoda')",
+    "button:has-text('Rozumiem')",
+    "button:has-text('Zezwól na wszystkie')",
+    "button:has-text('Zezwól')",
+    # Common id/class patterns
+    "#onetrust-accept-btn-handler",
+    "#accept-all-cookies",
+    "[id*='accept'][id*='cookie']",
+    "[class*='accept-all']",
+    "[class*='cookie-accept']",
+    "[data-cookiebanner='accept_button']",
+    "[aria-label*='Accept']",
+    "[aria-label*='Zaakceptuj']",
+]
+
+
+async def dismiss_cookie_banners(page) -> bool:
+    """Try each known cookie-accept selector; click the first one found. Returns True if clicked."""
+    for sel in _COOKIE_SELECTORS:
+        try:
+            locator = page.locator(sel).first
+            if await locator.count() > 0 and await locator.is_visible():
+                await locator.click(timeout=2000)
+                log.info("Cookie banner dismissed via: %s", sel)
+                await asyncio.sleep(0.5)
+                return True
+        except Exception:
+            continue
+    return False
 
 
 _FONT_SIZE_JS = """
@@ -98,6 +198,7 @@ async def _run_for_persona_and_intent(
     async def before_action_hook():
         if cfg.environment.recording.enabled:
             return
+        await dismiss_cookie_banners(env.page)
         await env.page.screenshot(path=store.screenshot_path(steps_taken, full_page=True), full_page=True)
         await env.page.screenshot(path=store.screenshot_path(steps_taken))
         scroll_data = await env.page.evaluate(
@@ -140,11 +241,34 @@ async def _run_for_persona_and_intent(
 
         if env_setup_hook:
             await env_setup_hook(env)
+
+        await dismiss_cookie_banners(env.page)
+
         obs = await env.observation()
 
         log.info("Initial observation ready")
 
+        def _action_key(action_json: str) -> str:
+            """Action identity ignoring the freeform description."""
+            try:
+                a = json.loads(action_json)
+                a = a[0] if isinstance(a, list) and a else a
+                a.pop("description", None)
+                return json.dumps(a, sort_keys=True)
+            except Exception:
+                return action_json
+
+        def _current_url(o: dict) -> str:
+            tabs = o.get("tabs") or []
+            return tabs[0].get("url", "") if tabs else ""
+
         action_trace = []
+        prev_action_key = None
+        repeat_count = 0
+        click_counts: Counter = Counter()
+        fail_counts: Counter = Counter()
+        abandon_at = abandon_threshold(store.read_persona_card())
+        abandoned = False
         while steps_taken < max_steps:
             store.append_observation(obs)
             if obs.get("tabs"):
@@ -152,7 +276,80 @@ async def _run_for_persona_and_intent(
             store.write_simp_html(steps_taken, obs["html"])
             store.write_raw_html(steps_taken, await env.page.content())
 
-            action = await policy.forward(env)
+            # Step-budget awareness: the planner reads this to pull
+            # intent-critical steps forward before the session runs out.
+            policy.agent.step_budget = {
+                "steps_used": steps_taken,
+                "max_steps": max_steps,
+                "steps_remaining": max_steps - steps_taken,
+            }
+
+            url_before = _current_url(obs)
+            action = await policy.forward(env, obs)
+
+            # Hard loop-breaker: advisory warnings (memory thoughts + error
+            # channel) fire after the 2nd repeat, but the model can still keep
+            # following its plan. If it picks the SAME action a 3rd time, we
+            # physically override it with a 'back' navigation to force a new
+            # page state — a stuck agent burns 5-10 minutes per wasted step.
+            if repeat_count >= 2 and _action_key(action) == prev_action_key:
+                log.warning("Forcing escape from action loop: %s", prev_action_key)
+                action = json.dumps({
+                    "action": "back",
+                    "description": "Ta metoda nie działała mimo kilku prób — wracam, by spróbować innej drogi.",
+                })
+                await policy.agent.memory.add_memory_piece(
+                    Thought(
+                        "I tried the same action several times and it did not work. "
+                        "I went back to the previous page to find a different way.",
+                        policy.agent.memory,
+                    )
+                )
+                repeat_count = 0
+
+            # Failed-action circuit breaker: the consecutive-repeat guard is
+            # defeated when the model alternates (click X fails → scroll →
+            # click X fails → goto → click X ...). Once the SAME action has
+            # already failed twice at execution (element unclickable, invalid
+            # URL), retrying is hopeless — block it and force a new route.
+            intended_key = _action_key(action)
+            if fail_counts[intended_key] >= 2:
+                log.warning(
+                    "Blocking action that failed %d times: %s",
+                    fail_counts[intended_key], intended_key,
+                )
+                blocked_desc = _parse_action_dict(action).get("description", "")
+                await policy.agent.memory.add_memory_piece(
+                    Thought(
+                        "I already tried this several times and it kept failing: "
+                        f"{blocked_desc or intended_key}. That element or route is "
+                        "broken — a UX finding worth noting. I must NOT try it "
+                        "again; I'll go back and take a completely different path "
+                        "toward my goal.",
+                        policy.agent.memory,
+                    )
+                )
+                action = json.dumps({
+                    "action": "back",
+                    "description": "Ten element nie działał mimo kilku prób — wracam i wybieram inną drogę.",
+                })
+
+            # Revisit guard: catches A-B-A-B product loops the consecutive
+            # repeat guard can't see. Advisory thought on the 2nd click of a
+            # target, error-channel escalation from the 3rd.
+            revisit_error = None
+            parsed_action = _parse_action_dict(action)
+            if parsed_action.get("action") == "click" and parsed_action.get("target"):
+                _target = str(parsed_action["target"])
+                revisit_thought, revisit_error = _revisit_warning(
+                    click_counts[_target], _target
+                )
+                if revisit_thought:
+                    await policy.agent.memory.add_memory_piece(
+                        Thought(revisit_thought, policy.agent.memory)
+                    )
+                click_counts[_target] += 1
+
             action_trace.append(action)
             store.write_action_trace(action_trace)
             store.write_observation_step_text(steps_taken, policy.agent.observation)
@@ -163,6 +360,47 @@ async def _run_for_persona_and_intent(
             obs = await env.step(action)
             steps_taken += 1
 
+            # Count execution failures per action identity (feeds the
+            # circuit breaker). Read before the guards below inject their
+            # own advisory messages into obs["error"].
+            if obs.get("error"):
+                fail_counts[_action_key(action)] += 1
+
+            # Repeat-action guard: same action + page unchanged = the agent is
+            # looping. Warn it via memory; escalate via the error channel it
+            # already reads (observation["error"] -> last_action_error).
+            action_key = _action_key(action)
+            if action_key == prev_action_key and _current_url(obs) == url_before:
+                repeat_count += 1
+                warning = (
+                    "I already tried exactly this action and the page did not change. "
+                    "I must try a different element or a different approach."
+                )
+                await policy.agent.memory.add_memory_piece(
+                    Thought(warning, policy.agent.memory)
+                )
+                if repeat_count >= 2 and not obs.get("error"):
+                    obs["error"] = (
+                        f"Repeated identical action {repeat_count + 1} times with no page change: "
+                        f"{action_key}. Choose a different element or strategy."
+                    )
+                # Persona drop-off: after this persona's patience runs out on a
+                # stuck loop, it abandons the task (a realistic UX signal, not a
+                # maxed-out step budget).
+                if repeat_count >= abandon_at:
+                    abandoned = True
+                    log.info(
+                        "Persona abandoned after %d stuck steps (threshold %d): %s",
+                        repeat_count, abandon_at, action_key,
+                    )
+                    break
+            else:
+                repeat_count = 0
+            prev_action_key = action_key
+
+            if revisit_error and not obs.get("error"):
+                obs["error"] = revisit_error
+
             if obs.get("terminated"):
                 break
 
@@ -170,6 +408,17 @@ async def _run_for_persona_and_intent(
             f"Finished persona run: terminated={obs.get('terminated')}, "
             f"score={obs.get('score')}, steps={steps_taken}"
         )
+
+        store.write_session_result({
+            "steps_taken": steps_taken,
+            "max_steps": max_steps,
+            "terminated": bool(obs.get("terminated")),
+            "ended_reason": (
+                "persona_abandoned" if abandoned
+                else "terminated" if obs.get("terminated")
+                else "max_steps"
+            ),
+        })
 
         store.write_memory_trace_text(policy.get_formatted_memories())
         log.info(f"Saved memory trace to {store.trace_dir}")
@@ -181,7 +430,20 @@ async def _run_for_persona_and_intent(
             (store.trace_dir / "error.txt").write_text(err)
         except Exception:
             pass
+        try:
+            store.write_session_result({
+                "steps_taken": steps_taken,
+                "max_steps": max_steps,
+                "terminated": False,
+                "ended_reason": "error",
+            })
+        except Exception:
+            pass
     finally:
+        try:
+            await policy.close()  # cancel the background reflect/wonder loop
+        except Exception:
+            pass
         try:
             log.info(f"[{run_uid}] closing env...")
             await asyncio.wait_for(asyncio.shield(env.close()), timeout=10)
