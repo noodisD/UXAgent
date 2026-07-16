@@ -23,7 +23,10 @@ import logging
 from typing import Any
 
 from .auditor import run_audit_analysis
+from .bias_audit import run_bias_audit
+from .cognitive_walkthrough import run_cognitive_walkthrough
 from .form_analysis import run_form_analysis
+from .iso_metrics import run_iso_metrics
 from .link_checker import run_link_check
 from .reporter import generate_objective_reflection, generate_per_agent_report
 from .scroll_depth import run_scroll_analysis
@@ -46,12 +49,14 @@ async def run_all_analyses(
     """
     log.info("[analysis_runner] Starting analyses for %s", store.trace_dir)
 
-    # I/O-bound passes run in parallel
+    # I/O-bound passes run in parallel. cognitive_walkthrough reads the
+    # already-written observation/action trace, so it can run alongside.
     await asyncio.gather(
         run_survey(store, questionnaire),
         run_audit_analysis(store),
         run_viewport_scan(store, headless=headless),
         run_link_check(store, headless=headless),
+        run_cognitive_walkthrough(store),
     )
 
     # Cheap post-hoc passes (read files already written by the agent loop)
@@ -60,5 +65,11 @@ async def run_all_analyses(
 
     report = await generate_per_agent_report(store)
     await generate_objective_reflection(store)
+
+    # Post-reflection passes: ISO metrics (sync, reads reflection) and the
+    # bias audit (LLM, reads findings + reflection rationale).
+    run_iso_metrics(store)
+    await run_bias_audit(store)
+
     log.info("[analysis_runner] Done for %s", store.trace_dir)
     return report

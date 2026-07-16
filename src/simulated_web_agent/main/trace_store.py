@@ -86,6 +86,29 @@ class TraceStore:
                     pass
         return result
 
+    def url_at_step(self, step: int) -> str:
+        """Return the active tab URL at a given observation step ('' if unknown)."""
+        observations = self.read_observations()
+        if not 0 <= step < len(observations):
+            return ""
+        tabs = observations[step].get("tabs") or []
+        for tab in tabs:
+            if tab.get("is_active") and tab.get("url", "").startswith("http"):
+                return tab["url"]
+        for tab in tabs:
+            if tab.get("url", "").startswith("http"):
+                return tab["url"]
+        return ""
+
+    def read_observation_step_text(self, step: int) -> str:
+        path = self.trace_dir / "observation_trace" / f"observation_trace_{step}.txt"
+        if not path.exists():
+            return ""
+        try:
+            return path.read_text(encoding="utf-8")
+        except Exception:
+            return ""
+
     def visited_urls(self) -> list[str]:
         """Return unique HTTP URLs seen across all observation steps, in order."""
         urls: list[str] = []
@@ -280,6 +303,18 @@ class TraceStore:
                 pass
         return result
 
+    # ------------------------------------------------------------------
+    # Session result (how the browser session ended: steps, reason)
+    # ------------------------------------------------------------------
+
+    def write_session_result(self, data: dict) -> None:
+        (self.trace_dir / "session_result.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_session_result(self) -> dict | None:
+        return self._read_json(self.trace_dir / "session_result.json")
+
     def write_survey_result(self, data: dict) -> None:
         (self.trace_dir / "survey_result.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -311,6 +346,30 @@ class TraceStore:
 
     def read_objective_reflection(self) -> dict | None:
         return self._read_json(self.trace_dir / "objective_reflection.json")
+
+    def write_iso_metrics(self, data: dict) -> None:
+        (self.trace_dir / "iso_metrics.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_iso_metrics(self) -> dict | None:
+        return self._read_json(self.trace_dir / "iso_metrics.json")
+
+    def write_bias_audit(self, data: dict) -> None:
+        (self.trace_dir / "bias_audit.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_bias_audit(self) -> dict | None:
+        return self._read_json(self.trace_dir / "bias_audit.json")
+
+    def write_cognitive_walkthrough(self, data: list) -> None:
+        (self.trace_dir / "cognitive_walkthrough.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_cognitive_walkthrough(self) -> list:
+        return self._read_json(self.trace_dir / "cognitive_walkthrough.json", fallback=[])
 
     # ------------------------------------------------------------------
     # UX report
