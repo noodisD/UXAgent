@@ -148,6 +148,12 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
             "priorityFix": reflection.get("priorityFix", ""),
         },
         "firstImpression": {k: fi_scores.get(src) for k, src in _FI_MAP.items()},
+        # Why each score, through this persona's eyes. Older runs lack both.
+        "firstImpressionRationale": {
+            k: _as_dict(fi.get("score_rationale")).get(src)
+            for k, src in _FI_MAP.items()
+        },
+        "firstImpressionLens": fi.get("persona_lens"),
         "accessibility": {
             "score": acc.get("overall_score"),
             "findings": [

@@ -1,54 +1,87 @@
-You are a UX expert conducting a 5-second first-impression test on a website screenshot.
+You are running a 5-second first-impression test on a website screenshot.
 
-Look at the provided screenshot of the website's landing/home page as seen by a first-time visitor. You have approximately 5 seconds of simulated attention.
+You are NOT scoring as a neutral UX expert. You are scoring as the specific
+person below, seeing this page for the first time with ~5 seconds of attention.
+Their age, profession, tech confidence and reason for visiting decide what they
+notice first and what they never see at all.
+
+## The person
+
+{persona}
 
 ## Your task
 
-Reason briefly IN ENGLISH about what a new visitor would perceive in the first 5 seconds. Then produce a JSON object with ALL TEXT VALUES IN POLISH.
+Reason briefly IN ENGLISH as this person. For EACH dimension, first state what
+*this* person specifically would notice, then score it. A 28-year-old marketer
+who lives in online shops and a 61-year-old pensioner buying once a year do not
+see the same page — if your scores would be identical for both, you have not
+done the task.
 
 ## Scoring dimensions (score each 1–5)
 
-- purpose_clarity: Can the visitor immediately understand what this website does / sells?
+- purpose_clarity: Would THIS person immediately understand what the site sells?
   1=completely unclear, 5=immediately obvious
-- navigation_visibility: Are the main navigation options clearly visible?
-  1=navigation hidden or absent, 5=navigation prominent and intuitive
-- call_to_action: Is there a clear primary action the visitor is invited to take?
+- navigation_visibility: Are the main navigation options visible to THIS person?
+  1=navigation hidden or absent, 5=prominent and intuitive
+- call_to_action: Is the primary action obvious and compelling to THIS person?
   1=no CTA visible, 5=CTA prominent and compelling
-- visual_hierarchy: Does the visual layout guide the eye logically?
+- visual_hierarchy: Does the layout guide THIS person's eye logically?
   1=chaotic or flat layout, 5=clear hierarchy leading the eye
-- trustworthiness: Does the design inspire confidence and professionalism?
+- trustworthiness: Does the design inspire confidence in THIS person?
   1=untrustworthy / amateurish, 5=highly professional and trustworthy
 
-overall_score = round(average of all 5 dimension scores, 1 decimal)
+Scoring discipline — read carefully, this is where evaluators go wrong:
+
+- You are not reviewing the site to be fair to its makers. You are recording how
+  well it serves THIS person. Politeness is a scoring error.
+- Calibrate against the scale, not against "is this a normal website":
+    5 = nothing about this dimension could be improved for this person
+    4 = works for them, with a minor friction
+    3 = they manage, but it costs them effort or a second look
+    2 = a real barrier; they hesitate, misread, or nearly give up
+    1 = fails them outright
+  A competent, unremarkable page is a 3. Most real pages score 2–4. A 5 is rare
+  and must be earned — if you are giving several 5s, you are being lenient.
+- Before scoring each dimension, name the single biggest barrier this person
+  faces on it. Every dimension has one. If you cannot find it, look harder at
+  the screenshot — do not award a 5 to avoid the work.
+- Your scores must not contradict your own reasoning. If this person distrusts
+  online payment, or cannot read small text, that MUST show up in the relevant
+  score — not only in the prose.
+- Score only what is visible in the screenshot. If you cannot point at the
+  evidence, you are guessing.
+
+overall_score = average of the 5 dimension scores, rounded to 1 decimal.
 
 ## Output format
 
-After your English reasoning, output exactly this JSON (no markdown fences in the final block):
+After your English reasoning, output exactly this JSON shape (no markdown
+fences). Every <...> is a placeholder you must replace:
 
 {{
-  "overall_score": 3.4,
-  "clarity_summary": "Strona natychmiast komunikuje swoją ofertę dzięki dużemu banerowemu zdjęciu produktu i wyraźnemu nagłówkowi, jednak wezwanie do działania jest słabo widoczne.",
+  "overall_score": <float, average of the 5 scores below, 1 decimal>,
+  "clarity_summary": "<1–2 sentences IN POLISH: this person's overall first impression>",
   "scores": {{
-    "purpose_clarity": 4,
-    "navigation_visibility": 3,
-    "call_to_action": 2,
-    "visual_hierarchy": 4,
-    "trustworthiness": 4
+    "purpose_clarity": <int 1-5>,
+    "navigation_visibility": <int 1-5>,
+    "call_to_action": <int 1-5>,
+    "visual_hierarchy": <int 1-5>,
+    "trustworthiness": <int 1-5>
   }},
-  "strengths": [
-    "Wyraźny i czytelny nagłówek komunikujący ofertę",
-    "Profesjonalna kolorystyka budująca zaufanie"
-  ],
-  "weaknesses": [
-    "Przycisk CTA słabo kontrastuje z tłem",
-    "Nawigacja wymaga przewinięcia strony"
-  ]
+  "score_rationale": {{
+    "purpose_clarity": "<IN POLISH: the biggest barrier for this person, and why that score>",
+    "navigation_visibility": "<IN POLISH: barrier + why that score>",
+    "call_to_action": "<IN POLISH: barrier + why that score>",
+    "visual_hierarchy": "<IN POLISH: barrier + why that score>",
+    "trustworthiness": "<IN POLISH: barrier + why that score>"
+  }},
+  "persona_lens": "<1 sentence IN POLISH: what this person noticed that a different person would not>",
+  "strengths": ["<2–4 specific, concrete items IN POLISH>"],
+  "weaknesses": ["<2–4 specific, concrete items IN POLISH>"]
 }}
 
 Rules:
-- clarity_summary must be 1–2 sentences in Polish describing the overall first impression.
-- strengths: 2–4 specific, concrete items in Polish.
-- weaknesses: 2–4 specific, concrete items in Polish.
-- All string values must be in Polish.
-- Scores must be integers 1–5.
-- overall_score must be a float rounded to 1 decimal place.
+- ALL string values must be in Polish. The reasoning before the JSON is English.
+- Scores must be integers 1–5; overall_score a float to 1 decimal.
+- Ground strengths/weaknesses in what is visible in the screenshot, phrased from
+  this person's point of view.

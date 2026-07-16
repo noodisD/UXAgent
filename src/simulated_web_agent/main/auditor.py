@@ -29,8 +29,14 @@ log = logging.getLogger(__name__)
 # JSON extraction
 # ---------------------------------------------------------------------------
 
-def _safe_json(text: str, fallback: Any = None) -> Any:
-    """Extract and parse the outermost JSON object or array from LLM output."""
+def _safe_json(text: str, fallback: Any = None, prefer: type | None = None) -> Any:
+    """Extract and parse the outermost JSON object or array from LLM output.
+
+    `prefer` biases candidate selection toward the shape the caller needs. Without
+    it we return the longest match of any shape, so a long array inside the
+    model's prose can beat the real object — that is how a bare weakness array
+    got persisted as a first_impression and broke every downstream reader.
+    """
     import regex
 
     try:
@@ -56,6 +62,10 @@ def _safe_json(text: str, fallback: Any = None) -> Any:
             except Exception:
                 pass
     if candidates:
+        if prefer is not None:
+            wanted = [c for c in candidates if isinstance(c[1], prefer)]
+            if wanted:
+                return max(wanted, key=lambda x: x[0])[1]
         return max(candidates, key=lambda x: x[0])[1]
 
     return fallback
@@ -72,7 +82,20 @@ async def _run_first_impression(store: TraceStore) -> dict:
         return {"error": "screenshot_missing"}
 
     b64 = base64.standard_b64encode(screenshot_path.read_bytes()).decode("utf-8")
-    prompt = _prompts.get("first_impression")
+
+    # The screenshot alone is identical for every persona on a site, so without
+    # the persona this pass asks one question N times and returns one answer.
+    card = store.read_persona_card() or {}
+    persona = (card.get("description") or "").strip()
+    if not persona:
+        # Pre-persona_card runs, and any run whose card failed to write.
+        persona = (store.read_basic_info().get("persona") or "").strip()
+    if not persona:
+        log.warning("[auditor] No persona for %s; first impression will not be "
+                    "persona-specific", store.trace_dir)
+        persona = "(brak danych o osobie — oceniaj jako przeciętny pierwszy użytkownik)"
+
+    prompt = _prompts.get("first_impression").format(persona=persona)
 
     messages = [
         {
@@ -83,22 +106,29 @@ async def _run_first_impression(store: TraceStore) -> dict:
             ],
         }
     ]
-    try:
-        raw = await async_chat(messages, model="small", log=False)
-        result = _safe_json(raw, fallback={"raw": raw})
-        # The model sometimes emits only a fragment (observed: a bare array of
-        # weakness strings). Persisting that shape breaks every downstream
-        # reader, so degrade it here instead.
-        if not isinstance(result, dict):
+    # The model intermittently emits only a fragment (observed: a bare array of
+    # weakness strings, roughly 1 reply in 10). Persisting that shape breaks
+    # every downstream reader — it 500'd the report in run 2026-07-16_13-41-14.
+    # The cause is not understood, but it does not reproduce on retry, so ask
+    # once more before degrading. Only the bad replies pay for this.
+    for attempt in (1, 2):
+        try:
+            # "large": scoring a screenshot as a specific person is a nuanced
+            # visual judgement, and it is one call per persona — the cheap tier
+            # anchored on the prompt's example and scored every site alike.
+            raw = await async_chat(messages, model="large", log=False)
+            result = _safe_json(raw, fallback={"raw": raw}, prefer=dict)
+            if isinstance(result, dict):
+                return result
             log.warning(
-                "[auditor] first_impression returned %s, expected object; degrading",
-                type(result).__name__,
+                "[auditor] first_impression returned %s, expected object "
+                "(attempt %d/2)", type(result).__name__, attempt,
             )
-            return {"error": "unexpected_shape", "raw": str(result)[:800]}
-        return result
-    except Exception as e:
-        log.exception("[auditor] first_impression LLM call failed: %s", e)
-        return {"error": str(e)}
+        except Exception as e:
+            log.exception("[auditor] first_impression LLM call failed: %s", e)
+            return {"error": str(e)}
+
+    return {"error": "unexpected_shape", "raw": str(result)[:800]}
 
 
 async def _run_heuristic_evaluation(store: TraceStore) -> list:
