@@ -17,8 +17,7 @@ const L = (id: string, prompt: string): PresetQuestion => ({
 const O = (id: string, prompt: string): PresetQuestion => ({ id, type: 'short_text', prompt })
 
 export const PRESET_KEYS = [
-  'ecommerce', 'catalog', 'directory', 'media',
-  'booking', 'fintech', 'public', 'corporate',
+  'ecommerce', 'catalog', 'directory', 'corporate',
 ] as const
 export type PresetKey = typeof PRESET_KEYS[number]
 
@@ -58,54 +57,6 @@ export const SURVEY_PRESETS: Record<PresetKey, PresetQuestion[]> = {
     L('d8', 'Chętnie skorzystał(a)bym z tej strony ponownie.'),
     O('d9', 'Jakiej informacji szukałeś/szukałaś, a nie mogłeś/mogłaś jej znaleźć?'),
     O('d10', 'Co było największą trudnością?'),
-  ],
-  media: [
-    L('m1', 'Strona lub aplikacja była łatwa w obsłudze.'),
-    L('m2', 'Szybko znalazłem/znalazłam treści, które mnie interesują.'),
-    L('m3', 'Kategorie i rekomendacje były trafne i pomocne.'),
-    L('m4', 'Było jasne, co się stanie po kliknięciu (odtwórz / subskrybuj / dodaj).'),
-    L('m5', 'Wyszukiwanie treści działało sprawnie.'),
-    L('m6', 'Miałem/miałam jasną kontrolę nad odtwarzaniem lub subskrypcją.'),
-    L('m7', 'Strona jest przejrzysta i atrakcyjna wizualnie.'),
-    L('m8', 'Ufam tej platformie.'),
-    O('m9', 'Czego zabrakło Ci w ofercie treści lub w sposobie ich prezentacji?'),
-    O('m10', 'Co było największą trudnością?'),
-  ],
-  booking: [
-    L('b1', 'Strona była łatwa w obsłudze.'),
-    L('b2', 'Łatwo było znaleźć i wybrać dostępny termin lub opcję.'),
-    L('b3', 'Informacje potrzebne do decyzji były kompletne.'),
-    L('b4', 'Cena i warunki rezerwacji były jasne przed potwierdzeniem.'),
-    L('b5', 'Proces rezerwacji był prosty i nie wymagał zbędnych kroków.'),
-    L('b6', 'Otrzymałem/otrzymałam jasne potwierdzenie rezerwacji.'),
-    L('b7', 'Było jasne, jak zmienić lub anulować rezerwację.'),
-    L('b8', 'Czułem/czułam się bezpiecznie podając swoje dane.'),
-    O('b9', 'Co było największą trudnością w procesie rezerwacji?'),
-    O('b10', 'Czego zabrakło, aby rezerwacja była łatwiejsza?'),
-  ],
-  fintech: [
-    L('f1', 'Strona lub aplikacja była łatwa w obsłudze.'),
-    L('f2', 'Wiedziałem/wiedziałam dokładnie, komu i ile wysyłam lub co potwierdzam.'),
-    L('f3', 'Miałem/miałam kontrolę i mogłem/mogłam zweryfikować dane przed potwierdzeniem.'),
-    L('f4', 'Statusy operacji (w toku, zakończona, błąd) były jasne.'),
-    L('f5', 'Komunikaty bezpieczeństwa i błędów były zrozumiałe.'),
-    L('f6', 'W razie pomyłki mogłem/mogłam cofnąć lub poprawić operację.'),
-    L('f7', 'Ufam, że moje dane i środki są bezpieczne.'),
-    L('f8', 'Logowanie i uwierzytelnianie były jasne i sprawne.'),
-    O('f9', 'Co wzbudziło Twój niepokój lub niepewność?'),
-    O('f10', 'Co było największą trudnością?'),
-  ],
-  public: [
-    L('p1', 'Strona była łatwa w obsłudze.'),
-    L('p2', 'Rozumiałem/rozumiałam swój obowiązek i kolejne kroki, bez wiedzy urzędowej.'),
-    L('p3', 'Język strony był prosty i zrozumiały.'),
-    L('p4', 'Łatwo było znaleźć właściwą usługę lub formularz.'),
-    L('p5', 'Formularz dało się wypełnić bez pomocy innej osoby.'),
-    L('p6', 'Wiedziałem/wiedziałam, jaki jest status mojej sprawy.'),
-    L('p7', 'Komunikaty błędów podpowiadały, jak je poprawić.'),
-    L('p8', 'Strona budzi zaufanie jako oficjalna usługa.'),
-    O('p9', 'Co było najbardziej niejasne lub blokujące?'),
-    O('p10', 'Czego zabrakło, aby załatwić sprawę samodzielnie?'),
   ],
   corporate: [
     L('k1', 'Strona była łatwa w obsłudze.'),
