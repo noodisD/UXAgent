@@ -260,9 +260,11 @@
 
       <div class="confirm-card">
         <div class="confirm-text">
-          {{ t('w3.confirmText', { n: form.persona.numSubjects }) }}
+          <div v-if="runBlockedReason" class="block-reason">⚠ {{ runBlockedReason }}</div>
+          <template v-else>{{ t('w3.confirmText', { n: form.persona.numSubjects }) }}</template>
         </div>
-        <button class="btn-run" :disabled="launching" @click="confirmRun">
+        <button class="btn-run" :disabled="launching || !!runBlockedReason"
+                :title="runBlockedReason || ''" @click="confirmRun">
           {{ launching ? t('w3.starting') : t('w3.confirmRun') }}
         </button>
       </div>
@@ -296,6 +298,16 @@ const form = inject<WizardForm>(FORM_KEY)!
 const { state: app, nextStep, prevStep, goStep, goScreen } = useApp()
 const { start } = useRun()
 const { t } = useI18n()
+
+// A run with an empty/invalid URL used to launch happily and die on
+// Page.goto("") — burning every session. Block it at the button.
+const runBlockedReason = computed<string | null>(() => {
+  const url = (form.experiment.startUrl || '').trim()
+  if (!url) return t('w3.needUrl')
+  if (!/^https?:\/\/.+\..+/i.test(url)) return t('w3.badUrl')
+  if (!(form.persona.generalIntent || '').trim()) return t('w3.needIntent')
+  return null
+})
 
 const launching = ref(false)
 const launchError = ref<string | null>(null)
@@ -625,6 +637,7 @@ async function confirmRun() {
 
 .wiz-footer { position: fixed; left: 240px; right: 0; bottom: 0; background: var(--bg-blur); backdrop-filter: blur(8px); border-top: 1px solid var(--border); padding: 16px 36px; display: flex; justify-content: space-between; align-items: center; }
 .foot-left { display: flex; align-items: center; gap: 10px; }
+.block-reason { color: #a8691a; font-weight: 600; }
 .reset-btn { color: var(--muted-2); }
 .reset-btn:hover { color: #b5564f; border-color: #e0d6d6; }
 .step-count { font-size: 12px; color: var(--faint); }
