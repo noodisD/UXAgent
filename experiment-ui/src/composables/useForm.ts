@@ -60,14 +60,16 @@ Clara prefers comfortable, functional clothing, often choosing items that are ea
           ]
         },
         // Where the persona lives. Without it, tasks like "check availability in
-        // a nearby store" have no anchor and the agent invents a city.
+        // a nearby store" have no anchor and the agent invents a city. Full
+        // addresses (street + postal code) — a bare city is useless for finding
+        // the *nearest* store, and store locators accept postal codes.
         {
           name: 'Miejsce zamieszkania',
           choices: [
-            { name: 'Warszawa', weight: 2 },
-            { name: 'Kraków', weight: 1 },
-            { name: 'średnie miasto (50–200 tys.)', weight: 2 },
-            { name: 'małe miasto lub wieś (do 50 tys.)', weight: 1 },
+            { name: 'ul. Marszałkowska 84/92, 00-514 Warszawa', weight: 2 },
+            { name: 'ul. Długa 14/3, 31-147 Kraków', weight: 2 },
+            { name: 'ul. Piłsudskiego 7, 62-800 Kalisz', weight: 2 },
+            { name: 'ul. Polna 3, 21-400 Łuków', weight: 1 },
           ]
         },
       ]

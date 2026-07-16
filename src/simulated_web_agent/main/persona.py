@@ -97,6 +97,12 @@ async def _generate_one(
                 "Generate a persona using the above examples. The persona should be different from previous personas to ensure diversity.\n"
                 + "The persona should:\n"
                 + "\n".join([f"- have the {k} of {v}" for k, v in sampled.items()])
+                + "\n- include a 'Miejsce zamieszkania:' line in the Demographics"
+                  " section with a SPECIFIC fictional home address: street and"
+                  " number, postal code, and city (e.g. 'ul. Długa 14/3, 31-147"
+                  " Kraków'). It is used to locate the nearest store, so a bare"
+                  " city name is not enough. Invent a plausible address; never"
+                  " use a real person's."
                 + "\nProvide the persona in the same format as the examples."
                 + "\nOnly output the persona, no other text."
             ),
@@ -167,7 +173,13 @@ async def generate_example_persona(
         + (f"Site context: {site_context}\n" if site_context else "")
         + f"\nDemographic dimensions to draw plausible values from:\n{dims_text}\n\n"
         "Write ONE persona tailored to this website and task. Keep the same section "
-        "headings and the same language as the example. Output ONLY the persona text."
+        "headings and the same language as the example.\n"
+        "REQUIRED: the Demographics section must contain a line "
+        "'Miejsce zamieszkania:' with a SPECIFIC fictional home address — street "
+        "and number, postal code, and city (e.g. 'ul. Długa 14/3, 31-147 Kraków'). "
+        "The agent uses it to find the nearest store, so a bare city name is not "
+        "enough. Use a plausible, invented address — never a real person's.\n"
+        "Output ONLY the persona text."
     )
 
     persona = await chat_fn(
@@ -177,6 +189,109 @@ async def generate_example_persona(
         ]
     )
     return persona.strip()
+
+
+async def generate_audit_settings(
+    start_url: str,
+    chat_fn: Callable[..., Awaitable[str]] = gpt.async_chat,
+) -> dict:
+    """Given only a URL, generate sensible wizard defaults for a UX audit run."""
+    cfg = load_cfg()
+    gpt.configure(cfg.llm_provider)
+
+    system = (
+        "You are a UX research expert. Given a website URL, generate sensible audit settings. "
+        "Respond with ONLY valid JSON matching this exact schema:\n"
+        "{\n"
+        '  "general_intent": "string — one concrete task a user would try on this site",\n'
+        '  "num_subjects": integer between 2 and 5,\n'
+        '  "max_steps": integer between 15 and 30,\n'
+        '  "demographics": [\n'
+        '    { "name": "string", "choices": [{ "name": "string", "weight": number }, ...] },\n'
+        "    ...\n"
+        "  ]\n"
+        "}\n"
+        "demographics should have 2-4 dimensions relevant to the site (e.g. Age, Gender, Experience). "
+        "Each dimension should have 2-4 choices with weights that sum to roughly equal proportions. "
+        "Write the general_intent in the same language as the website (Polish for .pl domains)."
+    )
+    user = f"Website URL: {start_url}"
+
+    raw = await chat_fn(messages=[
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ])
+
+    import json as _json
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return _json.loads(raw.strip())
+
+
+async def generate_objectives(
+    example_objective: str,
+    n: int,
+    start_url: str = "",
+    general_intent: str = "",
+    chat_fn: Callable[..., Awaitable[str]] = gpt.async_chat,
+    max_concurrency: int = 8,
+) -> list[str]:
+    """Generate N distinct objectives derived from an example objective.
+
+    Each objective is meaningfully different from the others so concurrent agents
+    explore different user journeys on the same site.
+    """
+    if n <= 0:
+        return []
+    if n == 1:
+        return [example_objective]
+
+    sem = asyncio.Semaphore(max_concurrency)
+    generated: list[str] = []
+    lock = asyncio.Lock()
+
+    async def _one(index: int) -> str:
+        system = (
+            "You generate ONE concise, realistic user objective for a UX research agent "
+            "that will autonomously browse a website. "
+            "The objective must be a single actionable task a real user would attempt "
+            "(e.g. 'Find and purchase a winter jacket under 200 PLN', "
+            "'Compare contract plans and identify the cheapest option for light users'). "
+            "Output ONLY the objective text — no numbering, no extra commentary."
+        )
+        async with lock:
+            seen = list(generated)
+
+        diversity_note = (
+            f"\n\nAlready generated objectives (yours must be clearly different):\n"
+            + "\n".join(f"- {o}" for o in seen)
+            if seen else ""
+        )
+
+        user = (
+            f"Website under test: {start_url or 'N/A'}\n"
+            f"Example objective to use as style/format reference: {example_objective}\n"
+            + (f"General research intent: {general_intent}\n" if general_intent else "")
+            + diversity_note
+            + "\n\nWrite ONE distinct objective for this website. "
+            "Same style and language as the example. Output ONLY the objective."
+        )
+
+        async with sem:
+            result = (await chat_fn(messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ])).strip()
+
+        async with lock:
+            generated.append(result)
+        return result
+
+    tasks = [asyncio.create_task(_one(i)) for i in range(n)]
+    return await asyncio.gather(*tasks)
 
 
 async def generate_personas(

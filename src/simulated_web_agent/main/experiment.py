@@ -110,7 +110,9 @@ def persona_with_location(persona_text: str, home_location: str | None) -> str:
         f"{persona_text}\n\n"
         f"WAŻNE — Twoje miejsce zamieszkania: {loc}.\n"
         f"Gdy szukasz sklepu, punktu odbioru lub sprawdzasz dostępność „w pobliżu”, "
-        f"używaj TEJ lokalizacji ({loc}). Nie wymyślaj innego miasta."
+        f"używaj TEJ lokalizacji. W wyszukiwarkę sklepów wpisz kod pocztowy lub "
+        f"miasto z tego adresu, a następnie wybierz sklep najbliższy temu adresowi. "
+        f"Nie wymyślaj innego miasta ani adresu."
     )
 
 

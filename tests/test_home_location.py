@@ -50,10 +50,21 @@ def test_card_carries_home_location():
 
 
 def test_prompt_states_location_and_forbids_inventing_a_city():
-    out = persona_with_location("Persona: Julia\nTło: studentka", "Kraków")
-    assert "Persona: Julia" in out          # original persona preserved
-    assert "Kraków" in out
+    out = persona_with_location("Persona: Julia\nTło: studentka", "ul. Długa 14/3, 31-147 Kraków")
+    assert "Persona: Julia" in out                      # original persona preserved
+    assert "ul. Długa 14/3, 31-147 Kraków" in out       # full address, not just city
+    assert "kod pocztowy" in out                        # told how to use it in a locator
     assert "Nie wymyślaj innego miasta" in out
+
+
+def test_full_address_demographic_is_extracted_whole():
+    info = {"persona": "Persona: X", "Miejsce zamieszkania": "ul. Polna 3, 21-400 Łuków"}
+    assert extract_home_location(info) == "ul. Polna 3, 21-400 Łuków"
+
+
+def test_address_with_postal_code_parsed_from_persona_text():
+    persona = "Persona: Ala\nMiejsce zamieszkania: ul. Marszałkowska 84/92, 00-514 Warszawa\nTło: x"
+    assert extract_home_location({"persona": persona}) == "ul. Marszałkowska 84/92, 00-514 Warszawa"
 
 
 def test_prompt_unchanged_when_location_unknown():

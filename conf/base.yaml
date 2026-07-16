@@ -70,7 +70,7 @@ environment:
       container_health_check: 3000 # Timeout for container health checks (in milliseconds)
 
     # Sleep configuration (in seconds)
-    sleep_after_action: 2      # Sleep time after each action (helps with page stability)
+    sleep_after_action: 1      # Sleep time after each action (observation already waits for network idle)
 
   # Browser tracing for debugging and analysis
   tracing:
@@ -92,7 +92,7 @@ survey:
 # LLM CONFIGURATION
 # ============================================================================
 # Large Language Model provider settings
-llm_provider: "openai"  # Provider: "openai" | "gemini" (cheapest) | "aws" | "anthropic"
+llm_provider: "gemini"  # Provider: "openai" | "gemini" (cheapest) | "aws" | "anthropic"
 
 # ============================================================================
 # GENERAL SETTINGS
@@ -123,6 +123,7 @@ example_persona: |
   Education: Pursuing a PhD in Computer Science
   Profession: PhD student
   Income: $50,000
+  Miejsce zamieszkania: ul. Długa 14/3, 31-147 Kraków
 
   Financial Situation:
   Clara lives on her stipend as a PhD student and is careful with her spending. She prefers to save money for research-related expenses and invest in her academic pursuits.
