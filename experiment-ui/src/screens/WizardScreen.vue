@@ -271,7 +271,10 @@
 
     <!-- footer nav -->
     <div class="wiz-footer">
-      <button class="btn" :style="{ visibility: app.step === 1 ? 'hidden' : 'visible' }" @click="prevStep">{{ t('wizard.back') }}</button>
+      <div class="foot-left">
+        <button class="btn" :style="{ visibility: app.step === 1 ? 'hidden' : 'visible' }" @click="prevStep">{{ t('wizard.back') }}</button>
+        <button class="btn small reset-btn" @click="onReset" :title="t('wizard.reset.hint')">{{ t('wizard.reset') }}</button>
+      </div>
       <div class="step-count mono">{{ t('wizard.step', { n: app.step }) }}</div>
       <button v-if="app.step < 4" class="btn-primary nav-next" @click="tryNext">{{ t('wizard.continue') }}</button>
       <div v-else class="nav-spacer"></div>
@@ -284,6 +287,7 @@ import { computed, inject } from 'vue'
 import { FORM_KEY, type WizardForm } from '../types'
 import { useApp } from '../composables/useApp'
 import { useRun } from '../composables/useRun'
+import { resetWizardForm } from '../composables/useForm'
 import { useI18n } from '../i18n'
 import { PRESET_KEYS, presetQuestions, type PresetKey } from '../surveyPresets'
 import { ref } from 'vue'
@@ -456,6 +460,12 @@ function writeQuestions(list: Q[]) { questions.value = list }
 function addOpen() { writeQuestions([...questions.value, { id: 'q' + (questions.value.length + 1), type: 'short_text', prompt: 'New open-ended question' }]) }
 function addMC() { writeQuestions([...questions.value, { id: 'q' + (questions.value.length + 1), type: 'multiple_choice', prompt: 'New multiple-choice question', options: ['Option 1', 'Option 2', 'Option 3'] }]) }
 function removeQuestion(i: number) { const l = questions.value.slice(); l.splice(i, 1); writeQuestions(l) }
+function onReset() {
+  resetWizardForm(form)
+  presetKey.value = ''
+  goStep(1)
+}
+
 const presetKeys = PRESET_KEYS
 const presetKey = ref<string>('')
 function onPresetChange(e: Event) {
@@ -614,6 +624,9 @@ async function confirmRun() {
 .launch-err { color: #b5564f; font-size: 13px; padding: 4px 2px; }
 
 .wiz-footer { position: fixed; left: 240px; right: 0; bottom: 0; background: var(--bg-blur); backdrop-filter: blur(8px); border-top: 1px solid var(--border); padding: 16px 36px; display: flex; justify-content: space-between; align-items: center; }
+.foot-left { display: flex; align-items: center; gap: 10px; }
+.reset-btn { color: var(--muted-2); }
+.reset-btn:hover { color: #b5564f; border-color: #e0d6d6; }
 .step-count { font-size: 12px; color: var(--faint); }
 .nav-spacer { width: 120px; }
 </style>

@@ -172,6 +172,48 @@
               </div>
             </div>
 
+            <!-- ISO 9241-11: effectiveness / efficiency / satisfaction (§1.1) -->
+            <div v-if="detail.iso" class="ux-card">
+              <div class="ct">{{ t('pd.iso') }}</div>
+              <div class="iso-grid">
+                <div class="iso-col">
+                  <div class="iso-label mono">{{ t('pd.iso.effectiveness') }}</div>
+                  <div class="iso-main" :style="{ color: oc(detail.outcome).color }">
+                    {{ t('iso.success.' + detail.iso.effectiveness.task_success) }}
+                  </div>
+                  <div class="iso-sub">{{ t('pd.iso.endedReason') }}: {{ t('iso.ended.' + (detail.iso.effectiveness.ended_reason || 'unknown')) }}</div>
+                  <div v-if="detail.iso.effectiveness.critical_error" class="iso-warn">{{ t('pd.iso.criticalError') }}</div>
+                </div>
+                <div class="iso-col">
+                  <div class="iso-label mono">{{ t('pd.iso.efficiency') }}</div>
+                  <div class="iso-main mono">{{ detail.iso.efficiency.step_count ?? '—' }} <span class="iso-unit">{{ t('pd.steps') }}</span></div>
+                  <div class="iso-sub">{{ t('pd.iso.backtracks') }}: {{ detail.iso.efficiency.backtracks }}</div>
+                  <div v-if="detail.iso.efficiency.loop_detected" class="iso-warn">{{ t('pd.iso.loopDetected') }}</div>
+                </div>
+                <div class="iso-col">
+                  <div class="iso-label mono">{{ t('pd.iso.satisfaction') }}</div>
+                  <div class="iso-main mono">
+                    {{ detail.iso.satisfaction.synthetic_seq_1_7 ?? detail.iso.satisfaction.synthetic_score_1_5 ?? '—' }}
+                    <span class="iso-unit">{{ detail.iso.satisfaction.synthetic_seq_1_7 ? 'SEQ /7' : '/5' }}</span>
+                  </div>
+                  <div class="iso-sub">{{ t('pd.iso.frustration') }}: {{ detail.iso.satisfaction.frustration_signals }}</div>
+                  <div class="iso-synth">{{ t('pd.iso.synthetic') }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- bias audit (§11.4) -->
+            <div v-if="detail.biasAudit && detail.biasAudit.flags && detail.biasAudit.flags.length" class="ux-card bias-card">
+              <div class="ct">{{ t('pd.bias') }}</div>
+              <div class="bias-summary">{{ detail.biasAudit.summary }}</div>
+              <div class="col gap8 mt14">
+                <div v-for="(f, i) in detail.biasAudit.flags" :key="i" class="bias-flag">
+                  <span class="bias-type mono">{{ f.issue_type }}</span>
+                  <span class="bias-expl">{{ f.explanation }}</span>
+                </div>
+              </div>
+            </div>
+
             <div class="grid2">
               <div class="ux-card">
                 <div class="ct">{{ t('pd.firstImpression') }}</div>
@@ -212,7 +254,10 @@
                 <div v-for="(h, i) in detail.heuristics" :key="i" class="heur" :style="{ borderLeftColor: SEV[h.severity].color }">
                   <div class="heur-head">
                     <span class="heur-tag mono" :style="{ background: SEV[h.severity].chipBg, color: SEV[h.severity].chipFg }">{{ sevLabel(h.severity) }}</span>
+                    <span v-if="h.severityScore !== undefined" class="sev-score mono">{{ h.severityScore }}</span>
                     <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
+                    <span v-if="h.harnessSuspect" class="verify-chip mono" :title="t('pd.needsVerify.hint')">{{ t('pd.needsVerify') }}</span>
+                    <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence">{{ t('conf.' + h.confidence) }}</span>
                     <span v-if="!h.verified" class="unverified-badge">{{ t('ev.unverified') }}</span>
                   </div>
                   <div class="heur-ev">{{ h.evidence }}</div>
@@ -260,7 +305,10 @@
             <div v-for="(h, i) in filteredFindings" :key="i" class="finding" :style="{ borderLeftColor: SEV[h.severity].color }">
               <div class="finding-head">
                 <span class="heur-tag mono" :style="{ background: SEV[h.severity].chipBg, color: SEV[h.severity].chipFg }">{{ sevLabel(h.severity) }}</span>
+                <span v-if="h.severityScore !== undefined" class="sev-score mono">{{ h.severityScore }}</span>
                 <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
+                <span v-if="h.harnessSuspect" class="verify-chip mono" :title="t('pd.needsVerify.hint')">{{ t('pd.needsVerify') }}</span>
+                <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence">{{ t('conf.' + h.confidence) }}</span>
                 <span class="finding-persona mono">{{ h.persona }}</span>
                 <button class="copy-btn" :class="{ copied: copiedIdx === i }" @click="copyFinding(h, i)">
                   {{ copiedIdx === i ? t('find.copied') : t('find.copy') }}
@@ -610,6 +658,32 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .heur-head, .finding-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .heur-tag { font: 700 10px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; padding: 5px 8px; border-radius: 5px; }
 .heur-name { font: 600 13.5px var(--sans); }
+/* NN/g 0–4 numeric severity */
+.sev-score { font: 700 10px var(--mono); background: #eef1f6; color: var(--muted); border-radius: 4px; padding: 3px 6px; }
+/* harness-suspect findings must never read as confirmed site defects */
+.verify-chip { font: 700 9.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; background: #fbf2e3; color: #a8691a; border: 1px solid #f0e6d4; border-radius: 5px; padding: 3px 7px; cursor: help; }
+.conf-chip { font: 700 9.5px var(--mono); letter-spacing: .04em; text-transform: uppercase; border-radius: 5px; padding: 3px 7px; }
+.conf-chip.high { background: #e9f6ee; color: #1f9d57; }
+.conf-chip.medium { background: #f1f2f4; color: #5b6470; }
+.conf-chip.low { background: #fbf2e3; color: #a8691a; }
+
+/* ISO 9241-11 panel */
+.iso-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.iso-col { background: #fcfcfd; border: 1px solid var(--border-soft); border-radius: 9px; padding: 14px; }
+.iso-label { font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted-2); margin-bottom: 8px; }
+.iso-main { font: 700 18px var(--sans); }
+.iso-main.mono { font-family: var(--mono); }
+.iso-unit { font-size: 12px; color: var(--faint); font-weight: 500; }
+.iso-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.iso-warn { font: 600 11px var(--mono); color: #a8691a; margin-top: 6px; }
+.iso-synth { font: 500 10px var(--mono); color: var(--faint); margin-top: 6px; }
+
+/* bias audit */
+.bias-card { border-color: #f0e6d4; }
+.bias-summary { font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+.bias-flag { display: flex; gap: 10px; align-items: flex-start; background: #fbf6ee; border: 1px solid #f0e6d4; border-radius: 8px; padding: 10px 12px; }
+.bias-type { font: 700 9.5px var(--mono); text-transform: uppercase; color: #a8691a; flex: none; margin-top: 2px; }
+.bias-expl { font-size: 13px; color: var(--ink-2); line-height: 1.45; }
 .finding-persona { margin-left: auto; font-size: 11.5px; color: #9aa0a8; }
 .heur-ev { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; }
 .heur-fix { font-size: 13px; color: var(--ink-2); line-height: 1.5; }

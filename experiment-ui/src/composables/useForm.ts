@@ -143,6 +143,17 @@ export type RunPayload = {
   headless: boolean
 }
 
+/** Restore factory defaults and drop the saved form.
+ * A form saved before a defaults change (e.g. the new "Miejsce zamieszkania"
+ * demographic) otherwise shadows it forever, since localStorage wins on load. */
+export function resetWizardForm(form: WizardForm) {
+  const d = getWizardDefaults()
+  try { localStorage.removeItem('wizard_form') } catch { /* ignore */ }
+  Object.assign(form.experiment, JSON.parse(JSON.stringify(d.experiment)))
+  Object.assign(form.survey, JSON.parse(JSON.stringify(d.survey)))
+  Object.assign(form.persona, JSON.parse(JSON.stringify(d.persona)))
+}
+
 export function buildRunPayload(form: WizardForm): RunPayload {
   // parse questionnaire string to object
   let questionnaireObj: any = {}

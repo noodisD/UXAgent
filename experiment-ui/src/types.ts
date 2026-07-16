@@ -75,6 +75,41 @@ export type FindingEvidence = {
 export type AccessibilityFinding = FindingEvidence & { detail: string }
 export type HeuristicFinding = FindingEvidence & {
   severity: Severity; id: number; evidence: string; recommendation: string
+  /** methodology fields — see METHODOLOGY_PLAN.md §1.3 / §3.1 */
+  harnessSuspect?: boolean
+  requiresHumanCheck?: boolean
+  confidence?: 'high' | 'medium' | 'low'
+  severityScore?: number          // NN/g 0–4; 0 = false positive
+  severityHumanConfirmed?: string | null
+  requiresRealUserValidation?: boolean
+}
+
+export type IsoMetrics = {
+  effectiveness: { task_success: string; goal_state_reached: boolean; critical_error: boolean; ended_reason: string | null }
+  efficiency: { step_count: number | null; backtracks: number; loop_detected: boolean; reached_step_limit: boolean; optimal_path_delta: number | null }
+  satisfaction: {
+    source: string
+    synthetic_score_1_5: number | null
+    synthetic_seq_1_7?: number | null
+    synthetic_confidence_1_7?: number | null
+    frustration_signals: number
+    requires_real_user_validation: boolean
+  }
+}
+
+export type BiasAudit = {
+  flags: { target: string; issue_type: string; explanation: string }[]
+  summary: string
+  bias_detected: boolean
+}
+
+export type CognitiveWalkthroughStep = {
+  step: number
+  right_intent: string
+  action_noticed: string
+  action_result_assoc: string
+  feedback_visible: string
+  note: string
 }
 
 export type PersonaResult = {
@@ -93,6 +128,9 @@ export type PersonaResult = {
   viewport: { findings: { device: string; issue: string; severity: Severity }[] }
   heuristics: HeuristicFinding[]
   survey: { q: string; answer: string; reasoning: string }[]
+  iso?: IsoMetrics | null
+  biasAudit?: BiasAudit | null
+  cognitiveWalkthrough?: CognitiveWalkthroughStep[]
 }
 
 export type RunMeta = {
