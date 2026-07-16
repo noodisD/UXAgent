@@ -25,8 +25,14 @@ log = logging.getLogger(__name__)
 # direct proof the interaction failed on the harness side, not the site side.
 _FALLBACK_MARKERS = ("nie działał", "nie działała", "wybieram inną", "innej drogi")
 
-# A target clicked/typed this many times or more is a stuck-interaction loop:
-# the agent kept retrying because nothing changed — a harness failure signature.
+# The same (action, target) repeated this many times *consecutively* is a stuck
+# loop: the agent retried back-to-back because nothing changed.
+#
+# It must be consecutive. Counting repeats across the whole session flags normal
+# behaviour — in run 2026-07-16_13-41-14 Marcin typed six different queries into
+# the same search box and Michał revisited one category three times; neither is a
+# loop, yet the session-wide rule flagged 7 of Marcin's 9 real findings as
+# "needs verification" and dropped them from the headline counts.
 _REPEAT_THRESHOLD = 3
 
 
@@ -58,14 +64,22 @@ def harness_suspect_steps(store: TraceStore) -> set[int]:
             if i - 1 >= 0:
                 suspect.add(i - 1)
 
-    counts: dict[tuple, int] = {}
-    for a in actions:
-        if a.get("target"):
-            key = (a.get("action"), a.get("target"))
-            counts[key] = counts.get(key, 0) + 1
-    for i, a in enumerate(actions):
-        if a.get("target") and counts.get((a.get("action"), a.get("target")), 0) >= _REPEAT_THRESHOLD:
-            suspect.add(i)
+    # Consecutive runs of the same (action, target).
+    run_start = 0
+    for i in range(1, len(actions) + 1):
+        prev = actions[i - 1]
+        same = (
+            i < len(actions)
+            and prev.get("target")
+            and actions[i].get("target") == prev.get("target")
+            and actions[i].get("action") == prev.get("action")
+        )
+        if same:
+            continue
+        run_len = i - run_start
+        if run_len >= _REPEAT_THRESHOLD and prev.get("target"):
+            suspect.update(range(run_start, i))
+        run_start = i
 
     return suspect
 
@@ -133,8 +147,12 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
             return True
         return False
 
+    # Idempotent: always write both outcomes, so re-running after a rule change
+    # clears stale flags instead of leaving them latched on.
     for f in findings or []:
-        if isinstance(f, dict) and _is_suspect(f):
-            f["harness_suspect"] = True
-            f["requires_human_check"] = True
+        if not isinstance(f, dict):
+            continue
+        suspected = _is_suspect(f)
+        f["harness_suspect"] = suspected
+        f["requires_human_check"] = suspected
     return findings

@@ -43,6 +43,32 @@ def test_repeated_target_loop_is_suspect(tmp_path):
     assert suspect == {0, 1, 2}
 
 
+def test_non_consecutive_repeats_are_not_a_loop(tmp_path):
+    """Marcin (run 2026-07-16_13-41-14) typed six *different* queries into the
+    same search box and Michał revisited one category three times. Normal
+    behaviour — a session-wide repeat count wrongly flagged 7 of 9 real
+    findings. Only back-to-back retries are a stuck loop."""
+    actions = [
+        {"action": "type", "target": "wyszukaj_produkt", "description": "search poduszki"},
+        {"action": "click", "target": "produkt_a", "description": "open"},
+        {"action": "type", "target": "wyszukaj_produkt", "description": "search lampka"},
+        {"action": "click", "target": "produkt_b", "description": "open"},
+        {"action": "type", "target": "wyszukaj_produkt", "description": "search obrus"},
+    ]
+    assert harness_suspect_steps(_store(tmp_path, actions)) == set()
+
+
+def test_consecutive_run_flags_only_that_run(tmp_path):
+    actions = [
+        {"action": "click", "target": "dom", "description": "open"},
+        {"action": "type", "target": "loc", "description": "Warszawa"},
+        {"action": "type", "target": "loc", "description": "Warszawa"},
+        {"action": "type", "target": "loc", "description": "Warszawa"},
+        {"action": "click", "target": "inny", "description": "open"},
+    ]
+    assert harness_suspect_steps(_store(tmp_path, actions)) == {1, 2, 3}
+
+
 def test_normal_session_has_no_suspects(tmp_path):
     actions = [
         {"action": "click", "target": "dom", "description": "open Dom"},
@@ -72,7 +98,20 @@ def test_search_broken_claim_not_flagged_when_search_never_ran(tmp_path):
     findings = [{"heuristic_id": 2, "severity": "poważny", "step": 0,
                  "evidence": "Wyszukiwarka nie przetwarza zapytań."}]
     flag_harness_suspects(store, findings)
-    assert "harness_suspect" not in findings[0]
+    assert findings[0]["harness_suspect"] is False
+
+
+def test_reflagging_clears_a_stale_flag(tmp_path):
+    """Flags are persisted, so a finding carrying a flag from an older/looser
+    rule must be cleared on re-run — not latched on. Run 2026-07-16_13-41-14
+    kept 7 findings marked "needs verification" after the rule was corrected."""
+    store = _store(tmp_path, [{"action": "click", "target": "dom", "description": "open"}])
+    findings = [{"heuristic_id": 1, "severity": "drobny", "step": 0,
+                 "evidence": "real issue",
+                 "harness_suspect": True, "requires_human_check": True}]
+    flag_harness_suspects(store, findings)
+    assert findings[0]["harness_suspect"] is False
+    assert findings[0]["requires_human_check"] is False
 
 
 def test_flag_marks_findings_on_suspect_steps(tmp_path):
@@ -89,4 +128,4 @@ def test_flag_marks_findings_on_suspect_steps(tmp_path):
     flagged = flag_harness_suspects(store, findings)
     assert flagged[0]["harness_suspect"] is True
     assert flagged[0]["requires_human_check"] is True
-    assert "harness_suspect" not in flagged[1]
+    assert flagged[1]["harness_suspect"] is False
