@@ -462,10 +462,6 @@ function onPresetChange(e: Event) {
   const key = (e.target as HTMLSelectElement).value as PresetKey
   presetKey.value = key
   if (!key) return
-  if (questions.value.length > 0 && !confirm(t('w2.preset.confirm'))) {
-    presetKey.value = ''
-    return
-  }
   writeQuestions(presetQuestions(key) as Q[])
 }
 
