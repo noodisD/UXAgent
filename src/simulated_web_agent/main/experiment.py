@@ -94,6 +94,26 @@ def extract_home_location(persona_info: dict) -> str | None:
     return None
 
 
+def persona_with_location(persona_text: str, home_location: str | None) -> str:
+    """Append an explicit home-location instruction to the persona the agent sees.
+
+    The agent only ever reads the freeform persona text, and a demographic row
+    buried in prose is easy to miss — in run 2026-07-09_11-49-36 the personas had
+    no location at all and invented one ("Warszawa", then "Kraków"). Stating it
+    plainly, with the rule to reuse it for any "nearby" lookup, removes the guess.
+    Returns the text unchanged when the location is unknown.
+    """
+    if not home_location or not str(home_location).strip():
+        return persona_text
+    loc = str(home_location).strip()
+    return (
+        f"{persona_text}\n\n"
+        f"WAŻNE — Twoje miejsce zamieszkania: {loc}.\n"
+        f"Gdy szukasz sklepu, punktu odbioru lub sprawdzasz dostępność „w pobliżu”, "
+        f"używaj TEJ lokalizacji ({loc}). Nie wymyślaj innego miasta."
+    )
+
+
 def build_persona_card(persona_info: dict) -> dict:
     """Build a structured persona card from the raw persona_info dict.
 
@@ -209,11 +229,16 @@ async def _run_for_persona_and_intent(
     env_setup_hook: Callable = None,
     env_wait_hook: Callable = None,
 ) -> pathlib.Path:
-    persona = persona_info["persona"]
+    persona_card = build_persona_card(persona_info)
+    # The agent reads only the persona text — state the home location explicitly
+    # so "nearby" lookups are anchored instead of guessed.
+    persona = persona_with_location(persona_info["persona"], persona_card.get("home_location"))
     intent = persona_info["intent"]
     log.info(
         f"\n=== persona (first 200 chars) ===\n{persona[:200]}...\n=== intent ===\n{intent}"
     )
+    if persona_card.get("home_location"):
+        log.info("Persona home location: %s", persona_card["home_location"])
     run_uid = uuid.uuid4().hex[:8]
 
     task_to_use = {
@@ -229,7 +254,7 @@ async def _run_for_persona_and_intent(
         runs_dir = pathlib.Path().resolve() / "runs"
     store = TraceStore(runs_dir / run_name)
     store.write_basic_info(persona_info)
-    store.write_persona_card(build_persona_card(persona_info))
+    store.write_persona_card(persona_card)
     context.run_path.set(store.trace_dir)
     steps_taken = 0
 

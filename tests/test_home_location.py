@@ -5,7 +5,11 @@ and the agent invents a city — observed in run 2026-07-09_11-49-36 where the
 pepco personas carried only age / online-shopping habit / payment preference,
 so Julia typed "Warszawa" and, in the re-run, "Kraków" arbitrarily.
 """
-from simulated_web_agent.main.experiment import build_persona_card, extract_home_location
+from simulated_web_agent.main.experiment import (
+    build_persona_card,
+    extract_home_location,
+    persona_with_location,
+)
 
 
 def test_explicit_field_wins():
@@ -43,3 +47,16 @@ def test_reserved_keys_are_not_treated_as_location():
 def test_card_carries_home_location():
     card = build_persona_card({"persona": "Persona: Ala", "intent": "x", "Miasto": "Łódź"})
     assert card["home_location"] == "Łódź"
+
+
+def test_prompt_states_location_and_forbids_inventing_a_city():
+    out = persona_with_location("Persona: Julia\nTło: studentka", "Kraków")
+    assert "Persona: Julia" in out          # original persona preserved
+    assert "Kraków" in out
+    assert "Nie wymyślaj innego miasta" in out
+
+
+def test_prompt_unchanged_when_location_unknown():
+    text = "Persona: Julia\nTło: studentka"
+    assert persona_with_location(text, None) == text
+    assert persona_with_location(text, "   ") == text
