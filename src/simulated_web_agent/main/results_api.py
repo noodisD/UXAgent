@@ -105,20 +105,31 @@ def _survey_rows(survey: dict, q_prompts: dict[str, str]) -> list[dict]:
     return rows
 
 
+def _as_dict(v) -> dict:
+    """The LLM occasionally returns the wrong JSON shape (observed: a bare list
+    of weakness strings written to first_impression.json). One malformed file
+    must degrade that section, not 500 the whole report."""
+    return v if isinstance(v, dict) else {}
+
+
+def _as_list(v) -> list:
+    return v if isinstance(v, list) else []
+
+
 def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
     store = TraceStore(trace_dir)
-    card = store.read_persona_card() or {}
-    basic = store.read_basic_info()
-    reflection = store.read_objective_reflection() or {}
-    fi = store.read_first_impression() or {}
-    acc = store.read_accessibility_findings() or {}
-    viewport = store.read_viewport_findings() or []
-    heuristics = store.read_heuristic_findings() or []
-    survey = store.read_survey_result() or {}
-    steps = len(store.read_action_trace() or [])
+    card = _as_dict(store.read_persona_card())
+    basic = _as_dict(store.read_basic_info())
+    reflection = _as_dict(store.read_objective_reflection())
+    fi = _as_dict(store.read_first_impression())
+    acc = _as_dict(store.read_accessibility_findings())
+    viewport = _as_list(store.read_viewport_findings())
+    heuristics = [h for h in _as_list(store.read_heuristic_findings()) if isinstance(h, dict)]
+    survey = _as_dict(store.read_survey_result())
+    steps = len(_as_list(store.read_action_trace()))
 
-    demographics = card.get("demographics", {}) or {}
-    fi_scores = fi.get("scores", {}) or {}
+    demographics = _as_dict(card.get("demographics"))
+    fi_scores = _as_dict(fi.get("scores"))
 
     return {
         "id": trace_dir.name,

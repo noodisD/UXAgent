@@ -10,6 +10,7 @@ Aggregated (called after ALL agents finish):
 
 import json
 import logging
+import re
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -56,7 +57,11 @@ def _build_per_agent_json(store: TraceStore) -> dict:
 
     sorted_findings = sorted(heuristic_findings, key=_severity_sort_key)
 
-    severity_counts = Counter(f.get("severity") for f in heuristic_findings)
+    # Headline severity counts exclude harness-suspect findings (interaction
+    # failures wrongly attributed to the site) so they can't inflate the numbers.
+    confirmed = [f for f in heuristic_findings if not f.get("harness_suspect")]
+    severity_counts = Counter(f.get("severity") for f in confirmed)
+    needs_verification = sum(1 for f in heuristic_findings if f.get("harness_suspect"))
 
     return {
         "trace_dir": str(store.trace_dir),
@@ -68,10 +73,12 @@ def _build_per_agent_json(store: TraceStore) -> dict:
             "krytyczny": severity_counts.get("krytyczny", 0),
             "poważny": severity_counts.get("poważny", 0),
             "drobny": severity_counts.get("drobny", 0),
+            "needs_verification": needs_verification,
         },
         "accessibility": accessibility,
         "viewport_findings": viewport,
         "survey_result": survey,
+        "session_result": store.read_session_result(),
     }
 
 
@@ -100,6 +107,8 @@ def _render_md(report: dict) -> str:
 
     # First impression
     fi = report.get("first_impression") or {}
+    if not isinstance(fi, dict):
+        fi = {}  # malformed LLM shape (e.g. a bare list) — skip the section
     if fi and not fi.get("error"):
         h(2, "Pierwsze wrażenie (test 5 sekund)")
         p(f"**Ocena ogólna:** {fi.get('overall_score', '—')}/5")
@@ -228,6 +237,10 @@ Zasady:
 - "outcome" MUSI być dokładnie jedną z wartości: success, partial, failed.
 - "success" = cel w pełni osiągnięty; "partial" = częściowo / z dużym tarciem;
   "failed" = cel nieosiągnięty.
+- Pole "session" opisuje, jak sesja faktycznie się zakończyła (steps_taken,
+  max_steps, ended_reason). Jeśli sesja urwała się po kilku krokach, a cel nie
+  został nawet podjęty, oceń "failed", a w summary wyraźnie zaznacz, że sesja
+  została przerwana przedwcześnie i dane z niej są ograniczone.
 - blockers i wins: maksymalnie po 4 pozycje, krótkie i konkretne. Mogą być puste ([]).
 - Pisz rzeczowo. Nie opisuj metodologii. Zwróć tylko poprawny JSON.\
 """
@@ -288,6 +301,7 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
         "scroll_summary": scroll,
         "form_engagement": form,
         "survey_answers": survey.get("answers", []),
+        "session": store.read_session_result() or {},
     }
 
     try:
@@ -320,6 +334,17 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
 # Aggregated report
 # ---------------------------------------------------------------------------
 
+# Sessions shorter than this carry no meaningful post-session survey signal.
+MIN_VALID_SESSION_STEPS = 5
+
+
+def _is_truncated_session(report: dict) -> bool:
+    """True when the session ended after too few steps to trust its survey."""
+    sr = report.get("session_result") or {}
+    steps = sr.get("steps_taken")
+    return isinstance(steps, int) and steps < MIN_VALID_SESSION_STEPS
+
+
 def aggregate_statistics(reports: list[dict]) -> dict:
     """Compute statistics across all per-agent reports."""
     n = len(reports)
@@ -342,23 +367,52 @@ def aggregate_statistics(reports: list[dict]) -> dict:
             if v is not None:
                 fi_dimension_scores[k].append(float(v))
 
-    # Heuristic findings aggregation
+    # Heuristic findings aggregation — annotate each finding with its persona
+    # so aggregated issues can point back to concrete evidence.
     all_findings: list[dict] = []
     for r in reports:
-        all_findings.extend(r.get("heuristic_findings") or [])
+        trace_dir = str(r.get("trace_dir", ""))
+        persona_dir = trace_dir.replace("\\", "/").rstrip("/").split("/")[-1] if trace_dir else ""
+        m = re.search(r"^Persona:\s*(\S+)", r.get("persona", ""), re.MULTILINE | re.IGNORECASE)
+        persona_name = m.group(1).rstrip(".,;:") if m else persona_dir
+        for f in r.get("heuristic_findings") or []:
+            if isinstance(f, dict):
+                all_findings.append({**f, "_persona_dir": persona_dir, "_persona_name": persona_name})
 
-    severity_totals = Counter(f.get("severity") for f in all_findings)
+    # Exclude harness-suspect findings (interaction failures mis-attributed to
+    # the site) from the headline severity counts and per-heuristic grouping, so
+    # they can't drive the critical/serious verdict or the score. They remain in
+    # all_findings and are surfaced separately as "needs verification".
+    confirmed_findings = [f for f in all_findings if not f.get("harness_suspect")]
+    needs_verification = sum(1 for f in all_findings if f.get("harness_suspect"))
+    severity_totals = Counter(f.get("severity") for f in confirmed_findings)
 
     # Group findings by heuristic_id
     by_heuristic: dict[int, list[dict]] = defaultdict(list)
-    for f in all_findings:
+    for f in confirmed_findings:
         by_heuristic[f.get("heuristic_id", 0)].append(f)
+
+    def _example(f: dict) -> dict:
+        screenshot = f.get("screenshot")
+        return {
+            "persona_dir": f.get("_persona_dir", ""),
+            "persona_name": f.get("_persona_name", ""),
+            "step": f.get("step"),
+            "url": f.get("url", ""),
+            # persona-relative → run-relative so report.html can embed it
+            "screenshot": f"{f.get('_persona_dir')}/{screenshot}" if screenshot else None,
+            "observation_quote": f.get("observation_quote", ""),
+            "evidence": f.get("evidence", ""),
+            "verified": bool(f.get("verified")),
+        }
 
     heuristic_summary = []
     for h_id in sorted(by_heuristic):
         group = by_heuristic[h_id]
         freq = len(group)
         worst_severity = min(group, key=_severity_sort_key).get("severity", "drobny")
+        verified_group = [f for f in group if f.get("verified")]
+        examples = [_example(f) for f in (verified_group or group)[:3]]
         heuristic_summary.append({
             "heuristic_id": h_id,
             "heuristic_name": HEURISTIC_NAMES.get(h_id, ""),
@@ -367,6 +421,8 @@ def aggregate_statistics(reports: list[dict]) -> dict:
             "worst_severity": worst_severity,
             "top_evidence": group[0].get("evidence", ""),
             "top_recommendation": group[0].get("recommendation", ""),
+            "examples": examples,
+            "verified": bool(verified_group),
         })
     heuristic_summary.sort(key=lambda x: (-x["frequency"], SEVERITY_ORDER.get(x["worst_severity"], 99)))
 
@@ -388,10 +444,22 @@ def aggregate_statistics(reports: list[dict]) -> dict:
         if any(v.get("viewport") == "tablet" and v.get("horizontal_overflow") for v in vp):
             tablet_overflow += 1
 
-    # Survey — average numeric answers; collect open-text answers
+    # Survey — average numeric answers; collect open-text answers.
+    # Sessions that ended after only a few steps carry no real experience:
+    # their survey answers are excluded from the averages (first-impression
+    # scores stay in — those are formed on the first page and remain valid).
     survey_scores: dict[str, list[float]] = defaultdict(list)
     survey_open: dict[str, list[str]] = defaultdict(list)
+    excluded_surveys: list[dict] = []
     for r in reports:
+        if _is_truncated_session(r):
+            sr = r.get("session_result") or {}
+            excluded_surveys.append({
+                "persona_dir": str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1],
+                "steps_taken": sr.get("steps_taken"),
+                "reason": f"sesja przerwana po {sr.get('steps_taken')} krokach — ankieta wykluczona ze średnich",
+            })
+            continue
         survey = r.get("survey_result") or {}
         for a in survey.get("answers") or []:
             qid = a.get("question_id", "")
@@ -412,11 +480,12 @@ def aggregate_statistics(reports: list[dict]) -> dict:
             "dimension_avgs": {k: _avg(v) for k, v in fi_dimension_scores.items()},
         },
         "heuristic": {
-            "total_findings": len(all_findings),
+            "total_findings": len(confirmed_findings),
             "severity_counts": {
                 "krytyczny": severity_totals.get("krytyczny", 0),
                 "poważny": severity_totals.get("poważny", 0),
                 "drobny": severity_totals.get("drobny", 0),
+                "needs_verification": needs_verification,
             },
             "by_heuristic": heuristic_summary,
         },
@@ -430,6 +499,8 @@ def aggregate_statistics(reports: list[dict]) -> dict:
         "survey": {
             "avg_scores": {k: _avg(v) for k, v in survey_scores.items()},
             "open_answers": {k: v for k, v in survey_open.items()},
+            "surveys_included": n - len(excluded_surveys),
+            "excluded_surveys": excluded_surveys,
         },
     }
 
@@ -637,7 +708,7 @@ async def generate_aggregated_report(
 
     messages = [{"role": "user", "content": prompt}]
     try:
-        raw = await async_chat(messages, model="large", log=False)
+        raw = await async_chat(messages, model="report", log=False)
         # extract JSON from LLM output
         import regex
         matches = regex.findall(r"\{(?:[^{}]|(?R))*\}", raw, regex.DOTALL)
@@ -645,6 +716,14 @@ async def generate_aggregated_report(
     except Exception as e:
         log.exception("[reporter] aggregate LLM call failed: %s", e)
         narrative = {"error": str(e)}
+
+    _attach_issue_evidence(narrative, stats)
+
+    try:
+        survey_summaries = await _summarize_survey(reports)
+    except Exception as e:
+        log.exception("[reporter] survey summaries failed (non-fatal): %s", e)
+        survey_summaries = []
 
     aggregated = {
         "statistics": stats,
@@ -655,6 +734,7 @@ async def generate_aggregated_report(
         "forms": form_data,
         "task": task_description,
         "website": website_url,
+        "survey_summaries": survey_summaries,
     }
 
     (runs_dir / "aggregated_report.json").write_text(
@@ -669,6 +749,77 @@ async def generate_aggregated_report(
 
     log.info("[reporter] Aggregated report saved to %s", runs_dir)
     return aggregated
+
+
+async def _summarize_survey(reports: list[dict]) -> list[str]:
+    """One Polish 'why agents answered this way' summary per survey question.
+
+    Returns a list aligned to the questionnaire's question order (taken from the
+    first persona's answers — all personas answer the same questionnaire).
+    """
+    per_question: dict[str, list[str]] = {}
+    order: list[str] = []
+    for r in reports:
+        if _is_truncated_session(r):
+            continue
+        survey = r.get("survey_result") or {}
+        for a in survey.get("answers") or []:
+            qid = a.get("question_id")
+            if not qid:
+                continue
+            if qid not in per_question:
+                per_question[qid] = []
+                order.append(qid)
+            per_question[qid].append(
+                f"odpowiedź: {a.get('value', '')} | uzasadnienie: {str(a.get('reason', ''))[:400]}"
+            )
+
+    if not order:
+        return []
+
+    payload = {qid: per_question[qid] for qid in order}
+    system = (
+        "You are a UX researcher. For EACH survey question (keyed by question id), "
+        "synthesise WHY the agents answered the way they did, based on their stated "
+        "reasoning. 2-4 sentences per question, in Polish. "
+        'Respond with ONLY JSON: {"summaries": {"<question_id>": "<polish summary>", ...}}'
+    )
+    raw = await async_chat(
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ],
+        json_mode=True,
+        log=False,
+    )
+    summaries = (json.loads(raw).get("summaries")) or {}
+    return [str(summaries.get(qid, "")) for qid in order]
+
+
+def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
+    """Deterministically join per-heuristic evidence examples onto narrative issues.
+
+    The LLM writes the prose; evidence (screenshots, URLs, observation quotes)
+    comes straight from the trace via aggregate_statistics — never from the LLM.
+    Issues whose heuristic has no verified example are marked verified: False.
+    """
+    if not isinstance(narrative, dict):
+        return
+    by_h = {
+        h.get("heuristic_id"): h
+        for h in ((stats.get("heuristic") or {}).get("by_heuristic") or [])
+    }
+    for key in ("critical_issues", "serious_issues", "minor_issues"):
+        for issue in narrative.get(key) or []:
+            if not isinstance(issue, dict):
+                continue
+            group = by_h.get(issue.get("heuristic_id"))
+            if group:
+                issue["examples"] = group.get("examples", [])
+                issue["verified"] = bool(group.get("verified"))
+            else:
+                issue["examples"] = []
+                issue["verified"] = False
 
 
 def _narrative_from_stats(stats: dict) -> dict:
@@ -741,6 +892,7 @@ def _render_aggregated_md(agg: dict) -> str:
     # Fall back to stats-derived narrative when LLM call failed or returned empty
     if not narr or "error" in narr or not narr.get("executive_summary"):
         narr = _narrative_from_stats(stats)
+        _attach_issue_evidence(narr, stats)
     n = stats.get("participant_count", 0)
 
     def h(level: int, text: str):
@@ -778,9 +930,20 @@ def _render_aggregated_md(agg: dict) -> str:
             h(2, sev_label)
             for issue in issues:
                 h(3, f"H{issue.get('heuristic_id', '?')}: {issue.get('heuristic_name', '')}")
+                if issue.get("verified") is False:
+                    p("⚠ **Niezweryfikowane** — brak dowodu w zapisie sesji.")
                 p(f"**Częstotliwość:** {issue.get('frequency', '')}")
                 p(f"**Wpływ:** {issue.get('impact', '')}")
                 p(f"**Rekomendacja:** {issue.get('recommendation', '')}")
+                for ex in issue.get("examples") or []:
+                    parts = [f"**Dowód:** {ex.get('url', '')}"]
+                    if ex.get("persona_name"):
+                        parts.append(f"(uczestnik {ex['persona_name']}, krok {ex.get('step')})")
+                    if ex.get("screenshot"):
+                        parts.append(f"— zrzut: `{ex['screenshot']}`")
+                    p(" ".join(parts))
+                    if ex.get("observation_quote"):
+                        p(f"> {ex['observation_quote'][:300]}")
 
     # Assessments
     for key, label in [

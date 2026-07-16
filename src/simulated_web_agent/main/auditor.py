@@ -18,6 +18,8 @@ from typing import Any
 
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
+from .attribution import flag_harness_suspects
+from .evidence import resolve_all, resolve_evidence
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -83,7 +85,17 @@ async def _run_first_impression(store: TraceStore) -> dict:
     ]
     try:
         raw = await async_chat(messages, model="small", log=False)
-        return _safe_json(raw, fallback={"raw": raw})
+        result = _safe_json(raw, fallback={"raw": raw})
+        # The model sometimes emits only a fragment (observed: a bare array of
+        # weakness strings). Persisting that shape breaks every downstream
+        # reader, so degrade it here instead.
+        if not isinstance(result, dict):
+            log.warning(
+                "[auditor] first_impression returned %s, expected object; degrading",
+                type(result).__name__,
+            )
+            return {"error": "unexpected_shape", "raw": str(result)[:800]}
+        return result
     except Exception as e:
         log.exception("[auditor] first_impression LLM call failed: %s", e)
         return {"error": str(e)}
@@ -91,14 +103,27 @@ async def _run_first_impression(store: TraceStore) -> dict:
 
 async def _run_heuristic_evaluation(store: TraceStore) -> list:
     memories = store.read_memory_trace()
-    observations = [m["content"] for m in memories if m.get("kind") == "observation"]
     reflections = [m["content"] for m in memories if m.get("kind") == "reflection"]
     action_trace = store.read_action_trace()
-    actions = [
-        a.get("description", json.dumps(a))
-        for a in action_trace
-        if isinstance(a, dict)
-    ]
+
+    # Step-indexed session context so the LLM can cite verifiable steps/URLs.
+    # Without the [step N] markers, claimed step/url values were guesses.
+    n_steps = len(store.read_observations())
+    observations = []
+    for i in range(n_steps):
+        text = store.read_observation_step_text(i).strip().replace("\n", " ")[:400]
+        url = store.url_at_step(i)
+        observations.append(f"[step {i}] {url} :: {text}")
+
+    actions = []
+    for i, a in enumerate(action_trace):
+        if isinstance(a, str):
+            try:
+                a = json.loads(a)
+            except Exception:
+                a = {"description": a}
+        if isinstance(a, dict):
+            actions.append(f"[step {i}] {a.get('description', json.dumps(a))}")
 
     if not observations and not reflections and not actions:
         log.warning("[auditor] No memory data found in %s", store.trace_dir)
@@ -153,6 +178,22 @@ async def run_audit_analysis(store: TraceStore) -> dict:
         _run_heuristic_evaluation(store),
         _run_accessibility_summary(store),
     )
+
+    # Ground every finding in trace evidence (screenshot, URL, observation
+    # quote) and stamp verified/unverified — claims are never trusted as-is.
+    heuristic_findings = resolve_all(store, heuristic_findings)
+    # Flag findings whose cited step lands on a harness interaction failure
+    # (stuck click/type loop) so they aren't shipped as confirmed site defects.
+    heuristic_findings = flag_harness_suspects(store, heuristic_findings)
+    if isinstance(accessibility_findings, dict):
+        accessibility_findings["findings"] = resolve_all(
+            store, accessibility_findings.get("findings") or []
+        )
+        accessibility_findings["font_size_issues"] = resolve_all(
+            store, accessibility_findings.get("font_size_issues") or []
+        )
+    if isinstance(first_impression, dict) and "error" not in first_impression:
+        first_impression = resolve_evidence(store, {**first_impression, "step": 0})
 
     store.write_first_impression(first_impression)
     store.write_heuristic_findings(heuristic_findings)

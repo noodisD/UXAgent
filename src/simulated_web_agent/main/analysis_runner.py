@@ -63,13 +63,30 @@ async def run_all_analyses(
     run_scroll_analysis(store)
     run_form_analysis(store)
 
-    report = await generate_per_agent_report(store)
-    await generate_objective_reflection(store)
+    # Each stage is isolated: a malformed artifact from one pass (e.g. an LLM
+    # returning the wrong JSON shape) must not skip every later pass for this
+    # persona — that silently cost one persona its ISO metrics and bias audit
+    # in run 2026-07-16_13-41-14.
+    report = {}
+    try:
+        report = await generate_per_agent_report(store)
+    except Exception:
+        log.exception("[analysis_runner] per-agent report failed for %s", store.trace_dir)
+    try:
+        await generate_objective_reflection(store)
+    except Exception:
+        log.exception("[analysis_runner] objective reflection failed for %s", store.trace_dir)
 
     # Post-reflection passes: ISO metrics (sync, reads reflection) and the
     # bias audit (LLM, reads findings + reflection rationale).
-    run_iso_metrics(store)
-    await run_bias_audit(store)
+    try:
+        run_iso_metrics(store)
+    except Exception:
+        log.exception("[analysis_runner] iso metrics failed for %s", store.trace_dir)
+    try:
+        await run_bias_audit(store)
+    except Exception:
+        log.exception("[analysis_runner] bias audit failed for %s", store.trace_dir)
 
     log.info("[analysis_runner] Done for %s", store.trace_dir)
     return report
