@@ -66,7 +66,7 @@ After your English reasoning, output a JSON array. Each element must follow this
     "step": 4,
     "evidence": "Po kliknięciu przycisku 'Dodaj do koszyka' nie pojawił się żaden komunikat potwierdzający dodanie produktu.",
     "recommendation": "Dodać animację lub komunikat potwierdzający, że produkt został dodany do koszyka.",
-    "confidence": "high"
+    "confidence": "<high | medium | low — see the rule below; do not default to high>"
   }}
 ]
 ```
@@ -90,5 +90,5 @@ Rules:
 - "url" is REQUIRED — copy the URL shown in the "[step N]" line you are citing.
 - "evidence" must quote or closely paraphrase the observation text of the cited step — never describe things that are not present in the session data.
 - All string values — heuristic_name, evidence, recommendation — must be written in Polish.
-- "confidence" is REQUIRED: "high" only when the evidence directly and unambiguously shows the problem; "medium" when it is a reasonable inference; "low" when the interaction may have failed for reasons other than the site (e.g. the element did not respond). Do not claim "high" for a problem you inferred rather than observed.
+- "confidence" is REQUIRED: "high" only when the observation text you quote directly and unambiguously shows the problem; "medium" when it is a reasonable inference from what you can see; "low" when the interaction may have failed for reasons other than the site (e.g. the element did not respond). Do not claim "high" for a problem you inferred rather than observed — "high" is a claim that the quoted evidence speaks for itself. If most of your findings are "high", you are not discriminating; re-read your own evidence and ask which ones you actually watched happen.
 - Output valid JSON only after your reasoning. Do not wrap it in markdown fences in the final JSON block.

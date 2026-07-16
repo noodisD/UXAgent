@@ -79,6 +79,8 @@ export type HeuristicFinding = FindingEvidence & {
   harnessSuspect?: boolean
   requiresHumanCheck?: boolean
   confidence?: 'high' | 'medium' | 'low'
+  /** set when evidence capped an over-claimed confidence */
+  confidenceCappedBy?: 'harness_suspect' | 'unverified' | null
   severityScore?: number          // NN/g 0–4; 0 = false positive
   severityHumanConfirmed?: string | null
   requiresRealUserValidation?: boolean

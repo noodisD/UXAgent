@@ -19,6 +19,7 @@ from typing import Any
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .attribution import flag_harness_suspects
+from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
 from .trace_store import TraceStore
 
@@ -215,6 +216,9 @@ async def run_audit_analysis(store: TraceStore) -> dict:
     # Flag findings whose cited step lands on a harness interaction failure
     # (stuck click/type loop) so they aren't shipped as confirmed site defects.
     heuristic_findings = flag_harness_suspects(store, heuristic_findings)
+    # Both stamps are now in place, so the LLM's self-reported confidence can be
+    # capped at what they actually support. Must stay after both.
+    heuristic_findings = cap_confidence(heuristic_findings)
     if isinstance(accessibility_findings, dict):
         accessibility_findings["findings"] = resolve_all(
             store, accessibility_findings.get("findings") or []

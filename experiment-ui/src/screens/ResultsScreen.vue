@@ -257,7 +257,7 @@
                     <span v-if="h.severityScore !== undefined" class="sev-score mono">{{ h.severityScore }}</span>
                     <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
                     <span v-if="h.harnessSuspect" class="verify-chip mono" :title="t('pd.needsVerify.hint')">{{ t('pd.needsVerify') }}</span>
-                    <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence">{{ t('conf.' + h.confidence) }}</span>
+                    <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence" :title="h.confidenceCappedBy ? t('conf.capped.' + h.confidenceCappedBy) : undefined">{{ t('conf.' + h.confidence) }}</span>
                     <span v-if="!h.verified" class="unverified-badge">{{ t('ev.unverified') }}</span>
                   </div>
                   <div class="heur-ev">{{ h.evidence }}</div>
@@ -308,7 +308,7 @@
                 <span v-if="h.severityScore !== undefined" class="sev-score mono">{{ h.severityScore }}</span>
                 <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
                 <span v-if="h.harnessSuspect" class="verify-chip mono" :title="t('pd.needsVerify.hint')">{{ t('pd.needsVerify') }}</span>
-                <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence">{{ t('conf.' + h.confidence) }}</span>
+                <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence" :title="h.confidenceCappedBy ? t('conf.capped.' + h.confidenceCappedBy) : undefined">{{ t('conf.' + h.confidence) }}</span>
                 <span class="finding-persona mono">{{ h.persona }}</span>
                 <button class="copy-btn" :class="{ copied: copiedIdx === i }" @click="copyFinding(h, i)">
                   {{ copiedIdx === i ? t('find.copied') : t('find.copy') }}

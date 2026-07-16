@@ -184,6 +184,9 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
                 "harnessSuspect": bool(h.get("harness_suspect")),
                 "requiresHumanCheck": bool(h.get("requires_human_check")),
                 "confidence": h.get("confidence", "medium"),
+                # Set when evidence capped an over-claimed confidence, so the
+                # chip can say why instead of just showing a lower level.
+                "confidenceCappedBy": h.get("confidence_capped_by"),
                 "requiresRealUserValidation": bool(h.get("requires_real_user_validation", True)),
                 "severityScore": severity_score(h),
                 "severityHumanConfirmed": h.get("severity_human_confirmed"),
