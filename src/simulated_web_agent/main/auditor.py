@@ -170,7 +170,9 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
     )
     try:
         raw = await async_chat([{"role": "user", "content": prompt}], model="large", log=False)
-        result = _safe_json(raw, fallback=[])
+        # prefer=list: a stray object in the model's prose must not win here, or
+        # every finding is silently dropped by the isinstance check below.
+        result = _safe_json(raw, fallback=[], prefer=list)
         return result if isinstance(result, list) else []
     except Exception as e:
         log.exception("[auditor] heuristic_evaluate LLM call failed: %s", e)
@@ -184,8 +186,11 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
         urls="\n".join(store.visited_urls()) or "(unknown)",
     )
     try:
-        raw = await async_chat([{"role": "user", "content": prompt}], model="small", log=False)
-        return _safe_json(raw, fallback={"error": "parse_failed", "raw": raw})
+        # "large": scoring accessibility is a judgement, and the cheap tier is
+        # what anchored on the prompt example (62% of scans returned the
+        # example's overall_score of 3).
+        raw = await async_chat([{"role": "user", "content": prompt}], model="large", log=False)
+        return _safe_json(raw, fallback={"error": "parse_failed", "raw": raw}, prefer=dict)
     except Exception as e:
         log.exception("[auditor] accessibility LLM call failed: %s", e)
         return {"error": str(e)}

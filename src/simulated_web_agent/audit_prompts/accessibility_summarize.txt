@@ -33,12 +33,12 @@ VISITED URLS:
 After your English reasoning, output exactly this JSON (no markdown fences in the final block):
 
 {{
-  "overall_score": 3,
-  "summary": "Strona wykazuje umiarkowane problemy z dostępnością. Brakuje opisów alternatywnych dla większości obrazów, a część tekstu jest zbyt mała dla użytkowników z wadami wzroku.",
+  "overall_score": <int 1-5, see the scale below — derive it from what you found>,
+  "summary": "<1–2 sentences IN POLISH describing the accessibility state>",
   "findings": [
     {{
       "category": "Brak tekstu alternatywnego",
-      "severity": "poważny",
+      "severity": "<krytyczny | poważny | drobny — see the scale below>",
       "url": "https://example.com/",
       "step": 1,
       "detail": "Znaleziono 5 obrazów bez atrybutu alt lub z pustym atrybutem alt na stronie głównej.",
@@ -61,10 +61,22 @@ Severity scale (Polish strings):
 - "poważny" — significant barrier for users with disabilities
 - "drobny" — minor issue, edge case
 
-overall_score: integer 1–5 (5 = excellent accessibility, 1 = severe barriers)
+overall_score: integer 1–5, derived from the issues you actually found:
+- 5 — the scan data shows no accessibility barriers at all. Rare; if you listed
+      any findings, this is not a 5.
+- 4 — only "drobny" issues; a user with a disability completes tasks unaided.
+- 3 — several real barriers; the site is usable but costs disabled users effort.
+- 2 — at least one "poważny" barrier blocks a common task.
+- 1 — "krytyczny" barriers; core functions are unreachable.
+
+Do not default to the middle of the scale. The score must be consistent with your
+own findings list — if you report serious barriers, you cannot also score 4 or 5.
 
 Rules:
 - Only report issues with evidence in the snapshot data.
+- "step" is REQUIRED for every finding and font_size_issue — cite the exact step key from the per-step snapshot data where the issue is visible. Findings without a real step citation will be discarded as unverifiable.
+- "url" is REQUIRED — use the URL corresponding to the cited step.
+- "detail" must reference concrete elements/values present in the snapshot data of the cited step.
 - If no accessibility issues are found, return findings: [] and font_size_issues: [].
 - All string values must be in Polish.
 - summary must be 1–2 sentences in Polish.

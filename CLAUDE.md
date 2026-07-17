@@ -113,3 +113,26 @@ wins/priorityFix/outcome), `ux_report.{json,md}`, `action_trace.json`,
 - Dynamic content (persona narratives, findings, report prose) is produced in Polish
   by the LLM; only UI chrome is translated via `i18n.ts`.
 - Add a new analysis pass via the recipe at the top of `main/analysis_runner.py`.
+
+### Prompt examples must not pre-fill a judgement field
+
+Never put a concrete value in a prompt's JSON example for a field the model is
+meant to *decide* — a score, rating, confidence or severity. It copies it, and
+the field silently stops measuring anything. This has bitten three times:
+
+| prompt | example said | what shipped |
+|---|---|---|
+| `first_impression` | `[4,3,2,4,4]` → `3.4` | 71% of 38 scans returned exactly that — including a telecom site |
+| `heuristic_evaluate` | `"confidence": "high"` | 56 of 59 findings "high"; `"low"` never used once |
+| `accessibility_summarize` | `"overall_score": 3` | 62% of 35 scans returned exactly 3 |
+
+Use `<int 1-5, ...>` placeholders instead, and give the scale per-level anchors
+(a competent page is a 3; a 5 must be earned). De-anchoring alone is not enough
+— without calibration the model drifts from a floor to a ceiling of generic
+praise. `tests/test_prompt_anchors.py` guards this; sample data ("11px", a URL)
+and *varied* rubric examples are fine — `memory_importance` shows 9/3/1 and its
+output stays well spread.
+
+Related: a judgement the trace can answer should not be asked of the LLM at all.
+`confidence` is capped by `main/confidence.py` against `verified` (evidence.py)
+and `harness_suspect` (attribution.py) — the model may lower it, never raise it.

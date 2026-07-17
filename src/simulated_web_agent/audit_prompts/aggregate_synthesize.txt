@@ -67,7 +67,7 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
 
 {{
   "executive_summary": "Badanie z udziałem {participant_count} uczestników ujawniło...",
-  "overall_ux_score": 3.2,
+  "overall_ux_score": <float 1.0-5.0 — derive it from the findings below>,
   "score_rationale": "Ocena odzwierciedla...",
   "key_strengths": [
     "Strona skutecznie komunikuje swoją główną ofertę",

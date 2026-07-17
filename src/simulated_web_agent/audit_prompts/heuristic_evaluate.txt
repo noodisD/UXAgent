@@ -61,7 +61,7 @@ After your English reasoning, output a JSON array. Each element must follow this
   {{
     "heuristic_id": 1,
     "heuristic_name": "Widoczność statusu systemu",
-    "severity": "poważny",
+    "severity": "<krytyczny | poważny | drobny — see the scale above>",
     "url": "https://example.com/cart",
     "step": 4,
     "evidence": "Po kliknięciu przycisku 'Dodaj do koszyka' nie pojawił się żaden komunikat potwierdzający dodanie produktu.",
