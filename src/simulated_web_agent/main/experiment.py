@@ -70,28 +70,67 @@ _LOCATION_PATTERNS = (
 )
 
 
+def _strip_markdown_noise(value: str) -> str:
+    """Strip stray markdown left over when a _LOCATION_PATTERNS regex captures
+    across a bold marker. Observed live: the LLM wrote
+    '*   **Miejsce zamieszkania:** ul. Legnicka 78/5, 54-206 Wrocław' instead of
+    the example's plain 'Miejsce zamieszkania: ...'. The closing ** sits right
+    after the colon with no whitespace, so a plain \\s* capture pulled it into
+    the value — the agent's prompt then opened with a stray asterisk."""
+    import re as _re
+
+    return _re.sub(r"^[\*`\s]+|[\*`\s]+$", "", value)
+
+
+def _looks_like_full_address(value: str) -> bool:
+    """True for a street address (postal code or "ul."/"al." prefix), false for
+    a bare city. Mirrors persona.py's twin — kept local since the two modules
+    are otherwise decoupled and this is a two-line check."""
+    import re
+
+    v = value.strip().lower()
+    return bool(re.search(r"\d{2}-\d{3}", v)) or v.startswith(("ul.", "ul ", "al.", "al "))
+
+
 def extract_home_location(persona_info: dict) -> str | None:
     """Where the persona lives — explicit field, a location-ish demographic, or
     a line in the persona text. Returns None when genuinely unknown (never
-    guesses a city)."""
+    guesses a city).
+
+    The "Miejsce zamieszkania" demographic may hold just a city (the wizard's
+    weighted-choice UI does, by design — see persona.py's _looks_like_full_address).
+    In that case persona.py instructs the LLM to invent the specific street
+    address inside the generated persona TEXT instead. So when the demographic
+    is a bare city and the text has a fuller address for the same field, the
+    text wins — a bare city cannot locate the nearest store.
+    """
     import re
 
     explicit = persona_info.get("home_location")
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()
 
+    demo_val = None
     for k, v in persona_info.items():
         if k in _RESERVED_KEYS or not isinstance(v, str) or not v.strip():
             continue
         if any(loc in k.lower() for loc in _LOCATION_KEYS):
-            return v.strip()
+            demo_val = v.strip()
+            break
 
     raw = persona_info.get("persona", "") or ""
+    text_val = None
     for pat in _LOCATION_PATTERNS:
         m = re.search(pat, raw, re.IGNORECASE)
         if m and m.group(1).strip():
-            return m.group(1).strip()
-    return None
+            text_val = _strip_markdown_noise(m.group(1))
+            break
+
+    if text_val and _looks_like_full_address(text_val) and not (
+        demo_val and _looks_like_full_address(demo_val)
+    ):
+        return text_val
+    return demo_val or text_val
 
 
 def persona_with_location(persona_text: str, home_location: str | None) -> str:

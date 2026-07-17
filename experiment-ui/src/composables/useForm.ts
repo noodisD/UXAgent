@@ -60,16 +60,18 @@ Clara prefers comfortable, functional clothing, often choosing items that are ea
           ]
         },
         // Where the persona lives. Without it, tasks like "check availability in
-        // a nearby store" have no anchor and the agent invents a city. Full
-        // addresses (street + postal code) — a bare city is useless for finding
-        // the *nearest* store, and store locators accept postal codes.
+        // a nearby store" have no anchor and the agent invents a city. Just the
+        // city here — typing a full street address to add one option doesn't
+        // scale in this UI. The AI expands it into a specific fictional street
+        // address + postal code at generation time (persona.py), since a bare
+        // city is useless for finding the *nearest* store.
         {
           name: 'Miejsce zamieszkania',
           choices: [
-            { name: 'ul. Marszałkowska 84/92, 00-514 Warszawa', weight: 2 },
-            { name: 'ul. Długa 14/3, 31-147 Kraków', weight: 2 },
-            { name: 'ul. Piłsudskiego 7, 62-800 Kalisz', weight: 2 },
-            { name: 'ul. Polna 3, 21-400 Łuków', weight: 1 },
+            { name: 'Warszawa', weight: 2 },
+            { name: 'Kraków', weight: 2 },
+            { name: 'Kalisz', weight: 2 },
+            { name: 'Łuków', weight: 1 },
           ]
         },
       ]

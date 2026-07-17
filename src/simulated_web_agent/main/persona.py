@@ -37,6 +37,16 @@ def sample_from_cumulative(cumulative):
     return cumulative[-1][1]  # rounding safety
 
 
+_POSTAL_CODE_RE = re.compile(r"\d{2}-\d{3}")
+
+
+def _looks_like_full_address(value: str) -> bool:
+    """True if a demographic value already reads as a street address (has a
+    Polish postal code or a "ul."/"al." street prefix), not just a city name."""
+    v = value.strip().lower()
+    return bool(_POSTAL_CODE_RE.search(v)) or v.startswith(("ul.", "ul ", "al.", "al "))
+
+
 def _prepare_demographics_cumulative(demographics: list[dict[str, Any]]):
     prepped: list[tuple[str, list[tuple[float, str]]]] = []
     for dim in demographics:
@@ -83,6 +93,42 @@ async def _generate_one(
     else:
         example_text = example_persona
 
+    # The "Miejsce zamieszkania" demographic holds a city (e.g. "Kraków") — a
+    # weighted-choice list of full addresses is unreadable and nobody wants to
+    # type "ul. X 14/3, 31-147 Kraków" to add one option. But a bare city is
+    # useless for "find the nearest store" (see test_home_location.py), so the
+    # LLM invents the street + postal code within that city, once, at
+    # generation time — the same way it already invents the rest of the
+    # backstory. A value that already looks like a full address (has "ul." or a
+    # postal code) is left alone, so saved forms / old defaults keep working.
+    residence_key, residence_city = None, None
+    other_lines = []
+    for k, v in sampled.items():
+        if k.strip().lower() == "miejsce zamieszkania" and not _looks_like_full_address(v):
+            residence_key, residence_city = k, v
+        else:
+            other_lines.append(f"- have the {k} of {v}")
+
+    if residence_city:
+        address_instruction = (
+            f"\n- lives in {residence_city}. In the Demographics section, include a"
+            f" 'Miejsce zamieszkania:' line with a SPECIFIC fictional home address"
+            f" WITHIN {residence_city}: a plausible street name and number plus a"
+            f" real-looking postal code for that city (e.g. 'ul. Długa 14/3,"
+            f" 31-147 Kraków' for Kraków). It is used to locate the nearest"
+            f" store, so a bare city name is not enough. Invent the address;"
+            f" never use a real person's."
+        )
+    else:
+        address_instruction = (
+            "\n- include a 'Miejsce zamieszkania:' line in the Demographics"
+            " section with a SPECIFIC fictional home address: street and"
+            " number, postal code, and city (e.g. 'ul. Długa 14/3, 31-147"
+            " Kraków'). It is used to locate the nearest store, so a bare"
+            " city name is not enough. Invent a plausible address; never"
+            " use a real person's."
+        )
+
     persona_msg = [
         {
             "role": "system",
@@ -96,13 +142,8 @@ async def _generate_one(
             "content": (
                 "Generate a persona using the above examples. The persona should be different from previous personas to ensure diversity.\n"
                 + "The persona should:\n"
-                + "\n".join([f"- have the {k} of {v}" for k, v in sampled.items()])
-                + "\n- include a 'Miejsce zamieszkania:' line in the Demographics"
-                  " section with a SPECIFIC fictional home address: street and"
-                  " number, postal code, and city (e.g. 'ul. Długa 14/3, 31-147"
-                  " Kraków'). It is used to locate the nearest store, so a bare"
-                  " city name is not enough. Invent a plausible address; never"
-                  " use a real person's."
+                + "\n".join(other_lines)
+                + address_instruction
                 + "\nProvide the persona in the same format as the examples."
                 + "\nOnly output the persona, no other text."
             ),
