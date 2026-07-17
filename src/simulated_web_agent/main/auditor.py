@@ -139,7 +139,15 @@ async def _run_first_impression(store: TraceStore) -> dict:
                     "persona-specific", store.trace_dir)
         persona = "(brak danych o osobie — oceniaj jako przeciętny pierwszy użytkownik)"
 
-    prompt = _prompts.get("first_impression").format(persona=persona)
+    # Without this, purpose_clarity and every other dimension are judged against
+    # an implicit "this is an online shop" frame — a catalog/store-locator site
+    # like pepco.pl then gets marked down for having no cart. See auditor's
+    # module docstring / CLAUDE.md "site_context" note.
+    site_context = (store.read_basic_info().get("site_context") or "").strip()
+    if not site_context:
+        site_context = "(nie podano — nie zakładaj, że to sklep internetowy; oceniaj wyłącznie na podstawie tego, co widać na zrzucie ekranu)"
+
+    prompt = _prompts.get("first_impression").format(persona=persona, site_context=site_context)
 
     messages = [
         {

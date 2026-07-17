@@ -52,6 +52,12 @@
           <textarea class="ux-input" rows="2" v-model="form.persona.generalIntent"
             :placeholder="t('w1.task.ph')"></textarea>
         </div>
+        <div class="mt16">
+          <label class="ux-label">{{ t('w1.siteContext') }} <span class="opt">{{ t('w1.optional') }}</span></label>
+          <textarea class="ux-input" rows="2" v-model="form.experiment.siteContext"
+            :placeholder="t('w1.siteContext.ph')"></textarea>
+          <div class="card-sub">{{ t('w1.siteContext.hint') }}</div>
+        </div>
         <div class="grid-url mt16">
           <div>
             <label class="ux-label">{{ t('w1.maxSteps') }}</label>
@@ -220,6 +226,7 @@
             <div class="ux-label">{{ t('w3.target') }}</div>
             <div class="mono target-url">{{ form.experiment.startUrl || '—' }}</div>
             <div class="target-intent">{{ form.persona.generalIntent }}</div>
+            <div v-if="form.experiment.siteContext" class="target-intent muted">{{ form.experiment.siteContext }}</div>
             <div class="target-intent">{{ t('w3.slotSummary', { a: autoCount, m: manualCount }) }}</div>
           </div>
           <div class="mini stats">
@@ -291,7 +298,7 @@ import { useApp } from '../composables/useApp'
 import { useRun } from '../composables/useRun'
 import { resetWizardForm } from '../composables/useForm'
 import { useI18n } from '../i18n'
-import { PRESET_KEYS, presetQuestions, type PresetKey } from '../surveyPresets'
+import { PRESET_KEYS, PRESET_SITE_CONTEXT, presetQuestions, type PresetKey } from '../surveyPresets'
 import { ref } from 'vue'
 
 const form = inject<WizardForm>(FORM_KEY)!
@@ -345,6 +352,7 @@ async function fillSettings() {
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
     if (data.general_intent) form.persona.generalIntent = data.general_intent
+    if (data.site_context) form.experiment.siteContext = data.site_context
     if (data.num_subjects) form.persona.numSubjects = data.num_subjects
     if (data.max_steps) form.experiment.maxSteps = data.max_steps
     if (Array.isArray(data.demographics) && data.demographics.length) {
@@ -371,6 +379,7 @@ async function generatePersona() {
         start_url: form.experiment.startUrl,
         general_intent: form.persona.generalIntent,
         demographics: form.persona.demographics,
+        site_context: form.experiment.siteContext,
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -408,6 +417,7 @@ async function generateSlotPersona(i: number) {
         start_url: form.experiment.startUrl,
         general_intent: form.persona.generalIntent,
         demographics: form.persona.demographics,
+        site_context: form.experiment.siteContext,
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -485,6 +495,11 @@ function onPresetChange(e: Event) {
   presetKey.value = key
   if (!key) return
   writeQuestions(presetQuestions(key) as Q[])
+  // Only fill site_context if the user has not written their own — the preset
+  // is a starting draft, not an override of a deliberate description.
+  if (!form.experiment.siteContext.trim()) {
+    form.experiment.siteContext = PRESET_SITE_CONTEXT[key]
+  }
 }
 
 function insertSUS() {
@@ -615,6 +630,7 @@ async function confirmRun() {
 .mini { background: #fcfcfd; border: 1px solid var(--border-soft); border-radius: 10px; padding: 16px; }
 .target-url { font-size: 14px; color: var(--ac); word-break: break-all; }
 .target-intent { font-size: 13.5px; color: var(--ink-2); margin-top: 8px; }
+.target-intent.muted { color: var(--faint); font-size: 12.5px; }
 .stats { display: flex; gap: 24px; }
 .stat { font: 700 26px var(--mono); }
 .stat-l { font-size: 12px; color: var(--muted-2); margin-top: 2px; }

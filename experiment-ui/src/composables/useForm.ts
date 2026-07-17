@@ -79,6 +79,7 @@ Clara prefers comfortable, functional clothing, often choosing items that are ea
       headless: true,
       maxSteps: 25,
       concurrency: 1,
+      siteContext: '',
     },
     survey: {
       questionnaire: ''
@@ -143,6 +144,7 @@ export type RunPayload = {
   concurrency: number
   questionnaire: Record<string, any>
   headless: boolean
+  site_context?: string
 }
 
 /** Restore factory defaults and drop the saved form.
@@ -181,6 +183,7 @@ export function buildRunPayload(form: WizardForm): RunPayload {
     concurrency:    Number(form?.experiment?.concurrency ?? 1),
     questionnaire:  questionnaireObj,
     headless:       Boolean(form?.experiment?.headless ?? true),
+    site_context:   String(form?.experiment?.siteContext ?? '').trim(),
   }
 }
 

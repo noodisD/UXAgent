@@ -29,6 +29,12 @@ export type ExperimentConfig = {
   headless: boolean;
   maxSteps: number; // [1..5000]
   concurrency: number;
+  // What the site actually is (e.g. "product catalog, no online checkout, has
+  // a store locator"). Without it, every judgement pass — first impression,
+  // heuristics, the aggregate narrative, and outcome success/partial/failed —
+  // implicitly assumes an online shop and marks a catalog/locator site down
+  // for lacking a cart it was never meant to have.
+  siteContext: string;
 };
 
 export type SurveyConfig = {

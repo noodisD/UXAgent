@@ -62,10 +62,10 @@ After your English reasoning, output a JSON array. Each element must follow this
     "heuristic_id": 1,
     "heuristic_name": "Widoczność statusu systemu",
     "severity": "<krytyczny | poważny | drobny — see the scale above>",
-    "url": "https://example.com/cart",
+    "url": "https://example.com/search",
     "step": 4,
-    "evidence": "Po kliknięciu przycisku 'Dodaj do koszyka' nie pojawił się żaden komunikat potwierdzający dodanie produktu.",
-    "recommendation": "Dodać animację lub komunikat potwierdzający, że produkt został dodany do koszyka.",
+    "evidence": "Po wpisaniu zapytania w wyszukiwarkę i naciśnięciu Enter strona nie pokazała żadnego wskaźnika ładowania ani wyniku.",
+    "recommendation": "Dodać widoczny wskaźnik ładowania lub natychmiastowy komunikat po wysłaniu zapytania.",
     "confidence": "<high | medium | low — see the rule below; do not default to high>"
   }}
 ]

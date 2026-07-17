@@ -242,6 +242,14 @@ Zasady:
   max_steps, ended_reason). Jeśli sesja urwała się po kilku krokach, a cel nie
   został nawet podjęty, oceń "failed", a w summary wyraźnie zaznacz, że sesja
   została przerwana przedwcześnie i dane z niej są ograniczone.
+- Pole "site_context" opisuje, czym strona faktycznie jest (np. katalog
+  produktów bez zakupów online, wyszukiwarka sklepów stacjonarnych). NIE oceniaj
+  jako "partial" ani "failed" tego, że persona nie mogła wykonać czynności, której
+  ta strona z założenia nie oferuje (np. zakup online na stronie bez koszyka).
+  Jeśli persona dotarła do najbliższego osiągalnego odpowiednika swojego celu
+  zgodnego z tym, czym strona jest (np. znalazła produkt i sklep stacjonarny
+  zamiast kupić online), to jest "success" — nie karz personę za ograniczenie
+  strony, którego nie mogła obejść.
 - blockers i wins: maksymalnie po 4 pozycje, krótkie i konkretne. Mogą być puste ([]).
 - Pisz rzeczowo. Nie opisuj metodologii. Zwróć tylko poprawny JSON.\
 """
@@ -285,6 +293,10 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
     payload = {
         "persona_name": persona_name,
         "objective": persona_card.get("objective", basic.get("intent", "")),
+        # What the site actually is (e.g. "catalog, no online checkout"), so a
+        # persona correctly stopping at the site's real ceiling is not scored
+        # the same as one who got stuck. See _REFLECTION_SYSTEM's site_context rule.
+        "site_context": basic.get("site_context", "") or "(nie podano)",
         "demographics": persona_card.get("demographics", {}),
         "first_impression_score": first_impression.get("overall_score"),
         "first_impression_summary": first_impression.get("clarity_summary", ""),

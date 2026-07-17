@@ -21,6 +21,18 @@ export const PRESET_KEYS = [
 ] as const
 export type PresetKey = typeof PRESET_KEYS[number]
 
+// Draft site_context text per category, used to auto-fill the wizard's "what
+// this site is" field when a preset is picked (only if the user has not typed
+// their own). Choosing "Katalog + lokalizator" already tells us the site has
+// no online checkout — reusing that signal here is what stops a catalog site
+// being judged as a shop in every downstream prompt.
+export const PRESET_SITE_CONTEXT: Record<PresetKey, string> = {
+  ecommerce: 'Sklep internetowy z możliwością zakupu online (koszyk, kasa, płatność).',
+  catalog: 'Katalog produktów z wyszukiwarką sklepów stacjonarnych; brak zakupów online i koszyka.',
+  directory: 'Katalog/portal z listą pozycji (np. firm, ofert, artykułów) bez transakcji online.',
+  corporate: 'Strona firmowa / prezentacja marki; brak katalogu produktów i zakupów online.',
+}
+
 export const SURVEY_PRESETS: Record<PresetKey, PresetQuestion[]> = {
   ecommerce: [
     L('e1', 'Strona była łatwa w obsłudze.'),

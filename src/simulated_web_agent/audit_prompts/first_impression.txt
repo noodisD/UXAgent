@@ -9,6 +9,16 @@ notice first and what they never see at all.
 
 {persona}
 
+## What this site is
+
+{site_context}
+
+Score against what this site actually is, not against a generic online shop.
+A product catalog with a store locator and no online checkout is not failing at
+e-commerce — it was never trying to be one. Do not penalize the absence of a
+cart, a "buy now" button, or a checkout flow unless the site context above says
+the site is meant to sell online.
+
 ## Your task
 
 Reason briefly IN ENGLISH as this person. For EACH dimension, first state what
@@ -19,7 +29,9 @@ done the task.
 
 ## Scoring dimensions (score each 1–5)
 
-- purpose_clarity: Would THIS person immediately understand what the site sells?
+- purpose_clarity: Would THIS person immediately understand what this site is
+  FOR and what they can do here (see "What this site is" above — that may be
+  selling, browsing a catalog, finding a store, or something else entirely)?
   1=completely unclear, 5=immediately obvious
 - navigation_visibility: Are the main navigation options visible to THIS person?
   1=navigation hidden or absent, 5=prominent and intuitive

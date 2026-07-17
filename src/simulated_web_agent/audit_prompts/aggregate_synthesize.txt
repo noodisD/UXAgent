@@ -75,11 +75,11 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
   ],
   "critical_issues": [
     {{
-      "heuristic_id": 3,
-      "heuristic_name": "Kontrola użytkownika i swoboda działania",
+      "heuristic_id": 1,
+      "heuristic_name": "Widoczność statusu systemu",
       "frequency": "hipoteza syntetyczna: zaobserwowano u 8 z 10 symulowanych person",
-      "impact": "Uczestnicy nie mogli wrócić do koszyka po przejściu do kasy.",
-      "recommendation": "Dodać wyraźny przycisk 'Wróć do koszyka' na każdym etapie procesu zakupowego."
+      "impact": "Po wysłaniu zapytania w wyszukiwarce uczestnicy nie widzieli żadnego potwierdzenia ani wskaźnika ładowania.",
+      "recommendation": "Dodać widoczny wskaźnik ładowania i komunikat potwierdzający po wysłaniu zapytania."
     }}
   ],
   "serious_issues": [],
@@ -90,9 +90,9 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
   "priority_recommendations": [
     {{
       "priority": 1,
-      "area": "Proces zakupowy",
-      "action": "Naprawić nawigację w procesie zakupowym, dodając breadcrumbs i przycisk powrotu.",
-      "expected_impact": "Redukcja porzuceń koszyka o szacowane 20–30%."
+      "area": "Wyszukiwanie i nawigacja",
+      "action": "Dodać widoczną informację zwrotną po wysłaniu zapytania w wyszukiwarce.",
+      "expected_impact": "Mniej porzuconych wyszukiwań i mniejsza frustracja przy braku natychmiastowej reakcji strony."
     }}
   ],
   "methodology_note": "Badanie przeprowadzono przy użyciu agentów LLM symulujących rzeczywistych użytkowników. Każdy agent wykonał zadanie: {task_description}. Ocena opiera się na heurystykach Nielsena, teście pierwszego wrażenia (5 sekund), analizie dostępności WCAG 2.1 oraz sprawdzeniu responsywności. UWAGA METODOLOGICZNA: to badanie jakościowe (wykrywanie hipotez problemów), a NIE ilościowy pomiar populacji. Liczby person to symulowane przebiegi, nie reprezentatywna próba użytkowników — nie należy interpretować ich jako odsetka rzeczywistych użytkowników. Wyniki wymagają walidacji z realnymi użytkownikami przed decyzjami produktowymi."

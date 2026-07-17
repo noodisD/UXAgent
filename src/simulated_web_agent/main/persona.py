@@ -204,6 +204,7 @@ async def generate_audit_settings(
         "Respond with ONLY valid JSON matching this exact schema:\n"
         "{\n"
         '  "general_intent": "string — one concrete task a user would try on this site",\n'
+        '  "site_context": "string — one or two sentences on what this site actually IS and does NOT do, e.g. \'Product catalog with a store locator; no online checkout or cart.\' Base this on what you know of the domain, and say plainly what capabilities it lacks so an evaluator does not judge it against features it never offers.",\n'
         '  "num_subjects": integer between 2 and 5,\n'
         '  "max_steps": integer between 15 and 30,\n'
         '  "demographics": [\n'
@@ -213,7 +214,7 @@ async def generate_audit_settings(
         "}\n"
         "demographics should have 2-4 dimensions relevant to the site (e.g. Age, Gender, Experience). "
         "Each dimension should have 2-4 choices with weights that sum to roughly equal proportions. "
-        "Write the general_intent in the same language as the website (Polish for .pl domains)."
+        "Write general_intent and site_context in the same language as the website (Polish for .pl domains)."
     )
     user = f"Website URL: {start_url}"
 
