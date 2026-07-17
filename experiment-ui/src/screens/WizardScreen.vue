@@ -58,7 +58,6 @@
             <option value="">{{ t('w2.preset.choose') }}</option>
             <option v-for="k in presetKeys" :key="k" :value="k">{{ t('w2.preset.' + k) }}</option>
           </select>
-          <div class="card-sub">{{ t('w1.siteContext.hint') }}</div>
         </div>
         <div class="grid-url mt16">
           <div>
