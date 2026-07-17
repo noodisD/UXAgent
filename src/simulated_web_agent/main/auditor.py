@@ -103,9 +103,13 @@ async def _chat_json(messages: list, *, model: str, prefer: type, label: str,
                 label, type(result).__name__, prefer.__name__, attempt, attempts,
             )
         except Exception as e:  # noqa: BLE001 — retry any failure, then report
-            reason = str(e)
-            log.warning("[auditor] %s LLM call failed (attempt %d/%d): %s",
-                        label, attempt, attempts, e)
+            # Include the type: some gateway errors carry an empty message, and
+            # a bare str(e) then degrades the artifact to {"error": ""}, which
+            # says nothing to whoever reads the run later.
+            reason = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            log.warning("[auditor] %s LLM call failed (attempt %d/%d): %s — "
+                        "prompt was %d chars", label, attempt, attempts, reason,
+                        sum(len(str(m.get("content", ""))) for m in messages))
 
     raise _UnusableReply(reason)
 
