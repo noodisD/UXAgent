@@ -54,8 +54,10 @@
         </div>
         <div class="mt16">
           <label class="ux-label">{{ t('w1.siteContext') }} <span class="opt">{{ t('w1.optional') }}</span></label>
-          <textarea class="ux-input" rows="2" v-model="form.experiment.siteContext"
-            :placeholder="t('w1.siteContext.ph')"></textarea>
+          <select class="ux-input" :value="presetKey" @change="onPresetChange">
+            <option value="">{{ t('w2.preset.choose') }}</option>
+            <option v-for="k in presetKeys" :key="k" :value="k">{{ t('w2.preset.' + k) }}</option>
+          </select>
           <div class="card-sub">{{ t('w1.siteContext.hint') }}</div>
         </div>
         <div class="grid-url mt16">
@@ -352,7 +354,10 @@ async function fillSettings() {
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
     if (data.general_intent) form.persona.generalIntent = data.general_intent
-    if (data.site_context) form.experiment.siteContext = data.site_context
+    // NOT data.site_context: siteContext is now driven by the category select
+    // (presetKey), which must always hold one of the 4 known texts or empty —
+    // writing an arbitrary AI sentence here would desync the dropdown from the
+    // text silently applied underneath it.
     if (data.num_subjects) form.persona.numSubjects = data.num_subjects
     if (data.max_steps) form.experiment.maxSteps = data.max_steps
     if (Array.isArray(data.demographics) && data.demographics.length) {
@@ -489,17 +494,26 @@ function onReset() {
 }
 
 const presetKeys = PRESET_KEYS
-const presetKey = ref<string>('')
-function onPresetChange(e: Event) {
-  const key = (e.target as HTMLSelectElement).value as PresetKey
+
+// One category drives both the site-description text (step 1) and the survey
+// question set (step 2) — they were always the same choice ("this is a
+// catalog site") shown twice. siteContext is a plain string, not a select
+// value, so on load we recover the dropdown's position by matching it back
+// against the known preset texts; an old free-typed description (pre-select
+// UI) simply won't match anything and the dropdown shows unselected while the
+// text itself is still sent as-is.
+const presetKey = ref<string>(
+  (Object.entries(PRESET_SITE_CONTEXT) as [PresetKey, string][])
+    .find(([, text]) => text === form.experiment.siteContext)?.[0] ?? ''
+)
+
+function applySitePreset(key: PresetKey | '') {
   presetKey.value = key
-  if (!key) return
-  writeQuestions(presetQuestions(key) as Q[])
-  // Only fill site_context if the user has not written their own — the preset
-  // is a starting draft, not an override of a deliberate description.
-  if (!form.experiment.siteContext.trim()) {
-    form.experiment.siteContext = PRESET_SITE_CONTEXT[key]
-  }
+  form.experiment.siteContext = key ? PRESET_SITE_CONTEXT[key] : ''
+  if (key) writeQuestions(presetQuestions(key) as Q[])
+}
+function onPresetChange(e: Event) {
+  applySitePreset((e.target as HTMLSelectElement).value as PresetKey | '')
 }
 
 function insertSUS() {
