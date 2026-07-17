@@ -41,7 +41,26 @@ chat_router = Router(
         {
             "model_name": "gemini",
             "litellm_params": {
-                "model": "gemini/gemini-2.0-flash",
+                # Thinking is intentionally ON. NOTE: it is not configured here
+                # and must not be — `thinking={"type": "disabled"}` is Anthropic
+                # syntax that litellm silently drops for Vertex, so this entry
+                # used to claim thinking was off while measuring 935/972
+                # completion tokens as reasoning. If you ever want it off, the
+                # params that actually work are reasoning_effort="disable" or
+                # thinkingConfig={"thinkingBudget": 0} — but that changes agent
+                # behaviour everywhere, so make it a deliberate call.
+                "model": "vertex_ai/gemini-2.5-flash",
+            },
+        },
+        {
+            # Lite tier: high-volume mechanical tasks (page transcription in
+            # perceive) — ~40% faster output than flash at lower cost.
+            "model_name": "gemini_lite",
+            "litellm_params": {
+                # flash-lite does not think by default (measured: reasoning=None),
+                # which is what perceive wants. No param needed — the
+                # thinking={"type": "disabled"} that used to sit here was inert.
+                "model": "vertex_ai/gemini-2.5-flash-lite",
             },
         },
         {
@@ -98,7 +117,22 @@ slow_chat_router = Router(
         {
             "model_name": "gemini",
             "litellm_params": {
-                "model": "gemini/gemini-2.0-flash",
+                # Thinking is intentionally ON. NOTE: it is not configured here
+                # and must not be — `thinking={"type": "disabled"}` is Anthropic
+                # syntax that litellm silently drops for Vertex, so this entry
+                # used to claim thinking was off while measuring 935/972
+                # completion tokens as reasoning. If you ever want it off, the
+                # params that actually work are reasoning_effort="disable" or
+                # thinkingConfig={"thinkingBudget": 0} — but that changes agent
+                # behaviour everywhere, so make it a deliberate call.
+                "model": "vertex_ai/gemini-2.5-flash",
+            },
+        },
+        {
+            # Report tier: one-shot final synthesis where quality > latency.
+            "model_name": "gemini_report",
+            "litellm_params": {
+                "model": "vertex_ai/gemini-2.5-pro",
             },
         },
         {
@@ -151,7 +185,7 @@ embed_router = Router(
         },
         {
             "model_name": "gemini",
-            "litellm_params": {"model": "gemini/text-embedding-004"},
+            "litellm_params": {"model": "vertex_ai/text-embedding-004"},
         },
         {
             "model_name": "aws",
@@ -231,7 +265,7 @@ def _extract_json_string(text: str) -> str:
         raise Exception("No JSON object found in the response")
 
 
-@async_retry()
+@async_retry(times=3)
 async def async_chat(
     messages,
     model="small",
@@ -263,29 +297,60 @@ async def async_chat(
     if context.api_call_manager.get() and log:
         context.api_call_manager.get().request.append(messages)
 
-    router = chat_router if model == "small" else slow_chat_router
+    router = chat_router if model in ("small", "lite") else slow_chat_router
     call_kwargs: Dict[str, Any] = dict(**kwargs)
+    call_kwargs.pop("_length_retry", None)
     if enable_thinking:
         router_model = provider + "_thinking"
     else:
         router_model = provider
+    if model == "report":
+        # Dedicated high-quality tier for final report synthesis; falls back to
+        # the provider's default slow model when no _report entry is configured.
+        candidate = provider + "_report"
+        if any(m["model_name"] == candidate for m in router.model_list):
+            router_model = candidate
+    elif model == "lite":
+        # Fast tier for mechanical high-volume tasks (e.g. perceive transcription);
+        # falls back to the provider's default fast model when not configured.
+        candidate = provider + "_lite"
+        if any(m["model_name"] == candidate for m in router.model_list):
+            router_model = candidate
     if json_mode and provider not in ("aws",):
         call_kwargs["response_format"] = {"type": "json_object"}
-    response = await router.acompletion(
-        model=router_model,
-        messages=messages,
-        max_tokens=max_tokens,
-        drop_params=True,  # do not forward unused params, such as thinking for openai
-        **call_kwargs,
-        tools=None,
+    # Bounded call: LiteLLM's implicit request timeout is 600s, which let hung
+    # streams stall an agent for minutes. 120s covers even the largest prompts;
+    # the wait_for is a belt-and-braces cap in case the HTTP layer wedges.
+    response = await asyncio.wait_for(
+        router.acompletion(
+            model=router_model,
+            messages=messages,
+            max_tokens=max_tokens,
+            timeout=120,
+            drop_params=True,  # do not forward unused params, such as thinking for openai
+            **call_kwargs,
+            tools=None,
+        ),
+        timeout=180,
     )
-    content = response.choices[0].message.get("content", "")
+    content = response.choices[0].message.get("content", "") or ""
 
     finish_reason = response.choices[0].finish_reason
     if finish_reason != "stop":
         print("finish_reason:", finish_reason)
         print("content:", content)
         print("response:", response)
+    if finish_reason == "length" and json_mode and max_tokens < 64000:
+        # Truncated JSON is unparseable and retrying with the same cap fails
+        # deterministically — double the output budget (bounded at 64k).
+        return await async_chat(
+            messages,
+            model=model,
+            json_mode=json_mode,
+            log=log,
+            max_tokens=min(max_tokens * 2, 64000),
+            enable_thinking=enable_thinking,
+        )
     # tokens_used = token_counter(model="openai/gpt-5-mini", text=content)
     # print("Output tokens:", tokens_used)
 
@@ -324,6 +389,7 @@ def chat(
 
     router = chat_router if model == "small" else slow_chat_router
     call_kwargs: Dict[str, Any] = dict(**kwargs)
+    call_kwargs.pop("_length_retry", None)
     if enable_thinking:
         call_kwargs["thinking"] = {
             "type": "enabled",

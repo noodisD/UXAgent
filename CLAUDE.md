@@ -38,9 +38,18 @@ Backend tests: `uv run pytest` (in `tests/`).
 
 ## Environment gotchas (important)
 
-- **`.env` required** at repo root with `OPENAI_API_KEY` (and/or `ANTHROPIC_API_KEY`,
-  `GEMINI_API_KEY`, AWS keys, `GOOGLE_PAGESPEED_API_KEY`). Loaded via python-dotenv in
-  `agent/gpt.py`. Without it all LLM calls 500. `llm_provider` is set in `conf/base.yaml`.
+- **`.env` required** at repo root. Loaded via python-dotenv in `agent/gpt.py`;
+  without it every LLM call 500s. `llm_provider: "gemini"` in `conf/base.yaml` is
+  the only provider in use, and it routes through **Vertex AI**, not AI Studio —
+  so the keys that actually matter are:
+  - `GOOGLE_APPLICATION_CREDENTIALS` — **path to a service-account JSON file**.
+    This is a file on disk, not a secret string: copying `.env` to another
+    machine is not enough, the JSON has to come too or every call fails to auth.
+  - `VERTEXAI_PROJECT`, `VERTEXAI_LOCATION`
+  - `GOOGLE_PAGESPEED_API_KEY` for the pagespeed pass.
+
+  `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / AWS keys are only
+  read if you switch `llm_provider`; nothing uses them today.
 - **OneDrive / cloud-synced folder**: `uv sync` / `uv add` must be prefixed with
   `UV_LINK_MODE=copy` (hardlinks fail on OneDrive). Plain `uv run` is fine.
 - **Windows console encoding**: prefix runs with `PYTHONIOENCODING=utf-8` (Polish chars).

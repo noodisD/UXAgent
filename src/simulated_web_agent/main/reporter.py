@@ -311,7 +311,13 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             json_mode=True,
-            model="large",
+            # "report" -> gemini-2.5-pro. This pass decides `outcome`
+            # (success/partial/failed), which iso_metrics turns into
+            # task_success and goal_state_reached — the headline effectiveness
+            # signal — and which bias_audit and the dashboard verdict both read.
+            # Nothing checks it (§4.2), so it is the single most consequential
+            # judgement in the run and belongs on the audit tier.
+            model="report",
         )
         parsed = json.loads(result)
         reflection = _coerce_reflection(parsed, persona_name)
