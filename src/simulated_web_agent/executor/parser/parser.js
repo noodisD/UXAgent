@@ -64,6 +64,14 @@ const parse = () => {
   };
 
   const isVisible = (el) => {
+    // checkVisibility also catches hiding via ANCESTOR opacity:0 /
+    // content-visibility, which the computed-style checks below miss
+    // (opacity is not inherited, so a child of an opacity:0 flyout
+    // reports opacity 1).
+    if (typeof el.checkVisibility === 'function' &&
+        !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+      return false;
+    }
     const style = window.getComputedStyle(el);
     const hidden =
       style.display === 'none' ||
@@ -186,9 +194,19 @@ const parse = () => {
       }
     }
 
-    if (original.closest('[parser-maybe-hoverable="true"]')) {
-      clone.setAttribute('parser-maybe-hoverable', 'true');
-      original.setAttribute('parser-maybe-hoverable', 'true');
+    // initscript.js tags elements that register hover listeners with
+    // data-maybe-hoverable (NOT parser-*, which is cleared each parse).
+    // Skip page-sized containers: frameworks with delegated events tag the
+    // app root, which would mark every element as hoverable.
+    const hoverContainer = original.closest('[data-maybe-hoverable="true"]');
+    if (hoverContainer &&
+        hoverContainer !== document.body &&
+        hoverContainer !== document.documentElement) {
+      const hr = hoverContainer.getBoundingClientRect();
+      if (hr.width * hr.height < window.innerWidth * window.innerHeight * 0.5) {
+        clone.setAttribute('parser-maybe-hoverable', 'true');
+        original.setAttribute('parser-maybe-hoverable', 'true');
+      }
     }
 
     if (tag === 'input' || tag === 'textarea' || original.hasAttribute('contenteditable')) {
@@ -276,7 +294,7 @@ const parse = () => {
     html: result.outerHTML,
     clickable_elements: Array.from(result.querySelectorAll('[parser-clickable="true"]'))
       .map(el => el.getAttribute('parser-semantic-id')),
-    hoverable_elements: Array.from(result.querySelectorAll('[parser-maybe-hoverable="true"]'))
+    hoverable_elements: Array.from(result.querySelectorAll('[parser-maybe-hoverable="true"][parser-semantic-id]'))
       .map(el => el.getAttribute('parser-semantic-id')),
     input_elements: Array.from(result.querySelectorAll('input[parser-semantic-id], textarea[parser-semantic-id], [contenteditable][parser-semantic-id]'))
       .map(el => ({
