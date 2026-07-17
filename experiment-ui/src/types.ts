@@ -145,6 +145,7 @@ export type RunMeta = {
   maxSteps: number | null
   status: string
   pagespeed: { performance: number | null; accessibility: number | null; bestPractices: number | null; seo: number | null }
+  scope?: RunScope | null
 }
 
 export type AggIssueExample = {
@@ -198,7 +199,52 @@ export type AggReport = {
   website?: string
 }
 
-export type RunDetail = { meta: RunMeta; personas: PersonaResult[]; report?: AggReport | null }
+/** §6.1 Scope — what produced the findings. Null for runs made before it was
+ *  recorded; it cannot be reconstructed, so the report says so rather than guess. */
+export type RunScope = {
+  provider?: string
+  models?: Record<string, string | null>
+  prompts_version?: string
+}
+
+/** §6.1 persona x task row. `outcome_source: 'declared'` matters: effectiveness
+ *  is an LLM's verdict on its own run, not an observation (see iso_metrics). */
+export type PersonaTaskRow = {
+  persona: string
+  home_location: string
+  task: string
+  outcome: string | null
+  outcome_source: 'declared'
+  goal_state_reached?: boolean | null
+  steps: number | null
+  backtracks: number | null
+  seq: number | null
+  seq_source: string
+}
+
+/** §6.2 prioritization row. `impact` is derived from reach x task consequence,
+ *  never self-reported — the evidence ships with it so the rule can be checked. */
+export type PriorityRow = {
+  priority: number
+  heuristic_id: number
+  heuristic_name: string
+  severity: string
+  severity_score: number
+  impact: 'high' | 'medium' | 'low'
+  confidence: 'high' | 'medium' | 'low'
+  personas_affected: number
+  participant_count: number
+  blocked: boolean
+  blocked_personas: string[]
+  finding_count: number
+}
+
+export type RunDetail = {
+  meta: RunMeta
+  personas: PersonaResult[]
+  report?: AggReport | null
+  personaTasks?: PersonaTaskRow[]
+}
 
 export type RunHistoryRow = {
   id: string

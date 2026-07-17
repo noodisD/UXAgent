@@ -29,6 +29,62 @@
         </div>
       </section>
 
+      <!-- §6.1 scope: what produced these findings -->
+      <section :id="anchor('scope')" class="sec">
+        <h3 class="sec-title">{{ t('rep.scope') }}</h3>
+        <div v-if="scope" class="scope-grid">
+          <div v-for="s in scopeRows" :key="s.label" class="scope-cell">
+            <div class="scope-label mono">{{ s.label }}</div>
+            <div class="scope-val mono">{{ s.value }}</div>
+          </div>
+        </div>
+        <p v-else class="prose sm muted-prose">{{ t('rep.scope.missing') }}</p>
+      </section>
+
+      <!-- §6.1 methodology + limitations -->
+      <section v-if="narrative.methodology_note" :id="anchor('methodology')" class="sec">
+        <h3 class="sec-title">{{ t('rep.methodology') }}</h3>
+        <p class="prose sm muted-prose">{{ narrative.methodology_note }}</p>
+      </section>
+
+      <!-- §6.1 persona x task -->
+      <section v-if="personaTasks?.length" :id="anchor('personas')" class="sec">
+        <h3 class="sec-title">{{ t('rep.personaTasks') }}</h3>
+        <div class="pt-wrap">
+          <table class="pt">
+            <thead>
+              <tr>
+                <th>{{ t('rep.pt.persona') }}</th>
+                <th>{{ t('rep.pt.task') }}</th>
+                <th>{{ t('rep.pt.outcome') }}</th>
+                <th class="num">{{ t('rep.pt.steps') }}</th>
+                <th class="num">{{ t('rep.pt.backtracks') }}</th>
+                <th class="num">{{ t('rep.pt.seq') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(r, i) in personaTasks" :key="i">
+                <td>
+                  <div class="pt-name">{{ r.persona }}</div>
+                  <div v-if="r.home_location" class="pt-home">{{ r.home_location }}</div>
+                </td>
+                <td class="pt-task">{{ r.task || '—' }}</td>
+                <td>
+                  <span class="pt-outcome" :style="{ color: outcomeColor(r.outcome) }">{{ outcomeLabel(r.outcome) }}</span>
+                  <span class="pt-src mono" :title="t('rep.pt.declaredHint')">{{ t('rep.pt.declared') }}</span>
+                </td>
+                <td class="num mono">{{ r.steps ?? '—' }}</td>
+                <td class="num mono">{{ r.backtracks ?? '—' }}</td>
+                <td class="num mono">
+                  {{ r.seq ?? '—' }}
+                  <span v-if="r.seq != null" class="pt-src mono" :title="t('rep.pt.syntheticHint')">{{ t('rep.pt.synthetic') }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- strengths -->
       <section v-if="narrative.key_strengths?.length" :id="anchor('strengths')" class="sec">
         <h3 class="sec-title">{{ t('rep.strengths') }}</h3>
@@ -42,6 +98,14 @@
       <!-- issues -->
       <section :id="anchor('issues')" class="sec">
         <h3 class="sec-title">{{ t('rep.issuesBySeverity') }}</h3>
+        <!-- §6.1 evidence-status legend: every claim says what backs it -->
+        <div class="legend">
+          <span v-for="l in evidenceLegend" :key="l.key" class="legend-item">
+            <span class="legend-dot" :style="{ background: l.color }"></span>
+            <span class="legend-name">{{ l.label }}</span>
+            <span class="legend-desc">{{ l.desc }}</span>
+          </span>
+        </div>
         <div class="issue-groups">
           <div v-for="g in issueGroups" :key="g.key" class="issue-group">
             <button class="group-head" @click="toggle(g.key)">
@@ -114,11 +178,58 @@
         </div>
       </section>
 
-      <!-- methodology -->
-      <section v-if="narrative.methodology_note" class="sec">
-        <div class="methodology">
-          <span class="ux-label">{{ t('rep.methodology') }}</span>
-          <p class="prose sm muted-prose">{{ narrative.methodology_note }}</p>
+      <!-- §6.2 prioritization: severity x impact x confidence -->
+      <section v-if="priorityRows.length" :id="anchor('prioritization')" class="sec">
+        <h3 class="sec-title">{{ t('rep.prioritization') }}</h3>
+        <p class="prose sm muted-prose">{{ t('rep.prioritization.note') }}</p>
+        <div class="pt-wrap">
+          <table class="pt">
+            <thead>
+              <tr>
+                <th class="num">#</th>
+                <th>{{ t('rep.pri.issue') }}</th>
+                <th>{{ t('rep.pri.severity') }}</th>
+                <th>{{ t('rep.pri.impact') }}</th>
+                <th>{{ t('rep.pri.confidence') }}</th>
+                <th>{{ t('rep.pri.evidence') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in priorityRows" :key="r.heuristic_id">
+                <td class="num mono">{{ r.priority }}</td>
+                <td><span class="issue-h mono">H{{ r.heuristic_id }}</span> {{ r.heuristic_name }}</td>
+                <td><span :style="{ color: sevColorOf(r.severity) }">{{ sevLabel(sevKey(r.severity)) }}</span></td>
+                <td><span class="pill" :class="r.impact">{{ t('rep.level.' + r.impact) }}</span></td>
+                <td><span class="pill" :class="r.confidence">{{ t('rep.level.' + r.confidence) }}</span></td>
+                <!-- the numbers behind `impact`, so the rule can be checked -->
+                <td class="pri-ev mono">
+                  {{ t('rep.pri.reach', { n: r.personas_affected, total: r.participant_count }) }}<template v-if="r.blocked"> · {{ t('rep.pri.blocked') }}</template>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- §6.1 sections that are deliberately out of scope -->
+      <section :id="anchor('outofscope')" class="sec">
+        <h3 class="sec-title">{{ t('rep.outOfScope') }}</h3>
+        <div class="oos">
+          <div v-for="o in outOfScope" :key="o.key" class="oos-item">
+            <div class="oos-name">{{ o.label }}</div>
+            <p class="prose sm muted-prose">{{ o.reason }}</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- §6.1 appendix -->
+      <section :id="anchor('appendix')" class="sec">
+        <h3 class="sec-title">{{ t('rep.appendix') }}</h3>
+        <div class="scope-grid">
+          <div v-for="a in appendixRows" :key="a.label" class="scope-cell">
+            <div class="scope-label mono">{{ a.label }}</div>
+            <div class="scope-val mono">{{ a.value }}</div>
+          </div>
         </div>
       </section>
     </div>
@@ -127,14 +238,68 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { SEV, scoreColor, pageSpeedColor, sevLabel } from '../theme'
+import { SEV, scoreColor, pageSpeedColor, sevLabel, outcomeLabel, OUTCOME } from '../theme'
 import { useApp } from '../composables/useApp'
 import { useI18n } from '../i18n'
-import type { AggIssueExample, AggReport } from '../types'
+import type { AggIssueExample, AggReport, PersonaTaskRow, PriorityRow, RunMeta } from '../types'
 
 const { t } = useI18n()
 const { state: app } = useApp()
-const props = defineProps<{ report: AggReport | null | undefined }>()
+const props = defineProps<{
+  report: AggReport | null | undefined
+  meta?: RunMeta | null
+  personaTasks?: PersonaTaskRow[]
+}>()
+
+// §6.1 scope. Null for runs made before it was recorded — say so rather than
+// print a guess about which model produced the findings.
+const scope = computed(() => props.meta?.scope ?? null)
+const scopeRows = computed(() => {
+  const s = scope.value
+  if (!s) return []
+  const rows = [{ label: t('rep.scope.provider'), value: s.provider ?? '—' }]
+  for (const [tier, model] of Object.entries(s.models ?? {})) {
+    rows.push({ label: t('rep.scope.model.' + tier), value: model ?? '—' })
+  }
+  rows.push({ label: t('rep.scope.prompts'), value: s.prompts_version ?? '—' })
+  return rows
+})
+
+const personaTasks = computed(() => props.personaTasks ?? [])
+
+// §6.2 matrix, computed backend-side (prioritization.py) — impact is derived
+// from reach x task consequence, never asked of the model.
+const priorityRows = computed<PriorityRow[]>(
+  () => (props.report?.statistics?.prioritization as PriorityRow[]) ?? [],
+)
+
+const sevKey = (pl: string) =>
+  ({ krytyczny: 'critical', poważny: 'serious', drobny: 'minor' } as Record<string, string>)[pl] ?? 'minor'
+const sevColorOf = (pl: string) => (SEV as any)[sevKey(pl)]?.color ?? '#6b7280'
+const outcomeColor = (o: string | null) => (OUTCOME as any)[o ?? '']?.color ?? '#6b7280'
+
+// §6.1 evidence-status legend. Each finding already carries these flags; the
+// legend is what lets a reader tell an observation from an inference.
+const evidenceLegend = computed(() => [
+  { key: 'observation', color: '#1f9d57', label: t('rep.ev.observation'), desc: t('rep.ev.observation.d') },
+  { key: 'inference', color: '#b5701a', label: t('rep.ev.inference'), desc: t('rep.ev.inference.d') },
+  { key: 'needs', color: '#d83a34', label: t('rep.ev.needs'), desc: t('rep.ev.needs.d') },
+])
+
+// §6.1 lists these, and this tool does not produce them. An audit report that
+// silently omits its own validation plan overclaims, so name them and say why.
+const outOfScope = computed(() => [
+  { key: 'benchmark', label: t('rep.oos.benchmark'), reason: t('rep.oos.benchmark.d') },
+  { key: 'validation', label: t('rep.oos.validation'), reason: t('rep.oos.validation.d') },
+])
+
+const appendixRows = computed(() => [
+  { label: t('rep.apx.task'), value: props.report?.task || props.meta?.intent || '—' },
+  { label: t('rep.apx.site'), value: props.report?.website || props.meta?.startUrl || '—' },
+  { label: t('rep.apx.personas'), value: String(props.meta?.personaCount ?? personaTasks.value.length) },
+  { label: t('rep.apx.maxSteps'), value: String(props.meta?.maxSteps ?? '—') },
+  { label: t('rep.apx.prompts'), value: scope.value?.prompts_version ?? '—' },
+])
 
 function evUrl(ex: AggIssueExample): string {
   // ex.screenshot is run-relative (<persona_dir>/screenshot/<file>.png)
@@ -182,13 +347,21 @@ const diagnostics = computed(() => {
   return out
 })
 
+// §6.1 order: summary -> scope -> methodology -> persona x task -> findings ->
+// accessibility/assessments -> prioritization -> validation -> appendix.
 const sections = computed(() => [
   { id: 'summary', label: t('rep.toc.summary') },
+  { id: 'scope', label: t('rep.toc.scope') },
+  { id: 'methodology', label: t('rep.toc.methodology') },
+  { id: 'personas', label: t('rep.toc.personas') },
   { id: 'strengths', label: t('rep.toc.strengths') },
   { id: 'issues', label: t('rep.toc.issues') },
   { id: 'assessments', label: t('rep.toc.assessments') },
   { id: 'recommendations', label: t('rep.toc.recommendations') },
+  { id: 'prioritization', label: t('rep.toc.prioritization') },
   { id: 'diagnostics', label: t('rep.toc.diagnostics') },
+  { id: 'outofscope', label: t('rep.toc.outOfScope') },
+  { id: 'appendix', label: t('rep.toc.appendix') },
 ])
 const activeSection = ref('summary')
 const anchor = (id: string) => `report-sec-${id}`
@@ -273,4 +446,44 @@ function fmtScore(v: number | undefined) { return typeof v === 'number' ? v.toFi
 .ev-url { font-size: 12px; color: var(--ac); word-break: break-all; text-decoration: none; }
 .ev-url:hover { text-decoration: underline; }
 .ev-quote { font-size: 12px; font-style: italic; color: var(--muted-2); line-height: 1.45; }
+
+/* §6.1 scope + appendix */
+.scope-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.scope-cell { background: var(--surface-2, #f7f8fa); border: 1px solid var(--line, #e7e9ee); border-radius: 8px; padding: 10px 12px; }
+.scope-label { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted-2); margin-bottom: 4px; }
+.scope-val { font-size: 12px; color: var(--ink-2); word-break: break-all; }
+
+/* §6.1 persona x task + §6.2 prioritization tables */
+.pt-wrap { overflow-x: auto; }
+.pt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pt th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted-2); font-weight: 700; padding: 6px 10px; border-bottom: 1px solid var(--line, #e7e9ee); white-space: nowrap; }
+.pt td { padding: 9px 10px; border-bottom: 1px solid var(--line-soft, #f0f1f4); vertical-align: top; }
+.pt th.num, .pt td.num { text-align: right; }
+.pt-name { font-weight: 600; }
+.pt-home { font-size: 11px; color: var(--muted-2); margin-top: 2px; }
+.pt-task { color: var(--ink-2); max-width: 260px; }
+.pt-outcome { font-weight: 600; }
+/* provenance markers — small, but they are the difference between a claim and
+   an observation, so they sit next to the value they qualify */
+.pt-src { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted-2);
+  border: 1px solid var(--line, #e7e9ee); border-radius: 4px; padding: 1px 4px; margin-left: 6px; cursor: help; }
+.pri-ev { font-size: 11px; color: var(--muted-2); }
+.pill { font-size: 11px; font-weight: 700; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
+.pill.high { background: #fdeceb; color: #d83a34; }
+.pill.medium { background: #fdf3e3; color: #b5701a; }
+.pill.low { background: #eef0f3; color: #6b7280; }
+
+/* §6.1 evidence-status legend */
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 14px; padding: 10px 12px;
+  background: var(--surface-2, #f7f8fa); border: 1px solid var(--line, #e7e9ee); border-radius: 8px; }
+.legend-item { display: flex; align-items: baseline; gap: 6px; font-size: 12px; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+.legend-name { font-weight: 700; color: var(--ink-2); }
+.legend-desc { color: var(--muted-2); }
+
+/* §6.1 sections this tool deliberately does not produce */
+.oos { display: flex; flex-direction: column; gap: 12px; }
+.oos-item { border-left: 3px solid var(--line, #e7e9ee); padding-left: 12px; }
+.oos-name { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
 </style>

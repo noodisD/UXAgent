@@ -13,7 +13,7 @@
 
       <div class="tab-body">
         <!-- REPORT -->
-        <ReportView v-if="tab === 'report'" :report="data.report" />
+        <ReportView v-if="tab === 'report'" :report="data.report" :meta="data.meta" :persona-tasks="data.personaTasks" />
 
         <!-- OVERVIEW -->
         <div v-else-if="tab === 'overview'" class="col">
