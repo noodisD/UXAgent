@@ -141,7 +141,28 @@ SEQ benchmark quoted *as context only*. Never presented as real-user SEQ.
 Files: `main/survey.py` (fixed post-task block), `iso_metrics.py`
 (satisfaction bucket), report.
 
-### 3.4 Web-adapted mobile/accessibility heuristics (§4.2)
+### 3.4 Web-adapted mobile/accessibility heuristics (§4.2) — ✅ DONE (aria-tree half)
+
+Implemented as `main/a11y_checks.py`: deterministic checks parse the captured
+aria snapshot and emit deduplicated, step-cited candidates; the LLM narrates and
+scores them instead of reading the tree itself.
+
+Checks: `image_missing_alt`, `control_missing_name`, `missing_main_landmark`,
+`text_below_12px` (reuses the font sizes viewport_scan already collects).
+
+This also fixed a live defect: the pass used to paste every raw snapshot into
+the prompt (one pepco page = 377k chars; a 30-step session = 1.66M chars /
+~416k tokens), which failed near the context limit and cost one persona their
+whole accessibility audit. Payload is now ~270 chars — 3000–6000x smaller — and
+the pass runs in ~20s instead of minutes.
+
+Still open (needs the live DOM, so it belongs to `viewport_scan.py`):
+tap-target size ≥ ~48px, contrast 4.5:1, drag-only interactions.
+
+Scope honestly: report as "mobile-web heuristics", not native-app WCAG2Mobile
+compliance.
+
+<details><summary>original plan text</summary>
 Extend `viewport_scan.py` checks with web equivalents of the doc's mobile
 criteria: tap-target size ≥ ~48px CSS for interactive elements, text ≥ 12px,
 contrast 4.5:1 (already partly covered), no drag-only interactions detected.
@@ -150,6 +171,7 @@ compliance.
 
 Files: `main/viewport_scan.py`, `main/auditor.py` accessibility prompt,
 report labels.
+</details>
 
 ---
 

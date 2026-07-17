@@ -1,57 +1,83 @@
-You are an accessibility specialist reviewing automated scan data from a website session.
+You are an accessibility specialist writing up the results of an automated scan.
 
-You will receive:
-- A list of accessibility tree snapshots (from Playwright's page.accessibility.snapshot()) — one per step
-- A list of font size samples (CSS computed font sizes found on each page)
-- The URL(s) visited during the session
+The scan has already been run. Deterministic checks parsed the accessibility
+tree of every page the agent visited and extracted the issues below. Your job is
+NOT to find issues — it is to explain the ones that were found, judge how badly
+they hurt real users, and say what to do about them.
 
-## Your task
+## What the checks found
 
-Reason IN ENGLISH about the accessibility issues present. Focus on:
+STEPS SCANNED: {steps_scanned}
 
-1. **Missing alt text** — images without descriptive alt attributes (role="img" nodes with no name, or name="")
-2. **Small text** — font sizes below 16px that appear in body content (not icon fonts or UI chrome)
-3. **Basic contrast signals** — look for low-contrast patterns mentioned in ARIA labels or element names (e.g., light-on-light, grey-on-grey)
-4. **Keyboard navigation** — missing focusable elements, unlabeled buttons, form fields without labels
-5. **ARIA issues** — landmark roles missing, interactive elements without accessible names
-
-Then produce a JSON object with ALL TEXT VALUES IN POLISH.
-
-## Accessibility data
-
-A11Y SNAPSHOTS (per step):
-{a11y_snapshots}
-
-FONT SIZE SAMPLES (per step):
-{font_sizes}
+CANDIDATES (JSON):
+{candidates}
 
 VISITED URLS:
 {urls}
 
+## How to read a candidate
+
+- `check` — what was detected:
+    image_missing_alt      an <img> exposed with no accessible name
+    control_missing_name   a button/link/field a screen reader cannot announce
+    missing_main_landmark  the page has no <main>; every visit re-reads the header
+    text_below_12px        body text smaller than the 12px readability floor
+- `step` — the WORST affected page. Cite THIS in your finding.
+- `max_on_one_page` — how many times it occurs on that page (`step`). **This is
+  the number a user actually meets — use it when describing scale, and attribute
+  it to `step` and no other page.** Other pages have fewer; you do not know how
+  many, so never say the count applies to them.
+- `occurrences` — total matches across all snapshots. A revisited page is
+  scanned again, so this DOUBLE-COUNTS the same elements. It is not a count of
+  distinct broken elements. Never present it as one.
+- `steps_affected` — how many scanned pages showed the issue.
+- `min_size_px` — the smallest font size found (text_below_12px only).
+
+## Your task
+
+Reason IN ENGLISH about what these findings mean for users of screen readers,
+keyboard navigation, and users with low vision. Then produce a JSON object with
+ALL TEXT VALUES IN POLISH.
+
+Rules:
+- Report ONLY what is in CANDIDATES. If the list is empty, return findings: []
+  and font_size_issues: [] and score accordingly. Do not speculate about issues
+  the scan did not detect — you cannot see the page.
+- One candidate becomes at most one finding. Do not split it per occurrence.
+- `text_below_12px` candidates go in "font_size_issues", not "findings".
+- "step" is REQUIRED and must be the candidate's `step`.
+- "url" is REQUIRED — the URL corresponding to that step.
+- "detail" must state the scale honestly, using `max_on_one_page` for the cited
+  step and `steps_affected` for the spread — e.g. "na najgorszej stronie (krok
+  13) 1436 obrazów bez tekstu alternatywnego; problem występuje na 13 z 13
+  przeskanowanych stron". Do NOT attach `max_on_one_page` to any step other than
+  `step`, and do NOT describe the cited page as "strona główna" unless its URL
+  says so — read the URL for that step.
+
 ## Output format
 
-After your English reasoning, output exactly this JSON (no markdown fences in the final block):
+After your English reasoning, output exactly this JSON (no markdown fences):
 
 {{
-  "overall_score": <int 1-5, see the scale below — derive it from what you found>,
+  "overall_score": <int 1-5, see the scale below — derive it from the findings>,
   "summary": "<1–2 sentences IN POLISH describing the accessibility state>",
   "findings": [
     {{
-      "category": "Brak tekstu alternatywnego",
+      "category": "<IN POLISH, e.g. Brak tekstu alternatywnego>",
       "severity": "<krytyczny | poważny | drobny — see the scale below>",
-      "url": "https://example.com/",
-      "step": 1,
-      "detail": "Znaleziono 5 obrazów bez atrybutu alt lub z pustym atrybutem alt na stronie głównej.",
-      "recommendation": "Dodać opisowy tekst alternatywny do wszystkich obrazów produktów."
+      "url": "<URL of the cited step>",
+      "step": <the candidate's step>,
+      "detail": "<IN POLISH: what was found, at what scale, and who it blocks>",
+      "recommendation": "<IN POLISH: the concrete fix>"
     }}
   ],
   "font_size_issues": [
     {{
-      "step": 2,
-      "url": "https://example.com/product",
-      "min_size_found": "11px",
-      "detail": "Tekst opisu produktu ma rozmiar 11px, poniżej zalecanego minimum 16px.",
-      "recommendation": "Zwiększyć rozmiar czcionki opisu do minimum 16px."
+      "step": <the candidate's step>,
+      "url": "<URL of the cited step>",
+      "min_size_found": "<e.g. 11px, from min_size_px>",
+      "detail": "<IN POLISH>",
+      "recommendation": "<IN POLISH>"
     }}
   ]
 }}
@@ -61,22 +87,12 @@ Severity scale (Polish strings):
 - "poważny" — significant barrier for users with disabilities
 - "drobny" — minor issue, edge case
 
-overall_score: integer 1–5, derived from the issues you actually found:
-- 5 — the scan data shows no accessibility barriers at all. Rare; if you listed
-      any findings, this is not a 5.
+overall_score: integer 1–5, derived from the issues actually found:
+- 5 — the checks found nothing. If CANDIDATES is empty, this is a 5.
 - 4 — only "drobny" issues; a user with a disability completes tasks unaided.
-- 3 — several real barriers; the site is usable but costs disabled users effort.
+- 3 — several real barriers; usable but costs disabled users effort.
 - 2 — at least one "poważny" barrier blocks a common task.
 - 1 — "krytyczny" barriers; core functions are unreachable.
 
 Do not default to the middle of the scale. The score must be consistent with your
 own findings list — if you report serious barriers, you cannot also score 4 or 5.
-
-Rules:
-- Only report issues with evidence in the snapshot data.
-- "step" is REQUIRED for every finding and font_size_issue — cite the exact step key from the per-step snapshot data where the issue is visible. Findings without a real step citation will be discarded as unverifiable.
-- "url" is REQUIRED — use the URL corresponding to the cited step.
-- "detail" must reference concrete elements/values present in the snapshot data of the cited step.
-- If no accessibility issues are found, return findings: [] and font_size_issues: [].
-- All string values must be in Polish.
-- summary must be 1–2 sentences in Polish.

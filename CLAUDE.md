@@ -136,3 +136,19 @@ output stays well spread.
 Related: a judgement the trace can answer should not be asked of the LLM at all.
 `confidence` is capped by `main/confidence.py` against `verified` (evidence.py)
 and `harness_suspect` (attribution.py) — the model may lower it, never raise it.
+
+### Decide in code, narrate with the LLM
+
+"Does this image have alt text?" is decidable, so `main/a11y_checks.py` decides
+it and the accessibility prompt only narrates and scores the candidates. Pasting
+raw evidence in and hoping the model finds the issue is how the pass ended up
+with a 1.66M-char (~416k token) prompt that failed near the context limit.
+
+When a check aggregates, the numbers must survive the trip into prose:
+- collapse repeats (a carousel is one defect ×40, not 40 defects);
+- cite the step the number is *true of* — citing first-sighting while reporting
+  the worst page's count made the narrator write "1436 images on step 0" when
+  step 0 had 40. Two true numbers, one fabricated claim;
+- pass step→URL explicitly. `store.visited_urls()` de-duplicates and drops the
+  mapping, so the model guessed the URL — and `resolve_all` only repairs the
+  `url` field, never the prose.

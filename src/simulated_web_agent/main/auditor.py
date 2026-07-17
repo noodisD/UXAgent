@@ -18,6 +18,7 @@ from typing import Any
 
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
+from .a11y_checks import extract_a11y_candidates
 from .attribution import flag_harness_suspects
 from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
@@ -207,11 +208,30 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
         return []
 
 
+def _step_urls(store: TraceStore) -> list[str]:
+    """The URL at each step, positionally — index i is step i's URL."""
+    urls = []
+    for obs in store.read_observations():
+        tabs = obs.get("tabs") or []
+        urls.append((tabs[0].get("url") or "") if tabs else "")
+    return urls
+
+
 async def _run_accessibility_summary(store: TraceStore) -> dict:
+    # Deterministic checks decide what is broken (a11y_checks.py); the LLM only
+    # narrates and scores. Pasting the raw trees here built a 1.66M-char prompt
+    # that failed near the context limit — see a11y_checks for the numbers.
+    scan = extract_a11y_candidates(store)
+    # Step-indexed, not store.visited_urls(): that de-duplicates and drops the
+    # step mapping, so the model had to guess which URL a cited step meant — and
+    # it guessed wrong in prose, where resolve_all cannot correct it.
+    step_urls = "\n".join(
+        f"- step {i}: {url}" for i, url in enumerate(_step_urls(store)) if url
+    ) or "(unknown)"
     prompt = _prompts.get("accessibility_summarize").format(
-        a11y_snapshots=json.dumps(store.read_a11y_snapshots(), ensure_ascii=False, indent=2),
-        font_sizes=json.dumps(store.read_font_sizes(), ensure_ascii=False, indent=2),
-        urls="\n".join(store.visited_urls()) or "(unknown)",
+        candidates=json.dumps(scan["candidates"], ensure_ascii=False, indent=2),
+        steps_scanned=scan["steps_scanned"],
+        urls=step_urls,
     )
     try:
         # "large": scoring accessibility is a judgement, and the cheap tier is
