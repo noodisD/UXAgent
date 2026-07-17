@@ -6,15 +6,35 @@ and satisfaction (synthetic self-report, always labelled as such) — not one
 blended "persona opinion". This module derives those three buckets from the
 trace so the report can present them independently, each tied to its context.
 
-Strongest signal first: effectiveness/efficiency come from the interaction log;
-satisfaction is a synthetic self-report and is flagged accordingly.
+Where each signal actually comes from — read this before trusting one:
+
+  efficiency     the interaction log. step_count, backtracks, fallbacks and
+                 frustration are counted from the trace. Measured.
+  effectiveness  `objective_reflection.outcome` — an LLM's verdict on the
+                 session. NOT measured. `goal_state_reached` is that verdict
+                 mapped to a bool, not a checked goal state. Only `ended_reason`
+                 and `critical_error` come from the harness.
+  satisfaction   a synthetic self-report, labelled as such in the output.
+
+So two of the three buckets rest on an LLM judging its own run. That is a known
+gap, not an oversight: METHODOLOGY_PLAN §4.2 would give each task a
+machine-checkable `success_condition` (URL pattern, element present) that the
+harness verifies at end-of-run, making effectiveness evidence.
+
+Until then, do not present effectiveness as an observed outcome. Checked against
+the 53 stored sessions, the labels agree with the traces (no "success" without a
+product or cart; no "failed" that reached checkout) — but n=2 for success, and
+most of that history predates the harness fixes, so it is weak evidence rather
+than validation.
 """
 from __future__ import annotations
 
 from .attribution import _parse_action, harness_suspect_steps
 from .trace_store import TraceStore
 
-# outcome (from objective_reflection) -> normalized effectiveness verdict
+# The LLM's self-reported outcome -> normalized verdict. `goal_state_reached` is
+# this declaration cast to a bool; nothing checks that the goal state was reached
+# (§4.2). Do not read it as evidence.
 _OUTCOME_MAP = {
     "success": ("success", True),
     "partial": ("partial_success", False),
@@ -50,7 +70,8 @@ def compute_iso_metrics(store: TraceStore) -> dict:
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
     suspect = harness_suspect_steps(store)
 
-    # --- effectiveness (from the interaction outcome, not a declaration) ---
+    # --- effectiveness (an LLM's verdict on its own run — see module docstring;
+    # only ended_reason/critical_error below are harness-observed) ---
     outcome = (reflection.get("outcome") or "").lower()
     task_success, goal_state_reached = _OUTCOME_MAP.get(outcome, ("unknown", False))
     ended_reason = session.get("ended_reason")

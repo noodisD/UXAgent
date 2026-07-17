@@ -22,8 +22,12 @@ Split each persona run's result into the three ISO dimensions instead of one
 blended narrative.
 
 - **effectiveness**: `task_success | partial_success | failed`,
-  `goal_state_reached`, `critical_error` — derived from `session_result.json`
-  + `objective_reflection.outcome`.
+  `goal_state_reached`, `critical_error`. Be precise about provenance, because
+  these do not share one: `task_success` and `goal_state_reached` are both
+  `objective_reflection.outcome` — an LLM's verdict on its own run, not a
+  checked goal state. Only `critical_error`/`ended_reason` come from
+  `session_result.json`. §4.2 is what would make this measured; until it lands,
+  the report must not present effectiveness as observed.
 - **efficiency**: `step_count`, `tap_count`, `backtracks` (count of `back`
   actions), `loop_detected` (already computable —
   `attribution.harness_suspect_steps()` finds exactly these loops),
