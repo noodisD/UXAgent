@@ -72,6 +72,44 @@ def _safe_json(text: str, fallback: Any = None, prefer: type | None = None) -> A
     return fallback
 
 
+class _UnusableReply(Exception):
+    """The LLM never returned JSON of the shape this pass needs."""
+
+
+async def _chat_json(messages: list, *, model: str, prefer: type, label: str,
+                     attempts: int = 2) -> Any:
+    """Ask the LLM for JSON in `prefer` shape, retrying an unusable reply once.
+
+    The model intermittently answers with the wrong shape (observed: a bare
+    array of weakness strings where an object belongs) or raises past
+    async_chat's own transport retry. It does not reproduce — a hand re-run of
+    the same pass succeeds first try — so one more ask is worth far more than a
+    degraded artifact. In run 2026-07-16_13-41-14 a single bad reply cost one
+    persona their entire accessibility audit and 500'd the report.
+
+    Raises _UnusableReply when every attempt fails, so each caller can degrade
+    the way its own artifact requires. Only the bad replies pay for this.
+    """
+    reason = "no_reply"
+    for attempt in range(1, attempts + 1):
+        try:
+            raw = await async_chat(messages, model=model, log=False)
+            result = _safe_json(raw, prefer=prefer)
+            if isinstance(result, prefer):
+                return result
+            reason = "unexpected_shape"
+            log.warning(
+                "[auditor] %s returned %s, expected %s (attempt %d/%d)",
+                label, type(result).__name__, prefer.__name__, attempt, attempts,
+            )
+        except Exception as e:  # noqa: BLE001 — retry any failure, then report
+            reason = str(e)
+            log.warning("[auditor] %s LLM call failed (attempt %d/%d): %s",
+                        label, attempt, attempts, e)
+
+    raise _UnusableReply(reason)
+
+
 # ---------------------------------------------------------------------------
 # Individual analysis functions — accept TraceStore, return parsed result
 # ---------------------------------------------------------------------------
@@ -107,29 +145,14 @@ async def _run_first_impression(store: TraceStore) -> dict:
             ],
         }
     ]
-    # The model intermittently emits only a fragment (observed: a bare array of
-    # weakness strings, roughly 1 reply in 10). Persisting that shape breaks
-    # every downstream reader — it 500'd the report in run 2026-07-16_13-41-14.
-    # The cause is not understood, but it does not reproduce on retry, so ask
-    # once more before degrading. Only the bad replies pay for this.
-    for attempt in (1, 2):
-        try:
-            # "large": scoring a screenshot as a specific person is a nuanced
-            # visual judgement, and it is one call per persona — the cheap tier
-            # anchored on the prompt's example and scored every site alike.
-            raw = await async_chat(messages, model="large", log=False)
-            result = _safe_json(raw, fallback={"raw": raw}, prefer=dict)
-            if isinstance(result, dict):
-                return result
-            log.warning(
-                "[auditor] first_impression returned %s, expected object "
-                "(attempt %d/2)", type(result).__name__, attempt,
-            )
-        except Exception as e:
-            log.exception("[auditor] first_impression LLM call failed: %s", e)
-            return {"error": str(e)}
-
-    return {"error": "unexpected_shape", "raw": str(result)[:800]}
+    try:
+        # "large": scoring a screenshot as a specific person is a nuanced visual
+        # judgement, and it is one call per persona — the cheap tier anchored on
+        # the prompt's example and scored every site alike.
+        return await _chat_json(messages, model="large", prefer=dict,
+                                label="first_impression")
+    except _UnusableReply as e:
+        return {"error": str(e)}
 
 
 async def _run_heuristic_evaluation(store: TraceStore) -> list:
@@ -169,13 +192,14 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
         actions="\n".join(f"- {a}" for a in actions) or "(none)",
     )
     try:
-        raw = await async_chat([{"role": "user", "content": prompt}], model="large", log=False)
         # prefer=list: a stray object in the model's prose must not win here, or
-        # every finding is silently dropped by the isinstance check below.
-        result = _safe_json(raw, fallback=[], prefer=list)
-        return result if isinstance(result, list) else []
-    except Exception as e:
-        log.exception("[auditor] heuristic_evaluate LLM call failed: %s", e)
+        # every finding is dropped and the audit looks cleanly empty.
+        return await _chat_json([{"role": "user", "content": prompt}],
+                                model="large", prefer=list,
+                                label="heuristic_evaluate")
+    except _UnusableReply:
+        log.error("[auditor] heuristic_evaluate unusable for %s — no findings "
+                  "will be reported for this persona", store.trace_dir)
         return []
 
 
@@ -189,10 +213,10 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
         # "large": scoring accessibility is a judgement, and the cheap tier is
         # what anchored on the prompt example (62% of scans returned the
         # example's overall_score of 3).
-        raw = await async_chat([{"role": "user", "content": prompt}], model="large", log=False)
-        return _safe_json(raw, fallback={"error": "parse_failed", "raw": raw}, prefer=dict)
-    except Exception as e:
-        log.exception("[auditor] accessibility LLM call failed: %s", e)
+        return await _chat_json([{"role": "user", "content": prompt}],
+                                model="large", prefer=dict,
+                                label="accessibility_summarize")
+    except _UnusableReply as e:
         return {"error": str(e)}
 
 
