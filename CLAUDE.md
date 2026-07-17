@@ -137,6 +137,25 @@ Related: a judgement the trace can answer should not be asked of the LLM at all.
 `confidence` is capped by `main/confidence.py` against `verified` (evidence.py)
 and `harness_suspect` (attribution.py) — the model may lower it, never raise it.
 
+### LLM tiers: what `model=` actually selects
+
+`llm_provider: "gemini"` is the only provider in use (`conf/base.yaml`). `gpt.py`
+is a legacy filename, not OpenAI; the openai/aws/anthropic router entries are
+dormant config. Under gemini the `model=` argument to `async_chat` resolves to:
+
+| `model=` | actual model | used by |
+|---|---|---|
+| `"lite"` | `gemini-2.5-flash-lite` | `agent.py` perceive (high-volume) |
+| `"small"` | `gemini-2.5-flash` | most passes |
+| `"large"` | `gemini-2.5-flash` | **identical to `small` — buys nothing** |
+| `"report"` | `gemini-2.5-pro` | `reporter.py` aggregate synthesis |
+
+`small` and `large` pick different *routers*, but both routers map `gemini` to
+the same model, so the distinction is a no-op here — it only means something for
+providers we don't use. Do not "upgrade a pass to the large tier" and expect a
+better answer; I did, and claimed it fixed anchoring when the prompt rewrite had
+done all the work. **`"report"` is the only real quality lever.**
+
 ### Decide in code, narrate with the LLM
 
 "Does this image have alt text?" is decidable, so `main/a11y_checks.py` decides

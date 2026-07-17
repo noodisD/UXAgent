@@ -151,9 +151,11 @@ async def _run_first_impression(store: TraceStore) -> dict:
         }
     ]
     try:
-        # "large": scoring a screenshot as a specific person is a nuanced visual
-        # judgement, and it is one call per persona — the cheap tier anchored on
-        # the prompt's example and scored every site alike.
+        # NB "large" == "small" under gemini (both vertex_ai/gemini-2.5-flash);
+        # only "lite" and "report" resolve to a different model. This tier does
+        # not buy quality today — the persona-independence fix came from the
+        # prompt, not from here. "report" (gemini-2.5-pro) is the real lever if
+        # this judgement ever needs a stronger model.
         return await _chat_json(messages, model="large", prefer=dict,
                                 label="first_impression")
     except _UnusableReply as e:
@@ -234,9 +236,8 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
         urls=step_urls,
     )
     try:
-        # "large": scoring accessibility is a judgement, and the cheap tier is
-        # what anchored on the prompt example (62% of scans returned the
-        # example's overall_score of 3).
+        # See _run_first_impression: "large" is not a stronger model under
+        # gemini. The 62%-return-the-example anchoring was fixed by the prompt.
         return await _chat_json([{"role": "user", "content": prompt}],
                                 model="large", prefer=dict,
                                 label="accessibility_summarize")
