@@ -144,6 +144,13 @@ it and the accessibility prompt only narrates and scores the candidates. Pasting
 raw evidence in and hoping the model finds the issue is how the pass ended up
 with a 1.66M-char (~416k token) prompt that failed near the context limit.
 
+The same split runs live-DOM checks in `main/viewport_scan.py` (tap targets,
+contrast, drag) — they need computed style and layout, so they cannot come off
+the aria tree. If you add a check there, encode the standard's exceptions too:
+skipping the SC 2.5.8 spacing exception turned 4 real tap-target failures on
+pepco.pl into 27 reported ones. And keep normative separate from advisory —
+24×24 is WCAG, 48×48 is guidance; merging them asserts a failure that isn't one.
+
 When a check aggregates, the numbers must survive the trip into prose:
 - collapse repeats (a carousel is one defect ×40, not 40 defects);
 - cite the step the number is *true of* — citing first-sighting while reporting

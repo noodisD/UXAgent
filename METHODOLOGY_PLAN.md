@@ -141,7 +141,7 @@ SEQ benchmark quoted *as context only*. Never presented as real-user SEQ.
 Files: `main/survey.py` (fixed post-task block), `iso_metrics.py`
 (satisfaction bucket), report.
 
-### 3.4 Web-adapted mobile/accessibility heuristics (§4.2) — ✅ DONE (aria-tree half)
+### 3.4 Web-adapted mobile/accessibility heuristics (§4.2) — ✅ DONE
 
 Implemented as `main/a11y_checks.py`: deterministic checks parse the captured
 aria snapshot and emit deduplicated, step-cited candidates; the LLM narrates and
@@ -156,11 +156,21 @@ the prompt (one pepco page = 377k chars; a 30-step session = 1.66M chars /
 whole accessibility audit. Payload is now ~270 chars — 3000–6000x smaller — and
 the pass runs in ~20s instead of minutes.
 
-Still open (needs the live DOM, so it belongs to `viewport_scan.py`):
-tap-target size ≥ ~48px, contrast 4.5:1, drag-only interactions.
+The live-DOM half is in `main/viewport_scan.py`, measured at mobile and tablet:
+tap-target size (SC 2.5.8, incl. the spacing exception), text contrast
+(SC 1.4.3 AA, 4.5:1 / 3:1 large), drag-only interactions (SC 2.5.7).
 
-Scope honestly: report as "mobile-web heuristics", not native-app WCAG2Mobile
-compliance.
+Scope honestly — **mobile-web heuristics, not WCAG conformance**, and the report
+must not overstate:
+- 24×24 is normative; 48×48 is Material/HIG advice and is a separate advisory
+  bucket. A 30px button is not a WCAG failure.
+- The SC 2.5.8 spacing exception is implemented. Without it pepco.pl reported 27
+  tap-target "failures"; 23 were well-spaced links that conform. The real number
+  is 4 — the 12×12 carousel dots.
+- Contrast over background images/gradients, and translucent layers needing
+  compositing, are counted `undetermined`, never scored.
+- SC 2.5.7 needs the *absence* of a pointer alternative, which is not
+  observable: drag affordances carry `requires_human_check`.
 
 <details><summary>original plan text</summary>
 Extend `viewport_scan.py` checks with web equivalents of the doc's mobile

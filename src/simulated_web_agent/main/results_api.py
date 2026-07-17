@@ -90,6 +90,47 @@ def _viewport_rows(viewport: list[dict]) -> list[dict]:
             txt = (sf.get("text") or "").strip()
             label = f'Small font {sf.get("size")}px' + (f': "{txt[:40]}"' if txt else "")
             rows.append({"device": device, "issue": label, "severity": "minor"})
+
+        # §3.4 live-DOM checks. `None` means the page never loaded — say nothing
+        # rather than imply a clean result.
+        tt = v.get("tap_targets")
+        if tt and tt.get("below_24px"):
+            ex = ", ".join(f'{e["el"]} ({e["w"]}×{e["h"]}px)'
+                           for e in (tt.get("examples") or [])[:2])
+            rows.append({
+                "device": device,
+                "issue": f'{tt["below_24px"]} tap target(s) below the 24×24px '
+                         f'WCAG 2.2 minimum' + (f": {ex}" if ex else ""),
+                "severity": "serious",
+            })
+        if tt and tt.get("below_48px_advisory"):
+            rows.append({
+                "device": device,
+                "issue": f'{tt["below_48px_advisory"]} tap target(s) meet WCAG '
+                         f'but are below the recommended 48×48px',
+                "severity": "minor",
+            })
+
+        c = v.get("contrast")
+        if c and c.get("below_threshold"):
+            worst = (c.get("examples") or [{}])[0]
+            detail = (f' (worst {worst["ratio"]}:1, needs {worst["required"]}:1)'
+                      if worst.get("ratio") else "")
+            rows.append({
+                "device": device,
+                "issue": f'{c["below_threshold"]} text element(s) below the WCAG '
+                         f'AA contrast threshold{detail}',
+                "severity": "serious",
+            })
+
+        d = v.get("drag_interactions")
+        if d and d.get("count"):
+            rows.append({
+                "device": device,
+                "issue": f'{d["count"]} drag-only interaction(s) — needs human '
+                         f'check for a single-pointer alternative (SC 2.5.7)',
+                "severity": "minor",
+            })
     return rows
 
 
