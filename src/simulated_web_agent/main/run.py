@@ -55,6 +55,39 @@ def _write_manifest(run_dir: Path, data: dict) -> None:
     )
 
 
+def _run_scope() -> dict:
+    """What produced this run: provider, the model behind each tier, and a
+    digest of the prompts. Resolves the tiers rather than naming them, since
+    "large" and "small" are the same model under gemini and a report that said
+    "large" would tell the reader nothing."""
+    from ..agent import gpt
+    from ..agent.prompt_registry import registry
+
+    cfg = load_cfg()
+    provider = cfg.llm_provider
+    models: dict[str, str] = {}
+    for tier, router, suffix in (
+        ("agent", gpt.chat_router, ""),
+        ("perceive", gpt.chat_router, "_lite"),
+        ("audit", gpt.slow_chat_router, "_report"),
+    ):
+        try:
+            name = provider + suffix
+            if not any(m["model_name"] == name for m in router.model_list):
+                name = provider  # tier not configured for this provider
+            models[tier] = next(
+                m["litellm_params"]["model"]
+                for m in router.model_list if m["model_name"] == name
+            )
+        except Exception:  # never let scope reporting break a run
+            models[tier] = None
+    return {
+        "provider": provider,
+        "models": models,
+        "prompts_version": registry.version_hash(),
+    }
+
+
 def read_manifest(run_dir: Path) -> dict | None:
     path = Path(run_dir) / "run_manifest.json"
     if not path.exists():
@@ -101,6 +134,11 @@ async def run_async(
             "max_steps": max_steps,
             "persona_count": total_personas,
             "questionnaire": questionnaire,
+            # Scope (§6.1): what produced these findings. Recorded at run time
+            # because it cannot be reconstructed afterwards — prompts and model
+            # both move, and two runs whose scope differs are not comparable.
+            # Runs made before this existed honestly report null.
+            "scope": _run_scope(),
             "started_at": started_at.isoformat(),
             "ended_at": None,
             "duration_seconds": None,

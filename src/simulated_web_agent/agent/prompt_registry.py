@@ -26,6 +26,33 @@ class PromptRegistry:
             )
         return self._cache[name]
 
+    def version_hash(self) -> str:
+        """A short digest of every registered prompt's content.
+
+        Goes into run_manifest.json so the report's Scope section (§6.1) can say
+        which prompts produced the findings. Two runs whose hashes differ are not
+        comparable — and the prompts move often enough for that to matter: the
+        anchoring fixes alone rewrote first_impression, heuristic_evaluate and
+        accessibility_summarize in one day.
+
+        Hashes content, not mtimes, and sorts by name so two checkouts of the
+        same commit agree.
+        """
+        import hashlib
+
+        h = hashlib.sha256()
+        seen: dict[str, bytes] = {}
+        for d in self._dirs:
+            if not d.is_dir():
+                continue
+            for p in d.glob("*.txt"):
+                # First directory wins, matching get()'s search order.
+                seen.setdefault(p.name, p.read_bytes())
+        for name in sorted(seen):
+            h.update(name.encode("utf-8"))
+            h.update(seen[name])
+        return h.hexdigest()[:12]
+
     def register(self, directory: Path) -> None:
         """Add a directory to the search path (checked after existing dirs)."""
         self._dirs = (*self._dirs, directory)

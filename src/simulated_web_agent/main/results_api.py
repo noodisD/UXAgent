@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .persona_matrix import build_persona_task_matrix
 from .run import read_manifest
 from .severity import severity_score
 from .trace_store import TraceStore
@@ -274,6 +275,10 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
         "personaCount": len(personas),
         "maxSteps": manifest.get("max_steps"),
         "status": manifest.get("status", "done"),
+        # §6.1 Scope: which provider/models/prompts produced these findings.
+        # None for runs made before scope was recorded — a report that guessed
+        # would be worse than one that says it does not know.
+        "scope": _as_dict(manifest.get("scope")) or None,
         "pagespeed": {
             "performance": _pagespeed_perf(run_dir),
             "accessibility": None,
@@ -285,7 +290,15 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
     # Full aggregated narrative report (narrative + statistics + diagnostics), if present.
     report = _read_json(run_dir / "aggregated_report.json", None)
     comparison = _build_comparison(run_id, manifest, report, personas, runs_root)
-    return {"meta": meta, "personas": personas, "report": report, "comparison": comparison}
+    return {
+        "meta": meta,
+        "personas": personas,
+        "report": report,
+        "comparison": comparison,
+        # §6.1 persona x task section. Derived from `personas` rather than
+        # stored, so it is correct for old runs too.
+        "personaTasks": build_persona_task_matrix(personas),
+    }
 
 
 def _issue_map(report: dict | None) -> dict[int, str]:
