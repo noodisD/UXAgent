@@ -5,15 +5,15 @@ export type Screen = 'wizard' | 'running' | 'results' | 'history'
 // Module-level singleton so every screen shares navigation + the active run id.
 const state = reactive({
   screen: 'wizard' as Screen,
-  step: 1,           // wizard step 1..3
+  step: 1,           // wizard step 1..4
   runId: null as string | null,      // the run launched this session (drives Running screen)
   viewRunId: null as string | null,  // the run being viewed in Results (may be a history row)
 })
 
 export function useApp() {
   function goScreen(s: Screen) { state.screen = s }
-  function goStep(n: number) { state.step = Math.min(3, Math.max(1, n)) }
-  function nextStep() { if (state.step < 3) state.step++ }
+  function goStep(n: number) { state.step = Math.min(4, Math.max(1, n)) }
+  function nextStep() { if (state.step < 4) state.step++ }
   function prevStep() { if (state.step > 1) state.step-- }
   function newAudit() {
     state.runId = null

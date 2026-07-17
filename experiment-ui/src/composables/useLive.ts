@@ -1,9 +1,11 @@
 import { onUnmounted, ref } from 'vue'
 
 export type LiveMemory = { kind: string; content: string }
+export type LiveStep = { step: number; description: string; duration_s: number | null; current: boolean }
 export type LivePersona = {
   id: string
   name: string
+  objective?: string
   step: number
   url: string
   title: string
@@ -11,6 +13,11 @@ export type LivePersona = {
   observation: string
   stream: LiveMemory[]
   has_screenshot: boolean
+  elapsed_seconds?: number | null
+  last_activity_seconds?: number | null
+  history?: LiveStep[]
+  status?: 'running' | 'done' | 'error'
+  finished?: boolean
 }
 
 export function useLive(pollMs = 1500) {

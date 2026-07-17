@@ -146,6 +146,13 @@ body {
 .issue-card .impact { font-size: 13px; margin-bottom: 8px; }
 .issue-card .rec { font-size: 13px; background: rgba(255,255,255,.55); border-radius: 6px; padding: 8px 12px; }
 .issue-card .rec-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-bottom: 3px; opacity: .7; }
+.unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
+.evidence { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; background: rgba(255,255,255,.6); border-radius: 6px; padding: 10px; }
+.ev-thumb { width: 140px; height: auto; border: 1px solid #dee2e6; border-radius: 4px; display: block; }
+.ev-meta { flex: 1; min-width: 0; }
+.ev-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; opacity: .65; margin-bottom: 3px; }
+.ev-url { font-size: 12px; word-break: break-all; }
+.ev-quote { font-size: 12px; font-style: italic; color: #495057; margin-top: 5px; }
 
 /* ── Survey ── */
 .survey-grid { display: grid; gap: 12px; }
@@ -295,15 +302,43 @@ def _render_issues_group(title: str, issues: list) -> str:
         freq = _esc(issue.get("frequency", ""))
         impact = _esc(issue.get("impact", ""))
         rec = _esc(issue.get("recommendation", ""))
+        unverified_badge = (
+            '<span class="unverified-badge">⚠ NIEZWERYFIKOWANE</span>'
+            if issue.get("verified") is False
+            else ""
+        )
+        evidence_html = ""
+        for ex in issue.get("examples") or []:
+            url = _esc(ex.get("url", ""))
+            quote = _esc((ex.get("observation_quote") or "")[:300])
+            who = _esc(ex.get("persona_name", ""))
+            step = ex.get("step")
+            shot = ex.get("screenshot")
+            thumb = (
+                f'<a href="{_esc(shot)}" target="_blank">'
+                f'<img class="ev-thumb" src="{_esc(shot)}" alt="dowód: krok {step}"/></a>'
+                if shot else ""
+            )
+            evidence_html += f"""
+            <div class="evidence">
+              {thumb}
+              <div class="ev-meta">
+                <div class="ev-label">Dowód — uczestnik {who}, krok {step}</div>
+                <a class="ev-url" href="{url}" target="_blank">{url}</a>
+                {f'<div class="ev-quote">„{quote}"</div>' if quote else ''}
+              </div>
+            </div>"""
         cards += f"""
         <div class="issue-card" style="background:{bg};border-left-color:{border};">
           <div class="issue-header">
             {_severity_chip(sev)}
             <div class="issue-title" style="color:{fg};">H{h_id}: {h_name}</div>
+            {unverified_badge}
           </div>
           <div class="freq">Częstotliwość: {freq}</div>
           <div class="impact">{impact}</div>
           <div class="rec"><div class="rec-label">Rekomendacja</div>{rec}</div>
+          {evidence_html}
         </div>"""
     return _section(title, cards)
 

@@ -19,6 +19,16 @@ export function useRun() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
+    if (res.status === 409) {
+      // A run is already in progress — attach to it instead of failing,
+      // so a double submit can never spawn a second concurrent run.
+      const data = await res.json().catch(() => ({}))
+      if (data.active_run_id) {
+        runId.value = data.active_run_id
+        try { localStorage.setItem(RUN_KEY, data.active_run_id) } catch { /* ignore */ }
+        return data.active_run_id
+      }
+    }
     if (!res.ok) {
       const text = await res.text()
       const msg = `Run failed: ${res.status} ${text}`

@@ -1,5 +1,15 @@
 <template>
   <div class="running">
+    <!-- hero banner -->
+    <div class="hero">
+      <div class="hero-slash"></div>
+      <div class="hero-slash thin"></div>
+      <div class="hero-body">
+        <div class="hero-kicker mono">{{ t('run.heroKicker') }}</div>
+        <div class="hero-title">{{ t('run.heroTitle') }}</div>
+      </div>
+    </div>
+
     <!-- progress header -->
     <div class="ux-card big">
       <div class="run-head">
@@ -49,6 +59,15 @@
               <span class="lh-viewing">{{ t('live.viewing') }}:</span>
               <span class="lh-urltext">{{ p.url || t('live.noUrl') }}</span>
             </div>
+            <div v-if="p.objective" class="lh-objective">{{ p.objective }}</div>
+          </div>
+        </div>
+        <div class="lh-timers">
+          <div v-if="p.status === 'done'" class="timer-chip mono done">✓ {{ t('live.done') }}</div>
+          <div v-else-if="p.status === 'error'" class="timer-chip mono bad">✕ {{ t('live.sessionError') }}</div>
+          <div v-if="p.elapsed_seconds != null" class="timer-chip mono">⏱ {{ fmtDur(p.elapsed_seconds) }}</div>
+          <div v-if="p.last_activity_seconds != null && !p.finished" class="timer-chip mono" :class="staleClass(p.last_activity_seconds)">
+            {{ t('live.lastActivity', { t: fmtDur(p.last_activity_seconds) }) }}
           </div>
         </div>
       </div>
@@ -73,6 +92,19 @@
           <div class="block">
             <div class="block-label mono">{{ t('live.observation') }}</div>
             <div class="obs-text">{{ p.observation || '…' }}</div>
+          </div>
+
+          <div v-if="p.history && p.history.length" class="block">
+            <div class="block-label mono">{{ t('live.history') }}</div>
+            <div class="hist">
+              <div v-for="h in [...p.history].reverse()" :key="h.step" class="hist-row" :class="{ current: h.current }">
+                <span class="hist-step mono">{{ h.step }}</span>
+                <span class="hist-desc">{{ h.description || '—' }}</span>
+                <span v-if="h.duration_s != null" class="hist-dur mono" :class="durClass(h.duration_s)">
+                  {{ h.current ? t('live.inProgress', { t: fmtDur(h.duration_s) }) : fmtDur(h.duration_s) }}
+                </span>
+              </div>
+            </div>
           </div>
 
           <div class="block grow">
@@ -113,8 +145,13 @@ const { t } = useI18n()
 const PHASE_KEYS = ['personas', 'agents', 'analysis', 'report'] as const
 const PHASES = computed(() => PHASE_KEYS.map(k => ({ key: k, label: t('run.phase.' + k) })))
 
+// Run timer anchored to the backend's elapsed_seconds (measured from the run's
+// actual start), so it survives reloads/navigation. The local 1s tick only
+// interpolates between /progress polls.
 const elapsed = ref(0)
 let timer: number | null = null
+let serverElapsed: number | null = null
+let serverElapsedAt = 0
 
 const snap = computed(() => data.value as any)
 const isActive = computed(() => snap.value && snap.value.status && snap.value.status !== 'idle')
@@ -169,20 +206,63 @@ watch(status, (s) => {
   if (s === 'done' && liveId.value) setTimeout(() => openResults(liveId.value as string), 900)
 })
 
+// Re-anchor the timer on every progress snapshot that carries elapsed_seconds.
+watch(snap, (s) => {
+  if (s && typeof s.elapsed_seconds === 'number') {
+    serverElapsed = s.elapsed_seconds
+    serverElapsedAt = Date.now()
+    elapsed.value = Math.floor(serverElapsed)
+  }
+})
+
 onMounted(() => {
   start()
-  timer = window.setInterval(() => { elapsed.value += 1 }, 1000)
+  timer = window.setInterval(() => {
+    if (serverElapsed !== null) {
+      elapsed.value = Math.floor(serverElapsed + (Date.now() - serverElapsedAt) / 1000)
+    } else {
+      elapsed.value += 1
+    }
+  }, 1000)
 })
 onUnmounted(() => {
   stop(); stopLive()
   if (timer !== null) clearInterval(timer)
 })
 
-function goNewAudit() { stop(); stopLive(); newAudit() }
+// --- live timers & anomaly hints ----------------------------------------
+function fmtDur(s: number): string {
+  if (s < 60) return `${Math.round(s)}s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${String(Math.round(s % 60)).padStart(2, '0')}s`
+}
+// >2 min of silence is suspicious, >5 min is almost certainly a stall
+function staleClass(s: number): string {
+  return s > 300 ? 'bad' : s > 120 ? 'warn' : ''
+}
+// per-step duration: normal steps run seconds-to-a-minute; longer = anomaly
+function durClass(s: number): string {
+  return s > 300 ? 'bad' : s > 120 ? 'warn' : ''
+}
+
+async function goNewAudit() {
+  stop(); stopLive()
+  // Ask the backend to abort the run; navigate away regardless of outcome.
+  const id = runId.value || app.runId
+  if (id) { try { await fetch(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }) } catch {} }
+  newAudit()
+}
 </script>
 
 <style scoped lang="scss">
-.running { max-width: 1500px; margin: 0 auto; padding: 28px 40px 60px; display: flex; flex-direction: column; gap: 18px; }
+.running { width: 100%; padding: 28px 40px 60px; display: flex; flex-direction: column; gap: 18px; }
+
+.hero { position: relative; overflow: hidden; background: var(--hero); border-radius: 16px; padding: 30px 32px; }
+.hero-slash { position: absolute; top: -40%; right: -6%; width: 60%; height: 200%; background: var(--ac); transform: rotate(-25deg); opacity: .92; }
+.hero-slash.thin { right: 14%; width: 10px; background: var(--surface); opacity: .14; }
+.hero-body { position: relative; }
+.hero-kicker { font: 600 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.6); margin-bottom: 12px; }
+.hero-title { font-family: var(--expanded); font-weight: 700; font-size: 30px; line-height: 1.1; color: #fff; max-width: 460px; text-transform: uppercase; }
 .ux-card.big { border-radius: 14px; padding: 28px; }
 .run-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
 .run-title { display: flex; align-items: center; gap: 12px; }
@@ -221,6 +301,24 @@ function goNewAudit() { stop(); stopLive(); newAudit() }
 .url-sep { color: var(--faint); }
 .lh-viewing { color: var(--muted-2); }
 .lh-urltext { color: var(--ac); }
+.lh-objective { font-size: 12px; color: var(--muted-2); margin-top: 4px; font-style: italic; }
+
+/* per-agent timers */
+.lh-timers { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; flex: none; }
+.timer-chip { font: 600 11.5px var(--mono); padding: 4px 9px; border-radius: 6px; background: var(--surface-3); color: var(--text-3); white-space: nowrap; }
+.timer-chip.warn { background: var(--warn-bg); color: var(--warn-text); }
+.timer-chip.bad { background: var(--accent-tint); color: var(--ac); animation: uxpulse 1.3s infinite; }
+.timer-chip.done { background: var(--ok-bg, #e6f6ec); color: var(--ok-text, #1a7f4b); }
+
+/* step history */
+.hist { display: flex; flex-direction: column; gap: 4px; max-height: 168px; overflow-y: auto; }
+.hist-row { display: flex; align-items: baseline; gap: 9px; padding: 5px 8px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border-2); }
+.hist-row.current { border-color: var(--accent-tint-border); background: var(--accent-tint); }
+.hist-step { font: 700 10.5px var(--mono); color: var(--text-faint); width: 18px; flex: none; text-align: right; }
+.hist-desc { font-size: 12px; color: var(--text-2); line-height: 1.35; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-dur { font: 600 11px var(--mono); color: var(--text-muted); flex: none; }
+.hist-dur.warn { color: var(--warn-text); }
+.hist-dur.bad { color: var(--ac); font-weight: 700; }
 
 .live-body { display: grid; grid-template-columns: 1.35fr 1fr; gap: 0; align-items: stretch; }
 .screen-col { padding: 22px 24px; border-right: 1px solid var(--border-soft); }

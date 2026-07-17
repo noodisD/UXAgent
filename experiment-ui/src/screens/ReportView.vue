@@ -56,10 +56,21 @@
                 <div class="issue-head">
                   <span class="issue-h mono">H{{ it.heuristic_id }}</span>
                   <span class="issue-name">{{ it.heuristic_name }}</span>
+                  <span v-if="it.verified === false" class="unverified-badge">{{ t('ev.unverified') }}</span>
                   <span class="issue-freq mono">{{ it.frequency }}</span>
                 </div>
                 <p class="issue-impact">{{ it.impact }}</p>
                 <p class="issue-fix"><span class="fix-lead">{{ t('rep.recommendation') }}</span>{{ it.recommendation }}</p>
+                <div v-for="(ex, ei) in (it.examples || [])" :key="ei" class="ev-block">
+                  <a v-if="ex.screenshot" :href="evUrl(ex)" target="_blank">
+                    <img class="ev-thumb" :src="evUrl(ex)" :alt="t('ev.step', { n: ex.step ?? 0 })" />
+                  </a>
+                  <div class="ev-meta">
+                    <span class="ev-label mono">{{ t('ev.evidence') }} — {{ ex.persona_name }}, {{ t('ev.step', { n: ex.step ?? 0 }) }}</span>
+                    <a class="ev-url" :href="ex.url" target="_blank">{{ ex.url }}</a>
+                    <div v-if="ex.observation_quote" class="ev-quote">„{{ ex.observation_quote }}"</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -117,11 +128,18 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { SEV, scoreColor, pageSpeedColor, sevLabel } from '../theme'
+import { useApp } from '../composables/useApp'
 import { useI18n } from '../i18n'
-import type { AggReport } from '../types'
+import type { AggIssueExample, AggReport } from '../types'
 
 const { t } = useI18n()
+const { state: app } = useApp()
 const props = defineProps<{ report: AggReport | null | undefined }>()
+
+function evUrl(ex: AggIssueExample): string {
+  // ex.screenshot is run-relative (<persona_dir>/screenshot/<file>.png)
+  return `/runs/${app.viewRunId}/${ex.screenshot}`
+}
 
 const report = computed(() => props.report)
 const narrative = computed(() => report.value?.narrative)
@@ -245,4 +263,14 @@ function fmtScore(v: number | undefined) { return typeof v === 'number' ? v.toFi
 
 .methodology { background: #fcfcfd; border: 1px solid var(--border-soft); border-radius: 10px; padding: 16px; }
 .muted { color: var(--muted-2); } .muted.sm { font-size: 12.5px; }
+
+/* issue evidence */
+.unverified-badge { font: 700 10.5px var(--mono); color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 1px 7px; white-space: nowrap; }
+.ev-block { display: flex; gap: 12px; align-items: flex-start; margin-top: 9px; background: #fafbfc; border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px; }
+.ev-thumb { width: 130px; height: auto; border: 1px solid var(--border-soft); border-radius: 5px; display: block; }
+.ev-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.ev-label { font-size: 11px; color: var(--muted-2); text-transform: uppercase; letter-spacing: .04em; }
+.ev-url { font-size: 12px; color: var(--ac); word-break: break-all; text-decoration: none; }
+.ev-url:hover { text-decoration: underline; }
+.ev-quote { font-size: 12px; font-style: italic; color: var(--muted-2); line-height: 1.45; }
 </style>
