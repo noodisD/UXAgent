@@ -46,7 +46,7 @@ async def run_bias_audit(store: TraceStore) -> dict:
         "{payload}", json.dumps(payload, ensure_ascii=False)
     )
     try:
-        raw = await async_chat([{"role": "user", "content": prompt}], model="small", log=False)
+        raw = await async_chat([{"role": "user", "content": prompt}], model="report", log=False)
         result = _safe_json(raw, fallback=dict(_EMPTY))
         if not isinstance(result, dict):
             result = dict(_EMPTY)

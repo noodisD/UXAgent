@@ -156,6 +156,22 @@ providers we don't use. Do not "upgrade a pass to the large tier" and expect a
 better answer; I did, and claimed it fixed anchoring when the prompt rewrite had
 done all the work. **`"report"` is the only real quality lever.**
 
+**The audit phase runs on `"report"` (gemini-2.5-pro)**: first impression,
+heuristic evaluation, accessibility, cognitive walkthrough, bias audit. These
+are judgement calls, and they cost one call per persona — unlike the agent loop,
+which pays per step. Pro is ~2.3x slower per call; that is affordable here and
+nowhere else.
+
+**Thinking is on everywhere, including where the config says it is off.** The
+flash entries set `"thinking": {"type": "disabled"}`, which is Anthropic syntax
+that litellm silently drops for Vertex — measured: 935 of 972 completion tokens
+were reasoning on a one-sentence prompt. What actually works on Vertex Gemini is
+`reasoning_effort="disable"` or `thinkingConfig={"thinkingBudget": 0}` (both
+verified to zero it out). So every flash call in the agent loop is paying for
+reasoning tokens that nobody asked for. Do not "enable thinking" via
+`enable_thinking=True` — there is no `gemini_thinking` route, so it raises;
+that is why `agent.py:316` has it commented out.
+
 ### Decide in code, narrate with the LLM
 
 "Does this image have alt text?" is decidable, so `main/a11y_checks.py` decides

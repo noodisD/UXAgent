@@ -151,12 +151,13 @@ async def _run_first_impression(store: TraceStore) -> dict:
         }
     ]
     try:
-        # NB "large" == "small" under gemini (both vertex_ai/gemini-2.5-flash);
-        # only "lite" and "report" resolve to a different model. This tier does
-        # not buy quality today — the persona-independence fix came from the
-        # prompt, not from here. "report" (gemini-2.5-pro) is the real lever if
-        # this judgement ever needs a stronger model.
-        return await _chat_json(messages, model="large", prefer=dict,
+        # "report" -> gemini-2.5-pro. The audit passes are the one place worth
+        # the expensive tier: one call per persona, versus the agent loop's one
+        # per step. "large" is NOT a stronger model here — it resolves to the
+        # same flash entry as "small" (see CLAUDE.md); "report" is the only real
+        # lever. Scoring a page as a specific person is exactly the nuanced
+        # judgement that the cheap tier renders shallowly.
+        return await _chat_json(messages, model="report", prefer=dict,
                                 label="first_impression")
     except _UnusableReply as e:
         return {"error": str(e)}
@@ -202,7 +203,7 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
         # prefer=list: a stray object in the model's prose must not win here, or
         # every finding is dropped and the audit looks cleanly empty.
         return await _chat_json([{"role": "user", "content": prompt}],
-                                model="large", prefer=list,
+                                model="report", prefer=list,
                                 label="heuristic_evaluate")
     except _UnusableReply:
         log.error("[auditor] heuristic_evaluate unusable for %s — no findings "
@@ -236,10 +237,10 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
         urls=step_urls,
     )
     try:
-        # See _run_first_impression: "large" is not a stronger model under
-        # gemini. The 62%-return-the-example anchoring was fixed by the prompt.
+        # "report" -> gemini-2.5-pro; see _run_first_impression. Note the
+        # 62%-return-the-example anchoring was fixed by the prompt, not the tier.
         return await _chat_json([{"role": "user", "content": prompt}],
-                                model="large", prefer=dict,
+                                model="report", prefer=dict,
                                 label="accessibility_summarize")
     except _UnusableReply as e:
         return {"error": str(e)}

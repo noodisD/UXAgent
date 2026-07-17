@@ -52,7 +52,7 @@ async def run_cognitive_walkthrough(store: TraceStore) -> list:
         .replace("{steps}", json.dumps(steps_payload, ensure_ascii=False))
     )
     try:
-        raw = await async_chat([{"role": "user", "content": prompt}], model="small", log=False)
+        raw = await async_chat([{"role": "user", "content": prompt}], model="report", log=False)
         result = _safe_json(raw, fallback=[])
         if not isinstance(result, list):
             result = []
