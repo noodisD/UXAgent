@@ -19,6 +19,7 @@ from typing import Any
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .pagespeed import format_pagespeed_summary, read_pagespeed
+from .prioritization import prioritize
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -351,8 +352,13 @@ def _is_truncated_session(report: dict) -> bool:
     return isinstance(steps, int) and steps < MIN_VALID_SESSION_STEPS
 
 
-def aggregate_statistics(reports: list[dict]) -> dict:
-    """Compute statistics across all per-agent reports."""
+def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = None) -> dict:
+    """Compute statistics across all per-agent reports.
+
+    `outcomes` maps persona_dir -> outcome/ended_reason and is what turns the
+    §6.2 prioritization matrix on; without it the matrix is omitted rather than
+    guessed (impact needs to know who failed).
+    """
     n = len(reports)
     if n == 0:
         return {}
@@ -495,6 +501,10 @@ def aggregate_statistics(reports: list[dict]) -> dict:
             },
             "by_heuristic": heuristic_summary,
         },
+        # §6.2: severity x impact x confidence, worst first. Impact is derived
+        # from reach and task consequence (prioritization.py), never asked of
+        # the LLM. Omitted rather than guessed when outcomes are unavailable.
+        "prioritization": prioritize(all_findings, outcomes) if outcomes else [],
         "accessibility": {
             "avg_score": _avg(a11y_scores),
         },
@@ -665,7 +675,21 @@ async def generate_aggregated_report(
     if not analytics_context and stores:
         analytics_context = stores[0].read_basic_info().get("analytics_context", "") or ""
 
-    stats = aggregate_statistics(reports)
+    # Per-persona outcome, for the §6.2 impact derivation. Read from the stores
+    # rather than the per-agent reports: reflection runs after those are written,
+    # so they carry no outcome. A persona who abandoned did not finish, whatever
+    # the reflection concluded, so ended_reason wins where it says so.
+    outcomes: dict[str, str] = {}
+    for s in stores:
+        reflection = s.read_objective_reflection() or {}
+        session = s.read_session_result() or {}
+        ended = str(session.get("ended_reason") or "")
+        outcomes[s.trace_dir.name] = (
+            ended if ended == "persona_abandoned"
+            else str(reflection.get("outcome") or "")
+        )
+
+    stats = aggregate_statistics(reports, outcomes=outcomes)
     n = stats["participant_count"]
 
     # Determine runs/ dir and read page speed (must happen before prompt build)
