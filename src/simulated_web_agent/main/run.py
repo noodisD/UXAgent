@@ -75,6 +75,7 @@ async def run_async(
     headless: bool = False,
     concurrency: int = 4,
     example_persona: str = None,
+    persona_slots: Optional[list[dict]] = None,
     on_progress: Optional[Callable[[dict], None]] = None,
     site_context: str = "",
     analytics_context: str = "",
@@ -120,16 +121,44 @@ async def run_async(
         _write_manifest(run_dir, manifest)
 
     # ── 1) Personas ──────────────────────────────────────────────────────────
-    ping({"phase": "personas", "status": "start", "total": total_personas})
-    all_personas_intents = await generate_personas(
-        demographics=demographics,
-        general_intent=general_intent,
-        n=total_personas,
-        on_progress=lambda k, n: ping(
-            {"phase": "personas", "status": "progress", "current": k, "total": n}
-        ),
-        example_text=example_persona,
+    # persona_slots (optional) lets the wizard mix manual and auto personas:
+    # [{"mode": "auto"|"manual", "description": "<full text for manual>"}, ...]
+    slots = list(persona_slots or [])
+    if len(slots) < total_personas:
+        slots += [{"mode": "auto"}] * (total_personas - len(slots))
+    slots = slots[:total_personas]
+
+    manual_count = sum(
+        1 for s in slots
+        if s.get("mode") == "manual" and str(s.get("description", "")).strip()
     )
+    n_auto = total_personas - manual_count
+
+    ping({"phase": "personas", "status": "start", "total": total_personas})
+    generated: list[dict[str, Any]] = []
+    if n_auto > 0:
+        generated = await generate_personas(
+            demographics=demographics,
+            general_intent=general_intent,
+            n=n_auto,
+            on_progress=lambda k, n: ping(
+                {"phase": "personas", "status": "progress",
+                 "current": manual_count + k, "total": total_personas}
+            ),
+            example_text=example_persona,
+        )
+
+    # Merge in slot order: manual slots keep the user's text, auto slots consume
+    # from the generated list.
+    all_personas_intents: list[dict[str, Any]] = []
+    gen_iter = iter(generated)
+    for s in slots:
+        desc = str(s.get("description", "")).strip()
+        if s.get("mode") == "manual" and desc:
+            all_personas_intents.append({"persona": desc, "intent": general_intent})
+        else:
+            all_personas_intents.append(next(gen_iter))
+    log.info("Personas ready: %d auto, %d manual", n_auto, manual_count)
     ping({"phase": "personas", "status": "progress", "current": total_personas, "total": total_personas})
 
     if site_context:
@@ -215,13 +244,19 @@ async def run_async(
     return run_id
 
 
-def mark_run_status(run_id: str, status: str) -> None:
-    """Update a run's manifest status out-of-band (e.g. on error from the caller)."""
+def mark_run_status(run_id: str, status: str, failure: Optional[dict] = None) -> None:
+    """Update a run's manifest status out-of-band (e.g. on error from the caller).
+
+    failure (optional): {"phase", "failedAt", "error", "suggestion"} — surfaced
+    in the dashboard's failed-run modal.
+    """
     run_dir = Path("runs") / run_id
     manifest = read_manifest(run_dir)
     if manifest is None:
         return
     manifest["status"] = status
+    if failure:
+        manifest["failure"] = failure
     if manifest.get("ended_at") is None:
         manifest["ended_at"] = datetime.now(timezone.utc).isoformat()
     _write_manifest(run_dir, manifest)
