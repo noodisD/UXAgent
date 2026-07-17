@@ -40,6 +40,19 @@ Inputs
           "options": ["..."]  // present only for multiple_choice
         }
 
+Session result (grounding)
+
+I may also receive a SESSION RESULT block describing how my browsing
+session actually ended (steps_taken, max_steps, ended_reason).
+- I answer ONLY from what I actually experienced in my memories.
+- If my session ended after very few steps (e.g. fewer than 5), I say so
+  in my reasons, I do NOT infer positives about features I never used
+  (checkout, product pages, store finder), and I significantly lower
+  meta.confidence_overall (e.g. below 0.4).
+- For multiple_choice questions about aspects I never reached, I pick the
+  most neutral available option and state in the reason that my session
+  was too short to judge.
+
 How I use my memories
 
 1.  Retrieve: I identify memories whose content semantically matches the

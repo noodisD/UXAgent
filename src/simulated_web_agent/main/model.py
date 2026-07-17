@@ -138,15 +138,24 @@ class AgentPolicy(BasePolicy):
 
     async def slow_loop(self):
         while True:
-            await self.agent.reflect()
-            await self.agent.wonder()
-            await self.agent.memory.update()
-            await asyncio.sleep(30)  # one reflect+wonder cycle per ~30s to avoid TPM spikes
+            try:
+                await self.agent.reflect()
+                await self.agent.wonder()
+                await self.agent.memory.update()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("slow_loop cycle failed; continuing")
+            await asyncio.sleep(60)  # one reflect+wonder cycle per ~60s to avoid TPM spikes
 
-    async def forward(self, playwright_env):
-        observation = await playwright_env.observation()
+    async def forward(self, playwright_env, observation=None):
+        # Reuse the observation from the previous env.step() when provided —
+        # re-observing costs a full load-state + network-idle wait per step.
+        if observation is None:
+            observation = await playwright_env.observation()
         observation_str = json.dumps(observation)
         available_actions = observation.get("clickable_elements")
+        last_action_error = observation.get("error")
 
         # self.env_trace_file.write(observation_str + "\n")
         # len_observation = self.profiler.count_tokens(observation_str)
@@ -161,7 +170,7 @@ class AgentPolicy(BasePolicy):
 
         if self.agent.memory.timestamp != 0:  # make parallel
             await asyncio.gather(
-                self.agent.feedback(observation["html"]),
+                self.agent.feedback(observation["html"], last_action_error=last_action_error),
                 self.agent.perceive(observation["html"]),
             )
         else:
@@ -175,7 +184,7 @@ class AgentPolicy(BasePolicy):
         # await self.agent.wonder()
         # await asyncio.gather(self.agent.reflect(), self.agent.wonder())
         await self.agent.plan()
-        action = await self.agent.act(observation)
+        action = await self.agent.act(observation, last_action_error=last_action_error)
         # pickle.dump(
         #     self.agent,
         #     open(self.run_path / f"agent_{self.agent.memory.timestamp}.pkl", "wb"),
@@ -205,7 +214,7 @@ class AgentPolicy(BasePolicy):
         """
         if not self.agent.memory.memories:
             return ""
-        return "\n".join(self.agent.format_memories(self.agent.memory.memories))
+        return "\n".join(self.agent.format_memories(self.agent.memory.memories, budget=False))
 
     async def close(self):
         if self.slow_loop_task is not None:

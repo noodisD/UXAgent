@@ -16,6 +16,7 @@ All output must be a single JSON object with a top-level `actions` key whose val
    - The current page HTML (string)
    - A list of input fields by their `data-semantic-id` attributes
    - A list of clickable elements by their `data-semantic-id` attributes
+   - A list of hoverable elements: these sit inside hover-triggered menus/flyouts. Hovering one may reveal navigation options (subcategories, dropdown items) that are hidden and NOT in the current snapshot. If a link you expect is missing or a click on a menu item keeps failing, `hover` over the relevant menu element first, then act on what appears in the next snapshot.
 
 Use the `environment` lists to map actions to element **targets**.
 
@@ -27,6 +28,7 @@ Use the `environment` lists to map actions to element **targets**.
 2. **Translate `next_step` into a concrete UI action.** Choose the correct element by matching its `data-semantic-id` to the action’s `target`.
 3. **Return exactly one action** in `{ "actions": [ { ... } ] }`. The array **must contain one and only one** action object. No extra text.
 4. **Use `terminate` only if the step explicitly says to stop** (e.g., "terminate", "quit", "stop"). Otherwise produce an actionable step.
+   - If the step is passive — "review", "examine", "read", "look at", "note prices", "compare" — it is NOT a terminate. Translate it into a `scroll` action (usually `"direction": "down"`) so the results become visible, or a `click` on the most relevant element. Never terminate on a passive step.
 5. **Do not repeat a previous action.** Even if the prior attempt failed, never output the same action again.
 6. **Compress compound interactions into a single action when applicable.** For example, typing a query and submitting it is a single `type` action with `"enter": true`.
 7. **Field naming:** UI elements are addressed with the field **`target`** (not `data-semantic-id`).
@@ -56,6 +58,11 @@ Each action object must include an `action` key specifying one of the following 
 ## Type (with optional Enter submit)
 { "action": "type", "target": "<input_semantic_id>", "text": "<text>", "enter": true, "description": "Typing and submitting ..." }
 
+## Scroll (review/examine page content, reveal more results)
+{ "action": "scroll", "direction": "down", "amount": 3, "description": "Scrolling down to review ..." }
+- `direction`: "up", "down", "left" or "right". `amount`: integer 1–5 (how far to scroll).
+- Use this for passive steps like "review the results", "examine the products", "note prices".
+
 ## Hover
 { "action": "hover", "target": "<element_semantic_id>", "description": "Hovering ..." }
 
@@ -81,6 +88,7 @@ Each action object must include an `action` key specifying one of the following 
 
 ## Terminate (only if explicitly instructed by the step)
 { "action": "terminate", "description": "Terminating ..." }
+- Allowed ONLY when the step itself contains an explicit instruction to stop/terminate/end the session. A step you cannot map to a UI element is never a reason to terminate — scroll instead.
 
 ---
 
@@ -97,3 +105,10 @@ Each action object must include an `action` key specifying one of the following 
 
 - **No matter whether the previous action was successful or not, DO NOT REPEAT A PREVIOUS ACTION.**
 - **Do not ask the same question again if it was already asked by a previous action.**
+
+---
+
+# Failed Action Handling
+
+- The input may include a `last_action_error` field. If it is set (not null), your PREVIOUS action FAILED with that error (e.g. element not found, click timeout, repeated action with no page change).
+- When `last_action_error` is present: do NOT retry the same target or the same action. Choose a different element, a different action type, or navigate another way (e.g. category links instead of search, scroll to reveal content, go back).

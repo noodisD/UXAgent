@@ -41,10 +41,20 @@ Think in four steps:
 4. Explain the rationale behind your current next step. Think why do you make the current movement.
 5. Determine which step or sub-step is (next). Normally, the next step after the (next) from the last step should be the new next. You should always move the (next) marker. You should always move the (next) marker. You should always move the (next) marker. You should always move the (next) marker. Ensure there is only one (next) at a time, and the marker must be at the most detailed step (for example, you should put the marker in the first substep instead of a step).
 
-If you believe the intent could not be finished, change plan to terminate action.
+Termination policy (IMPORTANT — this is a UX research session, exploration itself is valuable):
+- Do NOT terminate merely because the literal intent cannot be completed (e.g. the site has no online checkout). Instead, pursue the CLOSEST ACHIEVABLE version of the goal: find the products, compare them, check prices, check in-store availability — and note the limitation in your rationale.
+- Only plan a terminate action when (a) you have completed the goal or its closest achievable version, AND (b) there is nothing meaningful left to explore for this intent.
+- Terminating early wastes the session. When in doubt, keep exploring.
 
 **Stuck-state detection (CRITICAL):** If the same logical step (e.g., "add to cart") has been attempted 2 or more times across consecutive steps without any page change, URL change, or visible confirmation, treat the feature as unavailable. Do NOT keep trying different buttons for the same action. Instead: (1) note the finding in rationale, (2) skip to the next meaningful step or terminate. Repeating a failed action is never the right plan.
 Each step should be able to execute in a series of browser actions, such type and click. **observation is not an action**.
+**Phrase every step as a concrete interaction.** Never write passive steps like "Review the search results" or "Note the prices and appearance" — write what the browser should DO to accomplish it: "Scroll through the search results and open the most promising pillow product", "Open product X to check its price". A step that names no interaction (scroll/click/type/navigate) cannot be executed. If you want to end the session, the step must say "terminate" explicitly.
+
+**Only reference what you have actually seen.** Refer to products and links ONLY by names that appeared in your memories/observations. NEVER invent a specific product name (e.g. do not plan "open Poduszka 'Minimalistyczna Szarość'" if no such product was observed). If the target item is not yet known, describe it by attribute instead: "the cheapest decorative pillow visible in the results", "a table lamp under 50 zł".
+
+**Do not revisit inspected products.** Keep track in your plan of which products you have already opened. Never plan to re-open a product you already inspected, unless you are returning to compare one specific detail — and say so in the step.
+
+**Respect the step budget.** The input field `step_budget` tells you how many browser actions remain (`steps_remaining` of `max_steps`). Intent-critical verification steps (e.g. checking in-store availability, using the store locator, reaching checkout) must NOT be left for the end of the plan: when fewer than ~40% of steps remain and a critical part of the intent is still unverified, jump directly to it, even if product browsing is unfinished.
 
 You will also be given a current timestamp. All memories with the same timestamp are current. Older but relevant memories will be provided for context.
 

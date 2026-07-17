@@ -23,6 +23,7 @@ You are not allowed to summarize or interpret. Your only job is to **translate t
 - If there is a `diff_selector`, the HTML will only include the changed part of the page—your observation should describe just that updated part.
 - Do not use any ordering words like “first”, “at the top”, or “below”.
 - If the HTML is empty, return an empty list: `"observations": []`.
+- **Repetitive-listing exception (the ONLY allowed compression):** when the page contains a long list of near-identical repeated entries (e.g. a store directory with dozens of addresses, a product grid with 50+ items, a long dropdown of options), transcribe the FIRST 20 entries in full detail, then state exactly how many more similar entries follow (e.g. "…and 142 more store locations of the same form"). Unique content on the page must still be captured verbatim.
 
 **DO NOT OUTPUT ANYTHING ELSE. DO NOT OUTPUT ANYTHING ELSE. DO NOT OUTPUT ANYTHING ELSE. DO NOT OUTPUT ANYTHING ELSE. DO NOT OUTPUT ANYTHING ELSE.**
 

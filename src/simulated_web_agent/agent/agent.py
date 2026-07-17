@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 import time
 from typing import Optional, Union
 
@@ -62,15 +63,19 @@ class Agent:
         self.persona = persona
         self.intent = intent
         self.current_plan = None
+        # {"steps_used", "max_steps", "steps_remaining"} — set by the browser
+        # loop each step so the planner can respect the session's step budget.
+        self.step_budget = None
 
-    # ~125k tokens of HTML leaves room for system prompt + 64k output within 272k gpt-5-mini limit
-    _MAX_HTML_CHARS = 500_000
+    # ~50k tokens of HTML — large pages (e-commerce listings) at 500k chars made
+    # single Gemini calls take 4-7 minutes; 200k keeps steps at a usable pace.
+    _MAX_HTML_CHARS = 200_000
 
     async def perceive(self, environment):
         if isinstance(environment, str) and len(environment) > self._MAX_HTML_CHARS:
             environment = environment[:self._MAX_HTML_CHARS] + "\n... [HTML truncated due to length]"
 
-        environment_full = json.dumps(environment)
+        environment_full = json.dumps(environment, ensure_ascii=False)
 
         for denied_word in self.deny_list:
             environment_full = environment_full.replace(denied_word, "***")
@@ -81,7 +86,10 @@ class Agent:
                 {"role": "system", "content": _prompts.get("perceive")},
                 {"role": "user", "content": environment_full},
             ]
-            result = await async_chat(request, json_mode=True, max_tokens=64000)
+            # Lite tier: transcription is mechanical and output-bound — flash-lite
+            # writes ~40% faster. 16k covers observed payloads; async_chat retries
+            # with a doubled budget if the output is still length-truncated.
+            result = await async_chat(request, json_mode=True, max_tokens=16000, model="lite")
             result = json.loads(result)
             print(result)
             self.observation = result["observations"][0]
@@ -89,21 +97,32 @@ class Agent:
                 Observation(result["observations"][0], self.memory, environment)
             )
 
-    @staticmethod
-    def format_memories(memories: list[MemoryPiece], sort_by_kind=True) -> list[str]:
+    # Prompt payload budget: memory grows every step; without a cap the
+    # serialized memories pushed plan/act/feedback requests toward 1 MB and
+    # LLM latency grew ~10x over a run.
+    _MAX_MEMORY_ITEMS = 40
+    _MAX_MEMORY_CHARS = 400
+
+    @classmethod
+    def format_memories(cls, memories: list[MemoryPiece], sort_by_kind=True, budget=True) -> list[str]:
+        if budget and len(memories) > cls._MAX_MEMORY_ITEMS:
+            memories = memories[-cls._MAX_MEMORY_ITEMS:]
         # sort by kind and timestamp
         if sort_by_kind:
             memories = sorted(memories, key=lambda x: (x.kind, x.timestamp))
         importances_str = [
             f"{m.importance:.2f}" if m.importance != -1 else "N/A" for m in memories
         ]
+        max_chars = cls._MAX_MEMORY_CHARS if budget else None
         memories_str = [
-            f"""timestamp: {m.timestamp}; kind: {m.kind}; importance: {i}, content: {m.content}"""
+            f"""timestamp: {m.timestamp}; kind: {m.kind}; importance: {i}, content: {str(m.content)[:max_chars]}"""
             for m, i in zip(memories, importances_str)
         ]
         return memories_str
 
-    async def feedback(self, obs):
+    async def feedback(self, obs, last_action_error: Optional[str] = None):
+        if isinstance(obs, str) and len(obs) > self._MAX_HTML_CHARS:
+            obs = obs[:self._MAX_HTML_CHARS] + "\n... [HTML truncated due to length]"
         last_action = None
         last_plan = self.current_plan
         # todo: allow many actions in a timestamp.
@@ -123,9 +142,11 @@ class Agent:
                             {
                                 "persona": self.persona,
                                 "last_action": last_action.raw_action,
+                                "last_action_error": last_action_error,
                                 "last_plan": last_plan.content,
                                 "observation": obs,
-                            }
+                            },
+                            ensure_ascii=False,
                         ),
                     },
                 ],
@@ -155,7 +176,7 @@ class Agent:
         reflections = await async_chat(
             [
                 {"role": "system", "content": _prompts.get("reflect")},
-                {"role": "user", "content": json.dumps(model_input)},
+                {"role": "user", "content": json.dumps(model_input, ensure_ascii=False)},
             ],
             log=False,
             json_mode=True,
@@ -235,7 +256,8 @@ class Agent:
                             "persona": self.persona,
                             "memories": memories,
                             "intent": self.intent,
-                        }
+                        },
+                        ensure_ascii=False,
                     ),
                 },
             ],
@@ -263,7 +285,10 @@ class Agent:
             memories = self.format_memories(memories)
             new_plan = ""
             rationale = ""
-            while True:
+            next_step = ""
+            # Bounded retry: an unbounded loop here stalled agents for minutes
+            # when the model repeatedly returned malformed plans.
+            for attempt in range(3):
                 resp = await async_chat(
                     [
                         {
@@ -278,10 +303,12 @@ class Agent:
                                     "intent": self.intent,
                                     "memories": memories,
                                     "current_timestamp": self.memory.timestamp,
+                                    "step_budget": self.step_budget or "N/A",
                                     "old_plan": "N/A"
                                     if self.current_plan is None
                                     else self.current_plan.content,
-                                }
+                                },
+                                ensure_ascii=False,
                             ),
                         },
                     ],
@@ -289,21 +316,25 @@ class Agent:
                     # enable_thinking=True,
                     model="large",
                 )
-                # # print(resp)
-                resp = resp
                 resp = json.loads(resp)
                 if "plan" in resp and "rationale" in resp and "next_step" in resp:
-                    # logger.info(
-                    #     "retrieved memory for planning: %s", "\n".join(memories)
-                    # )
                     new_plan = resp["plan"]
                     rationale = resp["rationale"] if "rationale" in resp else "N/A"
                     next_step = resp["next_step"]
                     # make sure they are str
                     if isinstance(new_plan, str) and isinstance(rationale, str):
                         break
-                logger.info("invalid response, rethinking... ")
+                logger.info("invalid plan response (attempt %d), rethinking...", attempt + 1)
                 logger.info("response: %s", resp)
+            else:
+                # Fallback after exhausted retries: keep the old plan rather than stall.
+                logger.warning("plan() failed to produce a valid plan after 3 attempts; using fallback")
+                if self.current_plan is not None:
+                    new_plan = self.current_plan.content
+                else:
+                    new_plan = "Explore the page and work toward the intent step by step."
+                rationale = "Planning fallback: previous attempts returned malformed plans."
+                next_step = "Review the page and take the most reasonable next action toward the intent."
         logger.info("plan: %s", new_plan)
         logger.info("rationale: %s", rationale)
         logger.info("next_step: %s", next_step)
@@ -311,7 +342,7 @@ class Agent:
         await self.memory.add_memory_piece(Thought(rationale, self.memory))
         await self.memory.add_memory_piece(self.current_plan)
 
-    async def act(self, env):
+    async def act(self, env, last_action_error: Optional[str] = None):
         with LogApiCall():
             memories = await self.memory.retrieve(
                 self.current_plan.next_step,
@@ -320,9 +351,21 @@ class Agent:
             )
             memories = self.format_memories(memories)
             assert self.current_plan is not None
-            clickables = [e for e in env["clickable_elements"] if e is not None]
-            inputs = [e for e in env["clickable_elements"] if e is not None]
-            selects = [e for e in env["clickable_elements"] if e is not None]
+            clickables = [e for e in env.get("clickable_elements") or [] if e]
+            inputs = [
+                e["id"]
+                for e in env.get("input_elements") or []
+                if isinstance(e, dict) and e.get("id")
+            ]
+            selects = [
+                e["id"]
+                for e in env.get("select_elements") or []
+                if isinstance(e, dict) and e.get("id")
+            ]
+            # Elements inside containers that register hover listeners —
+            # hovering them may reveal flyout/dropdown content that is
+            # invisible (and therefore absent) in this snapshot.
+            hoverables = [e for e in env.get("hoverable_elements") or [] if e]
             action = await async_chat(
                 [
                     {"role": "system", "content": _prompts.get("action")},
@@ -334,14 +377,17 @@ class Agent:
                                     "inputs": inputs,
                                     "clickable": clickables,
                                     "selects": selects,
+                                    "hoverable": hoverables,
                                 },
                                 "persona": self.persona,
                                 "intent": self.intent,
                                 "plan": self.current_plan.content,
                                 "next_step": self.current_plan.next_step,
+                                "last_action_error": last_action_error,
                                 "environment": env["html"][:self._MAX_HTML_CHARS],
                                 "recent_memories": memories,
-                            }
+                            },
+                            ensure_ascii=False,
                         ),
                     },
                 ],
@@ -350,17 +396,45 @@ class Agent:
             )
         actions = json.loads(action)
         logger.info("actions: %s", actions)
-        for action in actions["actions"]:
-            await self.memory.add_memory_piece(
-                Action(action["description"], self.memory, json.dumps(action))
-            )
+        chosen = self._guard_terminate(actions["actions"][0])
+        await self.memory.add_memory_piece(
+            Action(chosen["description"], self.memory, json.dumps(chosen))
+        )
 
-        return actions["actions"][0]
+        return chosen
+
+    # Plan steps that legitimately end the session must say so explicitly
+    # (the planning prompt's termination policy phrases them with these words).
+    _EXPLICIT_STOP = re.compile(
+        r"\b(terminat\w*|quit|stop|zako[ńn]cz\w*)\b"
+        # "conclude/finish/end/complete the task|session|..." — anchored to the
+        # session noun so actionable steps like "complete the purchase" or
+        # "finish the checkout" are NOT treated as terminal.
+        r"|\b(conclud\w+|finish\w*|end\w*|complet\w*|wrap\w*\s+up)\s+(the\s+)?(task|session|visit|goal|browsing)\b",
+        re.IGNORECASE,
+    )
+
+    def _guard_terminate(self, action: dict) -> dict:
+        """Block premature terminates: the action LLM may fall back to
+        `terminate` when a plan step is passive ("review the results...")
+        and nothing in the action space matches. Unless the step explicitly
+        asks to stop, substitute a scroll so the agent keeps observing."""
+        if action.get("action") != "terminate":
+            return action
+        step = (self.current_plan.next_step if self.current_plan else "") or ""
+        if self._EXPLICIT_STOP.search(step):
+            return action
+        logger.warning(
+            "Blocked premature terminate for non-terminal step %r — substituting scroll",
+            step,
+        )
+        return {
+            "action": "scroll",
+            "direction": "down",
+            "amount": 3,
+            "description": action.get("description")
+            or f"Scrolling down to review the page: {step}",
+        }
 
     async def add_thought(self, thought):
-        await self.memory.add_memory_piece(Thought(thought, self.memory))
-        await self.memory.add_memory_piece(Thought(thought, self.memory))
-        await self.memory.add_memory_piece(Thought(thought, self.memory))
-        await self.memory.add_memory_piece(Thought(thought, self.memory))
-        await self.memory.add_memory_piece(Thought(thought, self.memory))
         await self.memory.add_memory_piece(Thought(thought, self.memory))

@@ -96,3 +96,10 @@ Return **only** a single valid JSON object with this shape:
     "Proceed to the next step: 'Add to cart'."
   ]
 }
+
+---
+
+# Failed Action Handling
+
+- The input may include a `last_action_error` field. If set, the last action FAILED with that error — the page likely did not change as intended.
+- In that case, produce thoughts that (1) acknowledge the failure and its cause, and (2) propose a concrete DIFFERENT approach for the next step. Never suggest repeating the failed action unchanged.
