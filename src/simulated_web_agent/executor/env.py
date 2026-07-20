@@ -57,6 +57,103 @@ async def select_places_suggestion(page, timeout: int = 2500) -> bool:
     return True
 
 
+async def locate_offcanvas_input(page, trigger, timeout: int = 2500):
+    """If `trigger` is a Bootstrap offcanvas decoy, return a locator for the real
+    input inside the panel it opens; otherwise return None.
+
+    Observed on diabetyk24.pl: the visible "Szukaj produktu" box is
+    `<input maxlength="0" data-bs-toggle="offcanvas" data-bs-target="#offcanvasSearch">`
+    — a trigger, not an input. The real `<input name="search[box][query]">` lives
+    inside a `.offcanvas` panel that is pruned from the parse while closed, so the
+    agent only ever sees the decoy, types into it (maxlength 0 → nothing lands),
+    and gives up. Same shape as the Google Places fix: detect the special input
+    and redirect the interaction transparently.
+
+    A decoy is an element with `data-bs-toggle="offcanvas"`, or a `maxlength="0"`
+    input. `type()` has usually already clicked the trigger (which opens the
+    panel); if the panel is not open yet, we click it here. We then return the
+    first visible, non-decoy input inside the target panel.
+    """
+    try:
+        info = await trigger.evaluate(
+            "el => ({toggle: el.getAttribute('data-bs-toggle'),"
+            " target: el.getAttribute('data-bs-target'),"
+            " maxlen: el.getAttribute('maxlength'),"
+            " tag: el.tagName.toLowerCase()})"
+        )
+    except Exception:
+        return None
+
+    is_decoy = info.get("toggle") == "offcanvas" or (
+        info.get("tag") == "input" and info.get("maxlen") == "0"
+    )
+    if not is_decoy:
+        return None
+
+    # The panel named by data-bs-target (e.g. "#offcanvasSearch"), else any panel.
+    panel_sel = info.get("target") or ".offcanvas"
+
+    # Open the panel if the trigger click has not already done so.
+    try:
+        already_open = await page.locator(
+            f"{panel_sel}.show, {panel_sel}.showing"
+        ).count()
+    except Exception:
+        already_open = 0
+    if not already_open:
+        try:
+            await trigger.click()
+        except Exception:
+            pass
+
+    # The real input inside the panel — never the maxlength=0 decoy or a hidden
+    # field. Text/search inputs, or an untyped input, are all valid.
+    input_sel = (
+        f"{panel_sel} input[type='search']:not([maxlength='0']), "
+        f"{panel_sel} input[type='text']:not([maxlength='0']), "
+        f"{panel_sel} input:not([type]):not([maxlength='0'])"
+    )
+    real_input = page.locator(input_sel).first
+    try:
+        await real_input.wait_for(state="visible", timeout=timeout)
+    except Exception:
+        return None
+    return real_input
+
+
+async def dismiss_open_offcanvas(page) -> bool:
+    """Close any open Bootstrap offcanvas panel (`.offcanvas.show`), returning
+    True if one was dismissed.
+
+    An open offcanvas — especially with `data-bs-backdrop="false"` — covers the
+    page and intercepts every click until closed. Its close control is often an
+    icon-only `data-bs-dismiss="offcanvas"` button the agent can't identify.
+    Bootstrap closes an offcanvas on Escape by default; if that doesn't clear it,
+    fall back to the panel's own dismiss control.
+    """
+    try:
+        if await page.locator(".offcanvas.show").count() == 0:
+            return False
+    except Exception:
+        return False
+
+    gone = "!document.querySelector('.offcanvas.show')"
+    await page.keyboard.press("Escape")
+    try:
+        await page.wait_for_function(gone, timeout=1500)
+        return True
+    except Exception:
+        pass
+    try:
+        await page.locator(
+            ".offcanvas.show [data-bs-dismiss='offcanvas']"
+        ).first.click(timeout=1000)
+        await page.wait_for_function(gone, timeout=1000)
+        return True
+    except Exception:
+        return False
+
+
 async def click_semantic_element(page, semantic_id: str, timeout: int = 5000) -> None:
     """Click the element with the given parser-semantic-id, recovering from
     sticky-overlay interception.
@@ -78,6 +175,11 @@ async def click_semantic_element(page, semantic_id: str, timeout: int = 5000) ->
     try:
         await element.click(timeout=timeout)
     except PlaywrightTimeoutError:
+        # An open Bootstrap offcanvas panel (data-bs-backdrop="false") covers the
+        # page and intercepts every click; dismiss it first. Observed on
+        # diabetyk24.pl, where the open search panel trapped agents in click
+        # loops on breadcrumbs / "Pokaż więcej".
+        await dismiss_open_offcanvas(page)
         await element.evaluate(
             "el => el.scrollIntoView({block: 'center', inline: 'nearest'})"
         )
@@ -936,6 +1038,27 @@ class WebAgentEnv:
             # also fixes JS-driven inputs that ignore values set by fill().
             await element.click()
             await asyncio.sleep(0.3)  # let the site shift focus (overlays, modals)
+
+            # Bootstrap offcanvas decoy: the visible "search" box is a trigger
+            # (data-bs-toggle="offcanvas" / maxlength="0") whose click just opened
+            # a panel holding the REAL input. Type into that instead — the
+            # focus-assurance below would otherwise force focus back onto the
+            # dead decoy, fighting the panel's autofocus. Same shape as the Places
+            # branch: detect the special input, redirect, early-return.
+            real_input = await locate_offcanvas_input(self.page, element)
+            if real_input is not None:
+                await real_input.scroll_into_view_if_needed(timeout=500)
+                await real_input.click()
+                await self.page.keyboard.press("Control+a")
+                await self.page.keyboard.press("Delete")
+                await self.page.keyboard.type(text, delay=40)
+                if press_enter:
+                    await asyncio.sleep(0.5)
+                    await self.page.keyboard.press("Enter")
+                self.logger.info(
+                    f"Typed '{text}' into offcanvas panel input (via {semantic_id})"
+                )
+                return
 
             # Ensure the real input actually holds focus. In SPA/overlay states a
             # click can be swallowed (focus stays on <body>), so page-level

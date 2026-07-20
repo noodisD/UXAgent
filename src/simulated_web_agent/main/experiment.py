@@ -540,6 +540,11 @@ async def _run_for_persona_and_intent(
                 "max_steps": max_steps,
                 "terminated": False,
                 "ended_reason": "error",
+                # The exception's last line (type + message). Without this,
+                # session_result recorded a bare "error" and the run's own record
+                # gave no clue why a session died — the "błąd sesji" badge with no
+                # cause. Full traceback stays in error.txt.
+                "error": (err.strip().splitlines() or [""])[-1][:500],
             })
         except Exception:
             pass
