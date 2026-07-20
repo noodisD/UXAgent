@@ -251,6 +251,17 @@ def _pagespeed_perf(run_dir: Path) -> int | None:
     return None
 
 
+def _first_persona_site_context(run_dir: Path) -> str:
+    """site_context as seen by the judgement passes, recovered from the first
+    persona's basic_info. Used for runs that pre-date recording it in the
+    manifest — it always lived here, only the manifest was missing it."""
+    for d in _persona_dirs(run_dir):
+        ctx = _as_dict(_read_json(d / "basic_info.json", {})).get("site_context")
+        if isinstance(ctx, str) and ctx.strip():
+            return ctx.strip()
+    return ""
+
+
 def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
     run_dir = runs_root / run_id
     manifest = read_manifest(run_dir)
@@ -279,6 +290,10 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
         # None for runs made before scope was recorded — a report that guessed
         # would be worse than one that says it does not know.
         "scope": _as_dict(manifest.get("scope")) or None,
+        # The declared site purpose the judgements were calibrated against.
+        # Older runs never stored it (it lived only in each persona's basic_info),
+        # so fall back to reading it off the first persona when absent.
+        "siteContext": manifest.get("site_context") or _first_persona_site_context(run_dir),
         "pagespeed": {
             "performance": _pagespeed_perf(run_dir),
             "accessibility": None,

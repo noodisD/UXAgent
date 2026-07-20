@@ -152,6 +152,8 @@ export type RunMeta = {
   status: string
   pagespeed: { performance: number | null; accessibility: number | null; bestPractices: number | null; seo: number | null }
   scope?: RunScope | null
+  /** Declared site purpose the judgements were calibrated against. */
+  siteContext?: string | null
 }
 
 export type AggIssueExample = {

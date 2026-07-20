@@ -131,6 +131,12 @@ async def run_async(
             "site": site_slug(start_url),
             "start_url": start_url,
             "intent": general_intent,
+            # What the site actually is (catalog / locator / shop...). It reaches
+            # every judgement pass via each persona's basic_info, but was not
+            # recorded here — so a finished run could not show, in its Scope
+            # section, which site_context produced the findings, and reading the
+            # manifest wrongly suggested calibration was off. Record it.
+            "site_context": site_context or "",
             "max_steps": max_steps,
             "persona_count": total_personas,
             "questionnaire": questionnaire,

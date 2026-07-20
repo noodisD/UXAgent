@@ -32,7 +32,7 @@
       <!-- §6.1 scope: what produced these findings -->
       <section :id="anchor('scope')" class="sec">
         <h3 class="sec-title">{{ t('rep.scope') }}</h3>
-        <div v-if="scope" class="scope-grid">
+        <div v-if="scopeRows.length" class="scope-grid">
           <div v-for="s in scopeRows" :key="s.label" class="scope-cell">
             <div class="scope-label mono">{{ s.label }}</div>
             <div class="scope-val mono">{{ s.value }}</div>
@@ -255,13 +255,19 @@ const props = defineProps<{
 // print a guess about which model produced the findings.
 const scope = computed(() => props.meta?.scope ?? null)
 const scopeRows = computed(() => {
+  const rows: { label: string; value: string }[] = []
   const s = scope.value
-  if (!s) return []
-  const rows = [{ label: t('rep.scope.provider'), value: s.provider ?? '—' }]
-  for (const [tier, model] of Object.entries(s.models ?? {})) {
-    rows.push({ label: t('rep.scope.model.' + tier), value: model ?? '—' })
+  if (s) {
+    rows.push({ label: t('rep.scope.provider'), value: s.provider ?? '—' })
+    for (const [tier, model] of Object.entries(s.models ?? {})) {
+      rows.push({ label: t('rep.scope.model.' + tier), value: model ?? '—' })
+    }
+    rows.push({ label: t('rep.scope.prompts'), value: s.prompts_version ?? '—' })
   }
-  rows.push({ label: t('rep.scope.prompts'), value: s.prompts_version ?? '—' })
+  // The declared site purpose the judgements were calibrated against — the
+  // reader needs to know a catalog was judged as a catalog, not a shop.
+  const ctx = props.meta?.siteContext
+  if (ctx && ctx.trim()) rows.push({ label: t('rep.scope.siteContext'), value: ctx })
   return rows
 })
 
