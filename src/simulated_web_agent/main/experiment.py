@@ -389,7 +389,19 @@ async def _run_for_persona_and_intent(
             }
 
             url_before = _current_url(obs)
-            action = await policy.forward(env, obs)
+            # Safety net: a single step's LLM call (perceive/plan/act) can still
+            # fail after gpt.py's repair+retries — a transient upstream error, or
+            # JSON that even repair can't salvage. That must not kill the whole
+            # persona session, so re-observe and retry the step once before
+            # letting it propagate. Combined with the JSON repair, an unrecovered
+            # "error" end is now genuinely rare.
+            try:
+                action = await policy.forward(env, obs)
+            except Exception as step_exc:
+                log.warning("[%s] step %d forward failed (%r) — re-observing and "
+                            "retrying once", run_uid, steps_taken, step_exc)
+                obs = await env.observation()
+                action = await policy.forward(env, obs)
 
             # Hard loop-breaker: advisory warnings (memory thoughts + error
             # channel) fire after the 2nd repeat, but the model can still keep

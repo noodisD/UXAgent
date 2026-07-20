@@ -265,6 +265,35 @@ def _extract_json_string(text: str) -> str:
         raise Exception("No JSON object found in the response")
 
 
+def _parse_json_response(content: str) -> str:
+    """Return a valid JSON string from an LLM response, repairing malformed JSON
+    rather than failing.
+
+    Models — especially the cheap `lite` tier used for page transcription —
+    intermittently emit invalid JSON: an unescaped quote or newline inside a
+    transcribed product name breaks the string and json.loads raises
+    "Expecting ',' delimiter". This call sits on the agent's perceive/plan/act
+    path, so a raise here was FATAL — it killed the whole persona session
+    (observed on dm.pl run 2026-07-20_16-43-51, and repeatedly before). We now
+    repair the response and only raise if it is truly unsalvageable.
+    """
+    # Fast path: extract the JSON object and parse it strictly.
+    try:
+        json_str = _extract_json_string(content)
+        json.loads(json_str)
+        return json_str
+    except Exception:
+        pass
+    # Repair path: json_repair locates and fixes the JSON (unescaped quotes,
+    # trailing commas, truncation, ...). Re-validate before returning so callers
+    # can always json.loads() the result.
+    from json_repair import repair_json
+
+    repaired = repair_json(content)
+    json.loads(repaired)  # raises only if even repair produced nothing valid
+    return repaired
+
+
 @async_retry(times=3)
 async def async_chat(
     messages,
@@ -358,11 +387,8 @@ async def async_chat(
         context.api_call_manager.get().response.append(content)
 
     if json_mode:
-        # Extract JSON substring from the content
         try:
-            json_str = _extract_json_string(content)
-            _ = json.loads(json_str)
-            return json_str
+            return _parse_json_response(content)
         except Exception as e:
             print(e)
             print(content)
