@@ -229,6 +229,12 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
                 # Set when evidence capped an over-claimed confidence, so the
                 # chip can say why instead of just showing a lower level.
                 "confidenceCappedBy": h.get("confidence_capped_by"),
+                # The truth gate: did the claim survive re-checking against the
+                # cited step's full observation? (supported/partial/unsupported)
+                "claimVerdict": h.get("claim_verdict"),
+                "claimVerdictReason": h.get("claim_verdict_reason"),
+                # The cited page was outside the site under test.
+                "offSite": bool(h.get("off_site")),
                 "requiresRealUserValidation": bool(h.get("requires_real_user_validation", True)),
                 "severityScore": severity_score(h),
                 "severityHumanConfirmed": h.get("severity_human_confirmed"),

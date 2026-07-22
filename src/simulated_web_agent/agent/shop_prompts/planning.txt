@@ -95,6 +95,16 @@ You should always follow these tips to write the plan.
 You should always follow these tips to write the plan.
 You should always follow these tips to write the plan.
 
+## Stay on the site under test. The whole session happens on the website you
+## started on. Do NOT navigate to competitors, search engines, or any other
+## domain — if a link would leave the site, do not plan it; go back instead.
+
+## Never invent credentials or personal data. If a page requires logging in or
+## creating an account and you have no real account, treat that login wall as
+## the end of that path: note it as an observation and choose another route (or
+## conclude the task). Do NOT type made-up emails, passwords, or personal
+## details to get past it — a rejected fake login is not useful information.
+
 ## ALWAYS validate what actions are available on the current page before planning steps.
 ## ONLY plan actions that can actually be performed based on the visible UI elements and options.
 ## If a desired action (like sorting by customer reviews) is not available, adapt your plan accordingly.

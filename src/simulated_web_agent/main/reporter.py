@@ -20,6 +20,7 @@ from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .pagespeed import format_pagespeed_summary, read_pagespeed
 from .prioritization import prioritize
+from .severity import excluded_from_report
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -58,11 +59,12 @@ def _build_per_agent_json(store: TraceStore) -> dict:
 
     sorted_findings = sorted(heuristic_findings, key=_severity_sort_key)
 
-    # Headline severity counts exclude harness-suspect findings (interaction
-    # failures wrongly attributed to the site) so they can't inflate the numbers.
-    confirmed = [f for f in heuristic_findings if not f.get("harness_suspect")]
+    # Headline severity counts exclude findings the gates demoted — harness
+    # failures, off-site pages, and claims the verifier could not support
+    # (severity.excluded_from_report is the single shared predicate).
+    confirmed = [f for f in heuristic_findings if not excluded_from_report(f)]
     severity_counts = Counter(f.get("severity") for f in confirmed)
-    needs_verification = sum(1 for f in heuristic_findings if f.get("harness_suspect"))
+    needs_verification = sum(1 for f in heuristic_findings if excluded_from_report(f))
 
     return {
         "trace_dir": str(store.trace_dir),
@@ -403,12 +405,12 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             if isinstance(f, dict):
                 all_findings.append({**f, "_persona_dir": persona_dir, "_persona_name": persona_name})
 
-    # Exclude harness-suspect findings (interaction failures mis-attributed to
-    # the site) from the headline severity counts and per-heuristic grouping, so
-    # they can't drive the critical/serious verdict or the score. They remain in
-    # all_findings and are surfaced separately as "needs verification".
-    confirmed_findings = [f for f in all_findings if not f.get("harness_suspect")]
-    needs_verification = sum(1 for f in all_findings if f.get("harness_suspect"))
+    # Exclude gated findings (harness failures, off-site pages, claims the
+    # verifier could not support) from the headline severity counts and
+    # per-heuristic grouping, so they can't drive the critical/serious verdict
+    # or the score. They remain in all_findings and are surfaced separately.
+    confirmed_findings = [f for f in all_findings if not excluded_from_report(f)]
+    needs_verification = sum(1 for f in all_findings if excluded_from_report(f))
     severity_totals = Counter(f.get("severity") for f in confirmed_findings)
 
     # Group findings by heuristic_id
@@ -434,6 +436,11 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     for h_id in sorted(by_heuristic):
         group = by_heuristic[h_id]
         freq = len(group)
+        # Personas, not findings: one persona filing the same heuristic three
+        # times is still ONE affected participant. Counting findings produced
+        # impossible frequencies ("10 z 5 uczestników") that the narrative then
+        # repeated to the client verbatim.
+        personas_affected = len({f.get("_persona_dir") for f in group if f.get("_persona_dir")}) or 1
         worst_severity = min(group, key=_severity_sort_key).get("severity", "drobny")
         verified_group = [f for f in group if f.get("verified")]
         examples = [_example(f) for f in (verified_group or group)[:3]]
@@ -441,7 +448,8 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "heuristic_id": h_id,
             "heuristic_name": HEURISTIC_NAMES.get(h_id, ""),
             "frequency": freq,
-            "sessions_affected": f"{freq} z {n} uczestników",
+            "personas_affected": personas_affected,
+            "sessions_affected": f"{min(personas_affected, n)} z {n} uczestników",
             "worst_severity": worst_severity,
             "top_evidence": group[0].get("evidence", ""),
             "top_recommendation": group[0].get("recommendation", ""),
@@ -538,7 +546,9 @@ def _top_issues_text(stats: dict, threshold: float = 0.5) -> str:
     cutoff = max(1, round(n * threshold))
     top = [
         h for h in stats["heuristic"]["by_heuristic"]
-        if h["frequency"] >= cutoff
+        # Unique personas, not finding counts — "in ≥50% of sessions" must mean
+        # sessions. (Falls back to frequency for pre-dedupe stored reports.)
+        if h.get("personas_affected", h["frequency"]) >= cutoff
     ]
     if not top:
         return "(brak problemów w ≥50% sesji)"

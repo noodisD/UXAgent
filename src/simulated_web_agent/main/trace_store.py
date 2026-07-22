@@ -58,6 +58,17 @@ class TraceStore:
             html, encoding="utf-8"
         )
 
+    def raw_html_size(self, step: int) -> int:
+        """Byte size of the step's raw HTML capture (0 if absent). Used to tell
+        a genuinely blank page from a perception artifact: a near-empty
+        *observation* over a large raw page means the perceiver failed, not the
+        site."""
+        path = self.trace_dir / "raw_html" / f"raw_html_{step}.html"
+        try:
+            return path.stat().st_size if path.exists() else 0
+        except Exception:
+            return 0
+
     # ------------------------------------------------------------------
     # Observation trace (JSONL + per-step text)
     # ------------------------------------------------------------------

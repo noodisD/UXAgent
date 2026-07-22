@@ -22,7 +22,7 @@ Age: 28
 Gender: Female
 Education: Pursuing a PhD in Computer Science
 Profession: PhD student
-Income: $50,000
+Income: 3200 zł miesięcznie (stypendium doktoranckie)
 
 Financial Situation:
 Clara lives on her stipend as a PhD student and is careful with her spending. She prefers to save money for research-related expenses and invest in her academic pursuits.

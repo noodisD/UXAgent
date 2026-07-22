@@ -20,8 +20,10 @@ from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .a11y_checks import extract_a11y_candidates
 from .attribution import flag_harness_suspects
+from .claim_verifier import run_claim_verification
 from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
+from .site_scope import flag_off_site
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -254,6 +256,29 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
         return {"error": str(e)}
 
 
+def _target_url(store: TraceStore) -> str:
+    """The site under test, for domain-scoping findings.
+
+    Read from the run-level manifest (trace_dir's parent) rather than importing
+    run.py (which would cycle back through analysis_runner → auditor). Falls
+    back to the session's first observed URL — the agent always starts on the
+    target site, so step 0 is a truthful anchor for pre-manifest runs.
+    """
+    try:
+        manifest = json.loads(
+            (store.trace_dir.parent / "run_manifest.json").read_text(encoding="utf-8")
+        )
+        url = manifest.get("start_url") or ""
+        if url:
+            return url
+    except Exception:
+        pass
+    try:
+        return store.url_at_step(0)
+    except Exception:
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -276,11 +301,21 @@ async def run_audit_analysis(store: TraceStore) -> dict:
     # Ground every finding in trace evidence (screenshot, URL, observation
     # quote) and stamp verified/unverified — claims are never trusted as-is.
     heuristic_findings = resolve_all(store, heuristic_findings)
+    # Findings about pages outside the site under test (agents wandering to
+    # doz.pl / gemini.pl fed the target site's report) are excluded up front —
+    # compared on the trace-resolved URL, which resolve_all just stamped.
+    heuristic_findings = flag_off_site(heuristic_findings, _target_url(store))
     # Flag findings whose cited step lands on a harness interaction failure
-    # (stuck click/type loop) so they aren't shipped as confirmed site defects.
+    # (stuck click/type loop, perception artifact) so they aren't shipped as
+    # confirmed site defects.
     heuristic_findings = flag_harness_suspects(store, heuristic_findings)
-    # Both stamps are now in place, so the LLM's self-reported confidence can be
-    # capped at what they actually support. Must stay after both.
+    # The truth gate: re-read each surviving claim against the cited step's
+    # FULL observation and verdict it (supported/partial/unsupported). Ground
+    # truth (diabetyk24 team review: ~2 of 8 issues real) showed most false
+    # claims are refutable from the run's own trace — this is where they die.
+    heuristic_findings = await run_claim_verification(store, heuristic_findings)
+    # All stamps are now in place, so the LLM's self-reported confidence can be
+    # capped at what they actually support. Must stay last.
     heuristic_findings = cap_confidence(heuristic_findings)
     if isinstance(accessibility_findings, dict):
         accessibility_findings["findings"] = resolve_all(

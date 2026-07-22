@@ -45,17 +45,34 @@ def _parse_action(entry) -> dict:
     return entry if isinstance(entry, dict) else {}
 
 
+# Perception-artifact signature: the observation text says (almost) nothing
+# while the step's raw HTML is large — the perceiver failed on an overlay
+# state; the page was not actually blank. Three "The page is empty" CRITICAL
+# findings in the diabetyk24 ground-truth run were exactly this.
+_ARTIFACT_OBS_MAX_CHARS = 80
+_ARTIFACT_RAW_MIN_BYTES = 20_000
+
+
 def harness_suspect_steps(store: TraceStore) -> set[int]:
     """Step indices whose action is a harness interaction failure.
 
-    Two signatures, both deterministic:
+    Three signatures, all deterministic:
       1. a fallback action ("...nie działał mimo kilku prób...") — and the step
          it retreated from, which is where the finding is usually anchored;
       2. an (action, target) pair repeated >= _REPEAT_THRESHOLD times — a stuck
-         loop where the agent retried because the interaction had no effect.
+         loop where the agent retried because the interaction had no effect;
+      3. a near-empty observation over a large raw page — a perception-capture
+         artifact ("The page is empty" while raw_html is tens of KB), i.e. the
+         perceiver failed, not the site.
     """
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
     suspect: set[int] = set()
+
+    for i in range(len(actions)):
+        obs = store.read_observation_step_text(i).strip()
+        if obs and len(obs) <= _ARTIFACT_OBS_MAX_CHARS:
+            if store.raw_html_size(i) >= _ARTIFACT_RAW_MIN_BYTES:
+                suspect.add(i)
 
     for i, a in enumerate(actions):
         desc = (a.get("description") or "").lower()

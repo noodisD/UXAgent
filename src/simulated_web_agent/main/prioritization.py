@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
-from .severity import severity_score
+from .severity import excluded_from_report, severity_score
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +88,10 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
     """
     groups: dict[int, list[dict]] = defaultdict(list)
     for f in findings or []:
-        if not isinstance(f, dict) or f.get("harness_suspect"):
+        # Gated findings (harness failures, off-site pages, verifier-rejected
+        # claims) never enter the matrix — ranking a false claim against real
+        # findings is how a false CRITICAL reaches a client.
+        if not isinstance(f, dict) or excluded_from_report(f):
             continue
         groups[f.get("heuristic_id", 0)].append(f)
 

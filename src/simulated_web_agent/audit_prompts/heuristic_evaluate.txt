@@ -41,6 +41,27 @@ Calibrate your evaluation against the site's declared purpose above:
   with severity "drobny" and explicit framing as a business recommendation.
 - If site_context is empty, apply standard heuristic evaluation.
 
+## Standard conventions are NOT defects — do not report these
+
+These are normal, expected behaviours across e-commerce sites. Reporting them as
+usability problems is a false positive (real site teams reject them):
+- A guest showing a login / registration prompt at checkout or account actions.
+  Requiring an account to buy is a business choice, not a bug.
+- A primary button (e.g. "Do koszyka") disabled until a REQUIRED option is
+  chosen (size, variant, refund type). Its discoverability may at most be
+  "drobny" IF the observation shows no hint of what is missing — never critical.
+- A two-step or overlay search (an icon/box that opens a search panel). The
+  pattern itself is conventional; only report it if the observation shows the
+  search genuinely returning wrong/empty results for a valid query.
+- An error message after submitting INVALID or made-up credentials. The site
+  correctly rejecting a bad login is correct behaviour, not a defect.
+- A cart shown as a count/number rather than a basket glyph, when an accessible
+  label (e.g. "Koszyk, liczba produktów: N") is present in the observation.
+
+Still fully reportable (do NOT suppress): an action the site ALLOWS and then
+fails on (e.g. add-to-cart succeeds then errors), genuinely broken links, real
+data loss, content that is objectively unreadable.
+
 ## Session data
 
 OBSERVATIONS:

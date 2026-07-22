@@ -20,6 +20,46 @@ def _store(tmp_path, actions):
     return store
 
 
+def test_empty_observation_artifact_is_suspect(tmp_path):
+    """Perception-capture artifact: the observation says the page is (near)
+    empty while the step's raw HTML is large — the perceiver missed an overlay
+    state, the page was NOT blank. In the diabetyk24 ground-truth run three
+    "The page is empty" CRITICAL findings were exactly this (raw_html full,
+    agent on an offcanvas overlay). Findings citing such steps must be
+    harness-suspect."""
+    actions = [
+        {"action": "click", "target": "a", "description": "open category"},
+        {"action": "click", "target": "b", "description": "open search"},
+        {"action": "scroll", "target": None, "description": "scroll down"},
+    ]
+    store = _store(tmp_path, actions)
+    store.write_observation_step_text(1, "The page is empty.")
+    store.write_raw_html(1, "<html>" + "x" * 30_000 + "</html>")
+    suspect = harness_suspect_steps(store)
+    assert 1 in suspect
+    assert 0 not in suspect and 2 not in suspect
+
+
+def test_truly_blank_page_is_not_an_artifact(tmp_path):
+    """Tiny observation AND tiny raw HTML = the page really was blank; that is
+    a legitimate observation, not a capture failure."""
+    actions = [{"action": "click", "target": "x", "description": "open"}] * 2
+    store = _store(tmp_path, actions)
+    store.write_observation_step_text(1, "The page is empty.")
+    store.write_raw_html(1, "<html><body></body></html>")
+    assert 1 not in harness_suspect_steps(store)
+
+
+def test_rich_observation_with_big_html_is_not_an_artifact(tmp_path):
+    actions = [{"action": "click", "target": "x", "description": "open"}] * 2
+    store = _store(tmp_path, actions)
+    store.write_observation_step_text(
+        1, "The page shows a product grid with 24 items, filters on the left, "
+           "a search bar at the top and pagination at the bottom.")
+    store.write_raw_html(1, "<html>" + "x" * 30_000 + "</html>")
+    assert 1 not in harness_suspect_steps(store)
+
+
 def test_fallback_action_marks_step_and_predecessor(tmp_path):
     actions = [
         {"action": "click", "target": "znajdz_sklep", "description": "open locator"},

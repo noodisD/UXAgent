@@ -86,7 +86,12 @@ export type HeuristicFinding = FindingEvidence & {
   requiresHumanCheck?: boolean
   confidence?: 'high' | 'medium' | 'low'
   /** set when evidence capped an over-claimed confidence */
-  confidenceCappedBy?: 'harness_suspect' | 'unverified' | null
+  confidenceCappedBy?: 'harness_suspect' | 'unverified' | 'off_site' | 'claim_unsupported' | 'claim_partial' | null
+  /** claim-verifier truth gate vs the cited step's full observation */
+  claimVerdict?: 'supported' | 'partial' | 'unsupported' | null
+  claimVerdictReason?: string | null
+  /** cited page was outside the site under test */
+  offSite?: boolean
   severityScore?: number          // NN/g 0–4; 0 = false positive
   severityHumanConfirmed?: string | null
   requiresRealUserValidation?: boolean

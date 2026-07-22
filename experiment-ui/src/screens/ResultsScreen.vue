@@ -256,7 +256,7 @@
                     <span class="heur-tag mono" :style="{ background: SEV[h.severity].chipBg, color: SEV[h.severity].chipFg }">{{ sevLabel(h.severity) }}</span>
                     <span v-if="h.severityScore !== undefined" class="sev-score mono">{{ h.severityScore }}</span>
                     <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
-                    <span v-if="h.harnessSuspect" class="verify-chip mono" :title="t('pd.needsVerify.hint')">{{ t('pd.needsVerify') }}</span>
+                    <span v-if="exclusionOf(h)" class="verify-chip mono" :title="t('excl.' + exclusionOf(h) + '.hint')">{{ t('excl.' + exclusionOf(h)) }}</span>
                     <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence" :title="h.confidenceCappedBy ? t('conf.capped.' + h.confidenceCappedBy) : undefined">{{ t('conf.' + h.confidence) }}</span>
                     <span v-if="!h.verified" class="unverified-badge">{{ t('ev.unverified') }}</span>
                   </div>
@@ -401,6 +401,16 @@ const fail = computed(() => personas.value.filter(p => p.outcome === 'failed').l
 function fiAvg(p: PersonaResult): number {
   const vals = Object.values(p.firstImpression).filter((v): v is number => typeof v === 'number')
   return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+}
+
+// Why a finding is held back from the confirmed report (drives the chip). One
+// of the three gates: off-site page, claim unsupported by the trace, or a
+// harness interaction failure. null = a confirmed finding.
+function exclusionOf(h: any): 'offSite' | 'unsupported' | 'harness' | null {
+  if (h?.offSite) return 'offSite'
+  if (h?.claimVerdict === 'unsupported') return 'unsupported'
+  if (h?.harnessSuspect) return 'harness'
+  return null
 }
 const avgFI = computed(() => personas.value.length ? personas.value.reduce((a, p) => a + fiAvg(p), 0) / n.value : 0)
 const avgA11y = computed(() => {

@@ -29,8 +29,17 @@ def _ceiling(finding: dict) -> tuple[str, str | None]:
     """The highest confidence this finding's evidence can support, and why."""
     if finding.get("harness_suspect"):
         return "low", "harness_suspect"
+    if finding.get("off_site"):
+        # The cited page is not the site under test (site_scope gate).
+        return "low", "off_site"
+    if finding.get("claim_verdict") == "unsupported":
+        # The claim-verifier re-read the cited step's full observation and it
+        # does not show the claimed problem.
+        return "low", "claim_unsupported"
     if not finding.get("verified", True):
         return "low", "unverified"
+    if finding.get("claim_verdict") == "partial":
+        return "medium", "claim_partial"
     return "high", None
 
 
