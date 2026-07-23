@@ -17,7 +17,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from simulated_web_agent.main.claim_verifier import run_claim_verification
+from simulated_web_agent.main.claim_verifier import (
+    run_claim_verification,
+    session_capabilities,
+)
 from simulated_web_agent.main.confidence import cap_confidence
 from simulated_web_agent.main.severity import excluded_from_report
 from simulated_web_agent.main.trace_store import TraceStore
@@ -162,3 +165,105 @@ async def test_no_verifiable_findings_makes_no_call(tmp_path):
     with patch("simulated_web_agent.main.claim_verifier.async_chat", new=mock):
         await run_claim_verification(_store(tmp_path), findings)
     assert mock.await_count == 0
+
+
+# --- session capabilities (what the run actually proved) -------------------
+
+def _store_with_urls(tmp_path, urls, obs_by_step=None):
+    store = TraceStore(tmp_path / "persona")
+    store.write_action_trace([json.dumps({"action": "click", "target": "x",
+                                           "description": "c"})] * len(urls))
+    for i, u in enumerate(urls):
+        store.append_observation({"tabs": [{"url": u, "is_active": True}]})
+        store.write_observation_step_text(i, (obs_by_step or {}).get(i, "content"))
+    return store
+
+
+def test_session_capabilities_counts_product_pages_and_cart(tmp_path):
+    store = _store_with_urls(tmp_path, [
+        "https://www.dm.pl/gospodarstwo-domowe/pranie",
+        "https://www.dm.pl/p/d/1234685/alverde-krem",
+        "https://www.dm.pl/p/d/1332317/balea-szampon",
+        "https://www.dm.pl/koszyk",
+    ])
+    caps = session_capabilities(store)
+    assert caps["product_pages_opened"] == 2
+    assert caps["reached_cart"] is True
+
+
+def test_session_capabilities_zero_when_only_listings(tmp_path):
+    store = _store_with_urls(tmp_path, [
+        "https://www.dm.pl/",
+        "https://www.dm.pl/search?query=krem",
+    ])
+    caps = session_capabilities(store)
+    assert caps["product_pages_opened"] == 0
+    assert caps["reached_cart"] is False
+
+
+# --- hard override: session contradicts an LLM "supported" -----------------
+
+async def test_links_broken_claim_overridden_when_products_opened(tmp_path):
+    """The dm ground truth: "product links randomly don't work" was marked
+    supported by the verifier, but the SAME session opened 7 product pages.
+    The deterministic override forces unsupported regardless of the LLM."""
+    store = _store_with_urls(tmp_path, [
+        "https://www.dm.pl/search?query=pasta",
+        "https://www.dm.pl/p/d/111/a",
+        "https://www.dm.pl/p/d/222/b",
+        "https://www.dm.pl/p/d/333/c",
+    ])
+    findings = [_f(
+        step=0,
+        evidence="Kliknięcia w linki produktów na liście wyników nie działały — "
+                 "strona nie reagowała.")]
+    mock = AsyncMock(return_value=_reply("supported"))  # LLM wrongly says supported
+    with patch("simulated_web_agent.main.claim_verifier.async_chat", new=mock):
+        await run_claim_verification(store, findings)
+    assert findings[0]["claim_verdict"] == "unsupported"
+    assert excluded_from_report(findings[0]) is True
+
+
+async def test_absence_claim_overridden_when_observation_shows_the_element(tmp_path):
+    """The one false critical: "system doesn't show status" while the cited
+    observation itself contains the cart indicator ("koszyk ... 1")."""
+    obs = ("Nagłówek strony z logo i wyszukiwarką. Obok ikona koszyka "
+           "z liczbą produktów: 1. Poniżej lista produktów.")
+    store = _store_with_urls(tmp_path, ["https://www.dm.pl/lista"], {0: obs})
+    findings = [_f(
+        step=0, heuristic_id=1,
+        evidence="System nie informuje o statusie — brak widocznej ikony koszyka.")]
+    mock = AsyncMock(return_value=_reply("supported"))
+    with patch("simulated_web_agent.main.claim_verifier.async_chat", new=mock):
+        await run_claim_verification(store, findings)
+    assert findings[0]["claim_verdict"] == "unsupported"
+
+
+async def test_override_does_not_touch_unrelated_supported_claim(tmp_path):
+    """A genuine supported finding (pop-up covers the search) is not affected by
+    the contradiction overrides."""
+    store = _store_with_urls(tmp_path, ["https://www.dm.pl/p/d/1/a",
+                                        "https://www.dm.pl/p/d/2/b"])
+    findings = [_f(step=0, heuristic_id=8,
+                   evidence="Wyskakujące okno pop-up zasłania wyszukiwarkę.")]
+    mock = AsyncMock(return_value=_reply("supported"))
+    with patch("simulated_web_agent.main.claim_verifier.async_chat", new=mock):
+        await run_claim_verification(store, findings)
+    assert findings[0]["claim_verdict"] == "supported"
+
+
+async def test_compare_friction_claim_is_not_falsely_overridden(tmp_path):
+    """Real false override caught in backtest: "musiał wielokrotnie PRZECHODZIĆ
+    między stroną wyników a produktami" (a legit no-compare-feature finding)
+    matched the broken marker "nie przechodz" across the word boundary of
+    "wielokrotNIE PRZECHODZić". Word-boundary matching must leave it alone."""
+    store = _store_with_urls(tmp_path, ["https://www.dm.pl/p/d/1/a",
+                                        "https://www.dm.pl/p/d/2/b",
+                                        "https://www.dm.pl/p/d/3/c"])
+    findings = [_f(step=0, heuristic_id=7, severity="drobny",
+                   evidence="Aby porównać produkty, użytkownik musiał wielokrotnie "
+                            "przechodzić między stroną wyników a stronami produktów.")]
+    mock = AsyncMock(return_value=_reply("partial"))
+    with patch("simulated_web_agent.main.claim_verifier.async_chat", new=mock):
+        await run_claim_verification(store, findings)
+    assert findings[0]["claim_verdict"] == "partial"  # untouched

@@ -20,6 +20,19 @@ For each claim you get:
   around that step
 - "url" — the page the step was on
 
+## Facts this session actually proved (ground truth from the trace)
+
+{session_facts}
+
+- "product_pages_opened": how many distinct product-detail pages the agent
+  actually reached. If this is >= 2, then product links DO work — any claim that
+  "product links/tiles don't work / don't respond" is "unsupported", no matter
+  how the agent described one failed click.
+- "reached_cart": whether the agent ever reached the cart/checkout. If FALSE,
+  the agent never completed an add-to-cart, so it has NO basis to claim "no
+  add-to-cart feedback" or that cart/status feedback is missing — such a claim
+  is "unsupported" (you cannot judge feedback for an action never performed).
+
 CLAIMS:
 {findings_json}
 

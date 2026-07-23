@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from ..agent.gpt import _parse_json_response, async_chat
 from ..agent.prompt_registry import registry as _prompts
@@ -55,6 +56,82 @@ def _parse_action(entry) -> dict:
         except Exception:
             return {"description": entry}
     return entry if isinstance(entry, dict) else {}
+
+
+# --- what the session actually PROVED (deterministic, from the trace) -------
+# A claim that an action-class is broken or a feature is absent is contradicted
+# when the trace shows that class working. dm ground truth: "product links
+# don't work" shipped as serious while the same session opened 7 product pages;
+# the one false critical claimed "no status feedback" while the cited
+# observation contained the cart indicator.
+
+_PRODUCT_URL_MARKERS = ("/p/", "/produkt", "/product/")
+_CART_URL_MARKERS = ("koszyk", "/cart", "checkout", "/kasa")
+
+
+def session_capabilities(store: TraceStore) -> dict:
+    """Ground-truth facts the run demonstrated, to check negative claims against.
+    Uses visited URLs (deduped, robust) — not fuzzy text."""
+    urls = [(u or "").lower() for u in (store.visited_urls() or [])]
+    return {
+        "product_pages_opened": sum(
+            1 for u in urls if any(m in u for m in _PRODUCT_URL_MARKERS)
+        ),
+        "reached_cart": any(
+            any(m in u for m in _CART_URL_MARKERS) for u in urls
+        ),
+    }
+
+
+# A claim asserts something is broken / doesn't respond / doesn't work.
+_BROKEN_MARKERS = (
+    "nie działa", "nie zadział", "nie reaguj", "nie otwiera", "nie przechodz",
+    "nie ładuj", "brak reakcji", "losowo nie", "nie klika", "nie uruchamia",
+    "did not respond", "does not work", "not working", "no response",
+)
+# ...specifically about product links / tiles / results.
+_PRODUCT_LINK_MARKERS = ("link do produkt", "linki produkt", "linki do produkt",
+                         "kafel", "tile", "product link", "product tile",
+                         "link produktu", "wynik", "wynikach wyszukiwania")
+
+# A claim asserts a status/cart element is absent...
+_ABSENCE_MARKERS = (
+    "nie informuje", "brak informacj", "nie wyświetla", "brak ikony",
+    "nie ma ikony", "brak stałej", "brak widocznej", "nie widać", "no feedback",
+    "not visible", "brak komunikat", "nie pokazuje",
+)
+# ...and the observation nonetheless contains a cart/status indicator.
+_STATUS_PRESENT_MARKERS = ("koszyk", "cart", "liczba produktów", "shopping cart",
+                           "cart icon", "ikona koszyka")
+
+
+def _has(text: str, markers) -> bool:
+    """Whole-word-ish marker match: a word boundary before the marker so
+    "nie przechodz" does not match "wielokrotNIE PRZECHODZić" (a real false
+    override on a legit compare-friction finding)."""
+    return any(re.search(r"(?<!\w)" + re.escape(m), text) for m in markers)
+
+
+def _contradiction_reason(evidence: str, observation: str, caps: dict) -> str | None:
+    """A short reason if the session/observation refutes a broken/absent claim,
+    else None. Deterministic and conservative — only the two clear classes the
+    LLM verifier proved unreliable on."""
+    ev = (evidence or "").lower()
+    obs = (observation or "").lower()
+
+    if (_has(ev, _BROKEN_MARKERS)
+            and _has(ev, _PRODUCT_LINK_MARKERS)
+            and caps.get("product_pages_opened", 0) >= 2):
+        return ("Wnioskowi przeczy zapis sesji: w tej samej sesji otwarto "
+                f"{caps['product_pages_opened']} stron produktów.")
+
+    if (_has(ev, _ABSENCE_MARKERS)
+            and _has(ev, ("koszyk", "cart", "status", "ikony"))
+            and _has(obs, _STATUS_PRESENT_MARKERS)):
+        return ("Cytowana obserwacja zawiera wskaźnik koszyka/statusu, "
+                "którego wniosek dotyczy jako rzekomo brakującego.")
+
+    return None
 
 
 def _step_context(store: TraceStore, step) -> dict:
@@ -106,9 +183,15 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
     if not to_verify:
         return findings
 
+    # Ground-truth facts this session demonstrated — passed to the LLM and used
+    # for the deterministic override below.
+    caps = session_capabilities(store)
+
     payload = []
+    obs_by_local: dict[int, str] = {}
     for local_id, (_, f) in enumerate(to_verify):
         ctx = _step_context(store, f.get("step"))
+        obs_by_local[local_id] = ctx["observation_full"]
         payload.append({
             "id": local_id,
             "heuristic_id": f.get("heuristic_id"),
@@ -119,10 +202,15 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
             **ctx,
         })
 
-    prompt = _prompts.get("verify_findings").replace(
-        "{findings_json}", json.dumps(payload, ensure_ascii=False, indent=1)
+    prompt = (
+        _prompts.get("verify_findings")
+        .replace("{session_facts}", json.dumps(caps, ensure_ascii=False))
+        .replace("{findings_json}", json.dumps(payload, ensure_ascii=False, indent=1))
     )
 
+    # LLM pass — fail-open: on any error, verdicts stay empty and we fall through
+    # to the deterministic override (which must run regardless of the LLM).
+    by_id: dict[int, tuple[str, str]] = {}
     try:
         raw = await async_chat(
             [{"role": "user", "content": prompt}], model="report", log=False
@@ -131,35 +219,42 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
         verdicts = result.get("verdicts") if isinstance(result, dict) else None
         if not isinstance(verdicts, list):
             raise ValueError("no verdicts array in verifier reply")
+        for v in verdicts:
+            if not isinstance(v, dict):
+                continue
+            verdict = str(v.get("verdict", "")).strip().lower()
+            if verdict not in _VALID_VERDICTS:
+                continue  # a creative verdict string must not exclude a finding
+            try:
+                by_id[int(v.get("id"))] = (
+                    verdict, str(v.get("reason", ""))[:_MAX_REASON_CHARS])
+            except (TypeError, ValueError):
+                continue
     except Exception as e:
-        # Fail open: an unverified report beats a silently emptied one.
-        log.warning("[claim_verifier] verification failed, findings left "
-                    "unchanged: %s", e)
-        return findings
+        log.warning("[claim_verifier] LLM verification failed, using "
+                    "deterministic checks only: %s", e)
 
-    by_id = {}
-    for v in verdicts:
-        if not isinstance(v, dict):
-            continue
-        verdict = str(v.get("verdict", "")).strip().lower()
-        if verdict not in _VALID_VERDICTS:
-            continue  # a creative verdict string must not exclude a finding
-        try:
-            by_id[int(v.get("id"))] = (verdict, str(v.get("reason", ""))[:_MAX_REASON_CHARS])
-        except (TypeError, ValueError):
-            continue
-
-    stamped = 0
+    stamped = overridden = 0
     for local_id, (_, f) in enumerate(to_verify):
         if local_id in by_id:
-            verdict, reason = by_id[local_id]
-            f["claim_verdict"] = verdict
-            f["verdict_reason"] = reason
+            f["claim_verdict"], f["verdict_reason"] = by_id[local_id]
             stamped += 1
+        # Deterministic override: the session/observation refutes a broken/absent
+        # claim — force unsupported, winning over an LLM "supported"/"partial".
+        # This is what the LLM proved unreliable at (a stale single observation
+        # looks consistent while the whole session disproves the claim).
+        reason = _contradiction_reason(
+            f.get("evidence", ""), obs_by_local.get(local_id, ""), caps)
+        if reason and f.get("claim_verdict") != "unsupported":
+            f["claim_verdict"] = "unsupported"
+            f["verdict_reason"] = reason
+            overridden += 1
 
-    counts = {}
-    for verdict, _ in by_id.values():
-        counts[verdict] = counts.get(verdict, 0) + 1
-    log.info("[claim_verifier] %d/%d finding(s) verdicted: %s",
-             stamped, len(to_verify), counts)
+    counts: dict[str, int] = {}
+    for _, (_, f) in enumerate(to_verify):
+        v = f.get("claim_verdict")
+        if v:
+            counts[v] = counts.get(v, 0) + 1
+    log.info("[claim_verifier] %d verdicted (%d hard-overridden) of %d: %s",
+             stamped, overridden, len(to_verify), counts)
     return findings
