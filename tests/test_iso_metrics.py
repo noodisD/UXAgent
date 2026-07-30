@@ -62,3 +62,58 @@ def test_satisfaction_is_labelled_synthetic(tmp_path):
     assert m["satisfaction"]["source"] == "synthetic_self_report"
     assert m["satisfaction"]["synthetic_score_1_5"] == 3.0  # avg of 4 and 2
     assert m["satisfaction"]["requires_real_user_validation"] is True
+
+
+# --- §4.2: effectiveness now OBSERVED where the target is decidable ---------
+
+_DM = "https://www.dm.pl"
+_SHOP = "dodaj do koszyka i przejdź do podsumowania zamówienia"
+
+
+def _store_obs(tmp_path, steps, *, intent, outcome, session=None):
+    s = TraceStore(tmp_path / "p")
+    s.write_action_trace([json.dumps({"action": "click", "description": "c"})] * len(steps))
+    for i, (url, obs) in enumerate(steps):
+        s.append_observation({"tabs": [{"url": url, "is_active": True}]})
+        s.write_observation_step_text(i, obs)
+    s.write_basic_info({"intent": intent})
+    s.write_objective_reflection({"outcome": outcome})
+    s.write_session_result(session or {"steps_taken": len(steps), "ended_reason": "terminated"})
+    return s
+
+
+def test_observed_outcome_overrides_declared_and_flags_disagreement(tmp_path):
+    # Trace reaches the order summary; the LLM declared "failed". Observed wins.
+    s = _store_obs(tmp_path,
+                   [(f"{_DM}/koszyk", "Podsumowanie. Produkty łącznie 20 zł. Przejdź do kasy.")],
+                   intent=_SHOP, outcome="failed")
+    eff = compute_iso_metrics(s)["effectiveness"]
+    assert eff["task_success"] == "success"
+    assert eff["goal_state_reached"] is True
+    assert eff["outcome_source"] == "observed"
+    assert eff["declared_outcome"] == "failed"
+    assert eff["disagreement"] is True
+    assert eff["target_rung"] == "order_summary_reached"
+
+
+def test_declared_fallback_when_target_undecidable(tmp_path):
+    # Non-shopping intent → checker abstains → declared kept, no disagreement.
+    s = _store_obs(tmp_path, [(f"{_DM}/artykul", "artykuł o zdrowiu")],
+                   intent="Przeczytaj artykuł", outcome="success")
+    eff = compute_iso_metrics(s)["effectiveness"]
+    assert eff["outcome_source"] == "declared"
+    assert eff["task_success"] == "success"
+    assert eff["observed_outcome"] == "unknown"
+    assert eff["disagreement"] is False
+
+
+def test_observed_agrees_with_declared_no_disagreement(tmp_path):
+    # Item added to cart (partial floor) but no summary → observed partial.
+    s = _store_obs(tmp_path, [
+        (f"{_DM}/p/d/1/a", "produkt"),
+        (f"{_DM}/koszyk", "Twój koszyk. Produkty łącznie 20,00 zł. Usuń."),
+    ], intent=_SHOP, outcome="partial")
+    eff = compute_iso_metrics(s)["effectiveness"]
+    assert eff["outcome_source"] == "observed"
+    assert eff["observed_outcome"] == "partial"
+    assert eff["disagreement"] is False

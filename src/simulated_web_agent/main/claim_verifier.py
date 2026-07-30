@@ -33,11 +33,16 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 from ..agent.gpt import _parse_json_response, async_chat
 from ..agent.prompt_registry import registry as _prompts
+from .session_goal_state import has_marker as _has, session_capabilities
 from .trace_store import TraceStore
+
+# `session_capabilities` is re-exported (moved to session_goal_state so there is
+# one "what the session did" module); imported here for the deterministic
+# override below and for callers/tests that import it from claim_verifier.
+__all__ = ["run_claim_verification", "session_capabilities"]
 
 log = logging.getLogger(__name__)
 
@@ -60,28 +65,11 @@ def _parse_action(entry) -> dict:
 
 # --- what the session actually PROVED (deterministic, from the trace) -------
 # A claim that an action-class is broken or a feature is absent is contradicted
-# when the trace shows that class working. dm ground truth: "product links
-# don't work" shipped as serious while the same session opened 7 product pages;
-# the one false critical claimed "no status feedback" while the cited
-# observation contained the cart indicator.
-
-_PRODUCT_URL_MARKERS = ("/p/", "/produkt", "/product/")
-_CART_URL_MARKERS = ("koszyk", "/cart", "checkout", "/kasa")
-
-
-def session_capabilities(store: TraceStore) -> dict:
-    """Ground-truth facts the run demonstrated, to check negative claims against.
-    Uses visited URLs (deduped, robust) — not fuzzy text."""
-    urls = [(u or "").lower() for u in (store.visited_urls() or [])]
-    return {
-        "product_pages_opened": sum(
-            1 for u in urls if any(m in u for m in _PRODUCT_URL_MARKERS)
-        ),
-        "reached_cart": any(
-            any(m in u for m in _CART_URL_MARKERS) for u in urls
-        ),
-    }
-
+# when the trace shows that class working (session_capabilities, now in
+# session_goal_state). dm ground truth: "product links don't work" shipped as
+# serious while the same session opened 7 product pages; the one false critical
+# claimed "no status feedback" while the cited observation contained the cart
+# indicator.
 
 # A claim asserts something is broken / doesn't respond / doesn't work.
 _BROKEN_MARKERS = (
@@ -103,13 +91,6 @@ _ABSENCE_MARKERS = (
 # ...and the observation nonetheless contains a cart/status indicator.
 _STATUS_PRESENT_MARKERS = ("koszyk", "cart", "liczba produktów", "shopping cart",
                            "cart icon", "ikona koszyka")
-
-
-def _has(text: str, markers) -> bool:
-    """Whole-word-ish marker match: a word boundary before the marker so
-    "nie przechodz" does not match "wielokrotNIE PRZECHODZić" (a real false
-    override on a legit compare-friction finding)."""
-    return any(re.search(r"(?<!\w)" + re.escape(m), text) for m in markers)
 
 
 def _contradiction_reason(evidence: str, observation: str, caps: dict) -> str | None:

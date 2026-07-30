@@ -10,27 +10,30 @@ Where each signal actually comes from — read this before trusting one:
 
   efficiency     the interaction log. step_count, backtracks, fallbacks and
                  frustration are counted from the trace. Measured.
-  effectiveness  `objective_reflection.outcome` — an LLM's verdict on the
-                 session. NOT measured. `goal_state_reached` is that verdict
-                 mapped to a bool, not a checked goal state. Only `ended_reason`
-                 and `critical_error` come from the harness.
+  effectiveness  OBSERVED from the trace (§4.2) where the task's target rung is
+                 machine-decidable: session_goal_state climbs a same-site goal
+                 ladder and compares the highest rung reached against the target
+                 the intent asks for. `outcome_source: "observed"` marks these.
+                 When the target is undecidable (non-shopping / oblique intent)
+                 or there is no on-site evidence, it falls back to the LLM's
+                 `objective_reflection.outcome` (`outcome_source: "declared"`),
+                 and any observed/declared conflict is flagged (`disagreement`).
+                 `ended_reason`/`critical_error` come from the harness.
   satisfaction   a synthetic self-report, labelled as such in the output.
 
-So two of the three buckets rest on an LLM judging its own run. That is a known
-gap, not an oversight: METHODOLOGY_PLAN §4.2 would give each task a
-machine-checkable `success_condition` (URL pattern, element present) that the
-harness verifies at end-of-run, making effectiveness evidence.
-
-Until then, do not present effectiveness as an observed outcome. Checked against
-the 53 stored sessions, the labels agree with the traces (no "success" without a
-product or cart; no "failed" that reached checkout) — but n=2 for success, and
-most of that history predates the harness fixes, so it is weak evidence rather
-than validation.
+So effectiveness is now evidence wherever the task's success condition can be
+checked; only the abstain path still rests on the LLM, and it says so.
 """
 from __future__ import annotations
 
 from .attribution import _parse_action, harness_suspect_steps
+from .session_goal_state import observed_outcome
+from .site_scope import target_url_for
 from .trace_store import TraceStore
+
+# Declared outcomes the LLM may emit — used only to detect observed/declared
+# disagreement.
+_VALID_DECLARED = {"success", "partial", "failed"}
 
 # The LLM's self-reported outcome -> normalized verdict. `goal_state_reached` is
 # this declaration cast to a bool; nothing checks that the goal state was reached
@@ -70,10 +73,24 @@ def compute_iso_metrics(store: TraceStore) -> dict:
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
     suspect = harness_suspect_steps(store)
 
-    # --- effectiveness (an LLM's verdict on its own run — see module docstring;
-    # only ended_reason/critical_error below are harness-observed) ---
-    outcome = (reflection.get("outcome") or "").lower()
-    task_success, goal_state_reached = _OUTCOME_MAP.get(outcome, ("unknown", False))
+    # --- effectiveness — OBSERVED from the trace where the task's target rung is
+    # machine-decidable (§4.2, session_goal_state). The LLM's declared outcome is
+    # kept as a labelled fallback (undecidable target / no on-site evidence) and
+    # any observed/declared disagreement is flagged. Only ended_reason/
+    # critical_error are harness-observed. ---
+    declared = (reflection.get("outcome") or "").lower()
+    observed = observed_outcome(store, target_url_for(store))
+    if observed["decidable"]:
+        task_success, goal_state_reached = _OUTCOME_MAP[observed["outcome"]]
+        outcome_source = "observed"
+    else:
+        task_success, goal_state_reached = _OUTCOME_MAP.get(declared, ("unknown", False))
+        outcome_source = "declared"
+    disagreement = (
+        observed["decidable"]
+        and declared in _VALID_DECLARED
+        and observed["outcome"] != declared
+    )
     ended_reason = session.get("ended_reason")
     critical_error = ended_reason == "error"
 
@@ -107,6 +124,16 @@ def compute_iso_metrics(store: TraceStore) -> dict:
             "goal_state_reached": bool(goal_state_reached),
             "critical_error": bool(critical_error),
             "ended_reason": ended_reason,
+            # Provenance of task_success/goal_state_reached: "observed" (trace
+            # evidence) or "declared" (LLM fallback). See session_goal_state.
+            "outcome_source": outcome_source,
+            "declared_outcome": declared or None,
+            "observed_outcome": observed["outcome"],
+            "target_rung": observed["target_rung"],
+            "target_source": observed["target_source"],
+            "reached_rung": observed["reached_rung"],
+            "disagreement": bool(disagreement),
+            "evidence": observed["evidence"],
         },
         "efficiency": {
             "step_count": step_count,

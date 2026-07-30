@@ -134,7 +134,21 @@
                   <div><div class="dh-name">{{ detail.name }}</div>
                     <div class="dh-meta mono">{{ detail.metaParts.join(' · ') }}<span v-if="detail.steps"> · {{ detail.steps }} {{ t('pd.steps') }}</span><span v-if="detail.duration"> · {{ detail.duration }}</span></div></div>
                 </div>
-                <div class="outcome-pill big" :style="{ background: oc(detail.outcome).bg, color: oc(detail.outcome).color }"><span class="pdot"></span>{{ outcomeLabel(outcomeOf(detail.outcome)) }}</div>
+                <div class="dh-outcome">
+                  <div class="outcome-pill big" :style="{ background: oc(detail.outcome).bg, color: oc(detail.outcome).color }"><span class="pdot"></span>{{ outcomeLabel(outcomeOf(detail.outcome)) }}</div>
+                  <div class="dh-outcome-tags">
+                    <span
+                      class="src-chip mono"
+                      :class="{ measured: detail.outcomeSource === 'observed' }"
+                      :title="detail.outcomeSource === 'observed' ? t('rep.pt.measuredHint') : t('rep.pt.declaredHint')"
+                    >{{ detail.outcomeSource === 'observed' ? t('rep.pt.measured') : t('rep.pt.declared') }}</span>
+                    <span
+                      v-if="detail.outcomeDisagreement"
+                      class="src-chip mono disagree"
+                      :title="t('rep.pt.disagreeHint') + (detail.declaredOutcome ? ' → ' + outcomeLabel(outcomeOf(detail.declaredOutcome)) : '')"
+                    >{{ t('rep.pt.disagree') }}</span>
+                  </div>
+                </div>
               </div>
               <div class="objective-box">
                 <span class="ux-label">{{ t('pd.objective') }}</span>
@@ -614,6 +628,12 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .outcome-pill { display: inline-flex; align-items: center; gap: 6px; font: 600 11.5px var(--sans); padding: 5px 10px; border-radius: 20px; }
 .outcome-pill.big { font-size: 13px; padding: 8px 14px; gap: 7px; }
 .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.dh-outcome { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.dh-outcome-tags { display: flex; gap: 5px; }
+.src-chip { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted-2);
+  border: 1px solid var(--line, #e7e9ee); border-radius: 4px; padding: 1px 5px; cursor: help; }
+.src-chip.measured { color: #1f9d57; border-color: #bfe6cf; background: #f1faf4; }
+.src-chip.disagree { color: #b5701a; border-color: #f0d9b0; background: #fdf3e3; }
 .strip-sum { font-size: 12.5px; color: var(--muted-2); margin-top: 11px; }
 
 .personas-layout { display: grid; grid-template-columns: 230px 1fr; gap: 22px; transition: grid-template-columns .2s ease; }

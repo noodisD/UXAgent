@@ -71,7 +71,16 @@
                 <td class="pt-task">{{ r.task || '—' }}</td>
                 <td>
                   <span class="pt-outcome" :style="{ color: outcomeColor(r.outcome) }">{{ outcomeLabel(r.outcome) }}</span>
-                  <span class="pt-src mono" :title="t('rep.pt.declaredHint')">{{ t('rep.pt.declared') }}</span>
+                  <span
+                    class="pt-src mono"
+                    :class="{ measured: r.outcome_source === 'observed' }"
+                    :title="r.outcome_source === 'observed' ? t('rep.pt.measuredHint') : t('rep.pt.declaredHint')"
+                  >{{ r.outcome_source === 'observed' ? t('rep.pt.measured') : t('rep.pt.declared') }}</span>
+                  <span
+                    v-if="r.disagreement"
+                    class="pt-src mono disagree"
+                    :title="t('rep.pt.disagreeHint') + (r.declared_outcome ? ' → ' + outcomeLabel(r.declared_outcome) : '')"
+                  >{{ t('rep.pt.disagree') }}</span>
                 </td>
                 <td class="num mono">{{ r.steps ?? '—' }}</td>
                 <td class="num mono">{{ r.backtracks ?? '—' }}</td>
@@ -474,6 +483,8 @@ function fmtScore(v: number | undefined) { return typeof v === 'number' ? v.toFi
    an observation, so they sit next to the value they qualify */
 .pt-src { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted-2);
   border: 1px solid var(--line, #e7e9ee); border-radius: 4px; padding: 1px 4px; margin-left: 6px; cursor: help; }
+.pt-src.measured { color: #1f9d57; border-color: #bfe6cf; background: #f1faf4; }
+.pt-src.disagree { color: #b5701a; border-color: #f0d9b0; background: #fdf3e3; }
 .pri-ev { font-size: 11px; color: var(--muted-2); }
 .pill { font-size: 11px; font-weight: 700; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
 .pill.high { background: #fdeceb; color: #d83a34; }

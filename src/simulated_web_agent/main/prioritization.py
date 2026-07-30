@@ -23,11 +23,17 @@ The trace already answers the question:
     medium  widespread OR blocking
     low     neither
 
-Known weakness, stated because the report must not hide it: `blocked` asks
-whether a persona who reported the finding failed — not whether *this finding*
-caused the failure. A persona who failed for an unrelated reason lends "blocked"
-to every finding they filed. Tightening it needs a causal signal we do not have
-(§4.2's machine-checkable success condition would help). So every row ships
+The `outcomes` this receives are now the OBSERVED per-persona outcomes
+(session_goal_state via iso_metrics, §4.2), not the LLM's self-rating — so
+"blocked" keys off evidence that the persona did not reach the goal, not an
+opinion. It caught the LLM declaring "failed" on a run whose trace shows the
+persona reached the order summary.
+
+Known weakness that remains, stated because the report must not hide it:
+`blocked` asks whether a persona who reported the finding failed — not whether
+*this finding* caused the failure. A persona who failed for an unrelated reason
+lends "blocked" to every finding they filed. Tightening it needs a causal signal
+we still do not have (evidence tells us they failed, not why). So every row ships
 `personas_affected`, `participant_count` and `blocked_personas` alongside the
 label: a reader can apply their own rule, or disagree with this one, instead of
 taking "high" on faith.

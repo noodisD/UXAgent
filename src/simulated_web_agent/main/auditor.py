@@ -23,7 +23,7 @@ from .attribution import flag_harness_suspects
 from .claim_verifier import run_claim_verification
 from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
-from .site_scope import flag_off_site
+from .site_scope import flag_off_site, target_url_for
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -257,26 +257,9 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
 
 
 def _target_url(store: TraceStore) -> str:
-    """The site under test, for domain-scoping findings.
-
-    Read from the run-level manifest (trace_dir's parent) rather than importing
-    run.py (which would cycle back through analysis_runner → auditor). Falls
-    back to the session's first observed URL — the agent always starts on the
-    target site, so step 0 is a truthful anchor for pre-manifest runs.
-    """
-    try:
-        manifest = json.loads(
-            (store.trace_dir.parent / "run_manifest.json").read_text(encoding="utf-8")
-        )
-        url = manifest.get("start_url") or ""
-        if url:
-            return url
-    except Exception:
-        pass
-    try:
-        return store.url_at_step(0)
-    except Exception:
-        return ""
+    """The site under test, for domain-scoping findings. Single definition in
+    site_scope.target_url_for, shared with session_goal_state / iso_metrics."""
+    return target_url_for(store)
 
 
 # ---------------------------------------------------------------------------

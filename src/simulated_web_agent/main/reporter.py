@@ -697,18 +697,23 @@ async def generate_aggregated_report(
     if not analytics_context and stores:
         analytics_context = stores[0].read_basic_info().get("analytics_context", "") or ""
 
-    # Per-persona outcome, for the §6.2 impact derivation. Read from the stores
-    # rather than the per-agent reports: reflection runs after those are written,
-    # so they carry no outcome. A persona who abandoned did not finish, whatever
-    # the reflection concluded, so ended_reason wins where it says so.
+    # Per-persona outcome, for the §6.2 impact derivation. Prefer the OBSERVED
+    # outcome (iso_metrics effectiveness, evidence-grounded per §4.2) over the
+    # LLM's declared one; fall back to declared where the target was undecidable.
+    # A persona who abandoned did not finish, whatever either concluded, so
+    # ended_reason wins where it says so.
     outcomes: dict[str, str] = {}
     for s in stores:
         reflection = s.read_objective_reflection() or {}
         session = s.read_session_result() or {}
+        eff = (s.read_iso_metrics() or {}).get("effectiveness", {}) or {}
         ended = str(session.get("ended_reason") or "")
+        if eff.get("outcome_source") == "observed":
+            outcome = str(eff.get("observed_outcome") or "")
+        else:
+            outcome = str(reflection.get("outcome") or "")
         outcomes[s.trace_dir.name] = (
-            ended if ended == "persona_abandoned"
-            else str(reflection.get("outcome") or "")
+            ended if ended == "persona_abandoned" else outcome
         )
 
     stats = aggregate_statistics(reports, outcomes=outcomes)

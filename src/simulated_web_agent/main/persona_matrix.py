@@ -9,10 +9,12 @@ average over a handful of synthetic people, and the matrix is where that becomes
 visible: two personas, both 28-year-old men from different towns, is a fact about
 the panel that no aggregate score can express.
 
-`outcome_source: "declared"` is not decoration. iso_metrics derives effectiveness
-from `objective_reflection.outcome` — an LLM's verdict on the session it just ran
-— and nothing checks it (§4.2). The matrix is exactly where a reader would
-otherwise read it as an observation.
+`outcome_source` is not decoration. effectiveness is now OBSERVED from the trace
+where the task's target is machine-decidable (§4.2, session_goal_state); it falls
+back to the LLM's declared self-rating only when it cannot (non-shopping / oblique
+intent, no on-site evidence). The matrix carries the per-persona source so a
+reader knows which rows are evidence and which are still an LLM's verdict, and
+flags any observed/declared disagreement.
 """
 from __future__ import annotations
 
@@ -48,8 +50,13 @@ def build_persona_task_matrix(personas: list) -> list[dict]:
             "home_location": p.get("homeLocation") or "",
             "task": p.get("objective") or "",
             "outcome": p.get("outcome"),
-            # The LLM's verdict on its own run — see module docstring.
-            "outcome_source": "declared",
+            # "observed" (trace evidence) or "declared" (LLM fallback) — see
+            # module docstring. Read from effectiveness, not hardcoded.
+            "outcome_source": _get(iso, "effectiveness", "outcome_source",
+                                   default="declared"),
+            "declared_outcome": _get(iso, "effectiveness", "declared_outcome"),
+            "disagreement": bool(_get(iso, "effectiveness", "disagreement", default=False)),
+            "target_rung": _get(iso, "effectiveness", "target_rung"),
             "goal_state_reached": _get(iso, "effectiveness", "goal_state_reached"),
             "steps": p.get("steps") if p.get("steps") is not None
                      else _get(iso, "efficiency", "step_count"),

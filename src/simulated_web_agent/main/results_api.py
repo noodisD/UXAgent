@@ -158,6 +158,18 @@ def _as_list(v) -> list:
     return v if isinstance(v, list) else []
 
 
+def _effective_outcome(store) -> str:
+    """The per-persona outcome the UI/history should count: the OBSERVED,
+    evidence-grounded verdict (§4.2, iso_metrics effectiveness) where the target
+    was decidable, else the LLM's declared self-rating. One definition for the
+    persona payload, the history counts and the run comparison."""
+    eff = _as_dict(_as_dict(store.read_iso_metrics()).get("effectiveness"))
+    declared = (store.read_objective_reflection() or {}).get("outcome") or "partial"
+    if eff.get("outcome_source") == "observed":
+        return eff.get("observed_outcome") or declared
+    return declared
+
+
 def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
     store = TraceStore(trace_dir)
     card = _as_dict(store.read_persona_card())
@@ -173,6 +185,16 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
     demographics = _as_dict(card.get("demographics"))
     fi_scores = _as_dict(fi.get("scores"))
 
+    # Task outcome: prefer the OBSERVED, evidence-grounded verdict (§4.2,
+    # iso_metrics effectiveness) over the LLM's declared self-rating; fall back
+    # to declared where the target was undecidable. Surface both + the source so
+    # the UI can label "zmierzone" vs "deklarowane" and flag disagreement.
+    iso = _as_dict(store.read_iso_metrics())
+    eff = _as_dict(iso.get("effectiveness"))
+    declared_outcome = reflection.get("outcome", "partial")
+    outcome = (eff.get("observed_outcome")
+               if eff.get("outcome_source") == "observed" else declared_outcome)
+
     return {
         "id": trace_dir.name,
         "name": card.get("name", "Unknown"),
@@ -180,7 +202,12 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
         "homeLocation": card.get("home_location"),
         "demographics": demographics,
         "metaParts": [str(v) for v in demographics.values()],
-        "outcome": reflection.get("outcome", "partial"),
+        "outcome": outcome,
+        "outcomeSource": eff.get("outcome_source", "declared"),
+        "declaredOutcome": declared_outcome,
+        "targetRung": eff.get("target_rung"),
+        "reachedRung": eff.get("reached_rung"),
+        "outcomeDisagreement": bool(eff.get("disagreement")),
         "steps": steps,
         "duration": _persona_duration(trace_dir),
         "reflection": {
@@ -372,9 +399,8 @@ def _build_comparison(
     def _successes(run_dir_):
         n_ok, n_all = 0, 0
         for pd in _persona_dirs(run_dir_):
-            refl = TraceStore(pd).read_objective_reflection() or {}
             n_all += 1
-            if refl.get("outcome") == "success":
+            if _effective_outcome(TraceStore(pd)) == "success":
                 n_ok += 1
         return n_ok, n_all
 
@@ -618,8 +644,7 @@ def list_runs(runs_root: Path = RUNS_ROOT) -> list[dict]:
         outcomes = {"success": 0, "partial": 0, "failed": 0}
         critical = 0
         for store in personas:
-            refl = store.read_objective_reflection() or {}
-            oc = refl.get("outcome", "partial")
+            oc = _effective_outcome(store)
             if oc in outcomes:
                 outcomes[oc] += 1
             for h in store.read_heuristic_findings() or []:

@@ -97,8 +97,21 @@ export type HeuristicFinding = FindingEvidence & {
   requiresRealUserValidation?: boolean
 }
 
+export type OutcomeSource = 'observed' | 'declared'
+
 export type IsoMetrics = {
-  effectiveness: { task_success: string; goal_state_reached: boolean; critical_error: boolean; ended_reason: string | null }
+  effectiveness: {
+    task_success: string; goal_state_reached: boolean; critical_error: boolean; ended_reason: string | null
+    /** §4.2 grounded outcome: "observed" (trace evidence) or "declared" (LLM fallback) */
+    outcome_source?: OutcomeSource
+    declared_outcome?: string | null
+    observed_outcome?: string
+    target_rung?: string | null
+    target_source?: string
+    reached_rung?: string
+    disagreement?: boolean
+    evidence?: { rung: string; step: number | null; url: string }[]
+  }
   efficiency: { step_count: number | null; backtracks: number; loop_detected: boolean; reached_step_limit: boolean; optimal_path_delta: number | null }
   satisfaction: {
     source: string
@@ -133,6 +146,12 @@ export type PersonaResult = {
   demographics: Record<string, unknown>
   metaParts: string[]
   outcome: Outcome
+  /** §4.2: is `outcome` trace-grounded ("observed") or the LLM's self-rating ("declared") */
+  outcomeSource?: OutcomeSource
+  declaredOutcome?: Outcome
+  targetRung?: string | null
+  reachedRung?: string | null
+  outcomeDisagreement?: boolean
   steps: number
   duration: string | null
   reflection: ObjectiveReflection
@@ -220,14 +239,17 @@ export type RunScope = {
   prompts_version?: string
 }
 
-/** §6.1 persona x task row. `outcome_source: 'declared'` matters: effectiveness
- *  is an LLM's verdict on its own run, not an observation (see iso_metrics). */
+/** §6.1 persona x task row. `outcome_source` matters: 'observed' = trace-grounded
+ *  (§4.2), 'declared' = the LLM's verdict on its own run (see iso_metrics). */
 export type PersonaTaskRow = {
   persona: string
   home_location: string
   task: string
   outcome: string | null
-  outcome_source: 'declared'
+  outcome_source: OutcomeSource
+  declared_outcome?: string | null
+  disagreement?: boolean
+  target_rung?: string | null
   goal_state_reached?: boolean | null
   steps: number | null
   backtracks: number | null

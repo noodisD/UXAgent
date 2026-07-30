@@ -19,10 +19,36 @@ path already caps those.
 """
 from __future__ import annotations
 
+import json
 import logging
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
+
+
+def target_url_for(store) -> str:
+    """The site under test for one persona store. Read from the run-level
+    manifest (trace_dir's parent) rather than importing run.py (which would
+    cycle back through analysis_runner). Falls back to the session's first
+    observed URL — the agent always starts on the target site, so step 0 is a
+    truthful anchor for pre-manifest runs. '' when neither is available.
+
+    Single definition shared by auditor (finding scoping), session_goal_state
+    (rung scoping) and iso_metrics (outcome scoping).
+    """
+    try:
+        manifest = json.loads(
+            (store.trace_dir.parent / "run_manifest.json").read_text(encoding="utf-8")
+        )
+        url = manifest.get("start_url") or ""
+        if url:
+            return url
+    except Exception:
+        pass
+    try:
+        return store.url_at_step(0)
+    except Exception:
+        return ""
 
 
 def registrable_domain(url) -> str:
