@@ -42,7 +42,8 @@
             <label class="ux-label">{{ t('w1.participants') }}</label>
             <div class="stepper-num">
               <button @click="dec">–</button>
-              <div class="num">{{ form.persona.numSubjects }}</div>
+              <input class="num" type="number" :min="MIN_PERSONAS" :max="MAX_PERSONAS"
+                :value="form.persona.numSubjects" @change="onPersonaCount" />
               <button @click="inc">+</button>
             </div>
           </div>
@@ -357,7 +358,7 @@ async function fillSettings() {
     // (presetKey), which must always hold one of the 4 known texts or empty —
     // writing an arbitrary AI sentence here would desync the dropdown from the
     // text silently applied underneath it.
-    if (data.num_subjects) form.persona.numSubjects = data.num_subjects
+    if (data.num_subjects) form.persona.numSubjects = Math.min(MAX_PERSONAS, Math.max(MIN_PERSONAS, Number(data.num_subjects)))
     if (data.max_steps) form.experiment.maxSteps = data.max_steps
     if (Array.isArray(data.demographics) && data.demographics.length) {
       form.persona.demographics = data.demographics.map((d: any) => ({
@@ -447,8 +448,18 @@ function tryNext() {
   nextStep()
 }
 
-function inc() { if (form.persona.numSubjects < 12) form.persona.numSubjects++ }
-function dec() { if (form.persona.numSubjects > 1) form.persona.numSubjects-- }
+const MIN_PERSONAS = 1
+const MAX_PERSONAS = 50
+
+function inc() { if (form.persona.numSubjects < MAX_PERSONAS) form.persona.numSubjects++ }
+function dec() { if (form.persona.numSubjects > MIN_PERSONAS) form.persona.numSubjects-- }
+// Typed entry — clicking + up to 50 is unusable, so the field is editable and clamped.
+function onPersonaCount(e: Event) {
+  const raw = Number((e.target as HTMLInputElement).value)
+  const n = Number.isFinite(raw) ? Math.round(raw) : MIN_PERSONAS
+  form.persona.numSubjects = Math.min(MAX_PERSONAS, Math.max(MIN_PERSONAS, n))
+  ;(e.target as HTMLInputElement).value = String(form.persona.numSubjects)
+}
 
 function pct(d: any, c: any): number {
   const total = d.choices.reduce((a: number, x: any) => a + (+x.weight || 0), 0) || 1
@@ -583,10 +594,12 @@ async function confirmRun() {
 .hint { font-size: 11px; color: #9aa0a8; }
 
 .grid-url { display: grid; grid-template-columns: 1fr 200px; gap: 16px; }
-.stepper-num { display: flex; align-items: center; border: 1px solid #e0e3e9; border-radius: 8px; overflow: hidden; }
-.stepper-num button { width: 42px; height: 43px; border: none; background: #f5f6f8; color: var(--muted); font-size: 20px; cursor: pointer; }
-.stepper-num button:hover { background: #eceef1; }
-.stepper-num .num { flex: 1; text-align: center; font: 700 16px var(--mono); }
+.stepper-num { display: flex; align-items: center; border: 1px solid var(--border-input); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.stepper-num button { width: 42px; height: 43px; border: none; background: var(--surface-3); color: var(--text-3); font-size: 20px; cursor: pointer; flex: none; }
+.stepper-num button:hover { filter: brightness(.96); }
+.stepper-num .num { flex: 1; min-width: 0; width: 100%; text-align: center; font: 700 16px var(--mono); color: var(--text);
+  border: none; background: transparent; outline: none; padding: 0; -moz-appearance: textfield; }
+.stepper-num .num::-webkit-outer-spin-button, .stepper-num .num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .ta-mono { font: 400 13.5px/1.6 var(--mono); background: #fcfcfd; resize: vertical; }
 .gen-btn { gap: 7px; }
 .gen-btn:disabled { opacity: .65; cursor: default; }

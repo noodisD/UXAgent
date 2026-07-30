@@ -13,7 +13,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest
 
-from . import results_api
+from . import cancellation, results_api
 from .persona import generate_audit_settings, generate_example_persona
 from .run import mark_run_status, new_run_id, run, site_slug
 
@@ -168,6 +168,7 @@ def run_endpoint():
         }
         CURRENT_RUN_ID = run_id
 
+    cancellation.clear(run_id)  # never inherit a stale cancel flag
     threading.Thread(target=_run_thread, args=(run_id, payload), daemon=True).start()
 
     return jsonify({"run_id": run_id, "site_slug": site_slug(payload["start_url"])}), 202
@@ -225,6 +226,9 @@ def cancel_run_endpoint(run_id: str):
         if not entry or entry.get("status") != "running":
             return jsonify({"status": "error", "error": "no active run with that id"}), 404
         entry["status"] = "cancelled"
+    # Flag it for the agent loop: sessions stop after their current step and
+    # queued personas never start, instead of running on in the background.
+    cancellation.cancel(run_id)
     try:
         mark_run_status(run_id, "cancelled")
     except Exception:
@@ -320,7 +324,11 @@ def run_report_html_endpoint(run_id: str):
     report = Path("runs") / run_id / "aggregated_report.html"
     if not report.exists():
         return jsonify({"status": "error", "error": "report not found"}), 404
-    return send_file(report.resolve())
+    # No caching: a re-rendered report must never be masked by a stale copy in
+    # the browser (the report is regenerated whenever styling or data changes).
+    resp = send_file(report.resolve())
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
 
 
 if __name__ == "__main__":

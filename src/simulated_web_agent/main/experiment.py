@@ -12,6 +12,7 @@ from omegaconf import DictConfig
 
 from ..agent import context, gpt
 from ..agent.memory import Thought
+from . import cancellation
 from ..executor.env import WebAgentEnv
 from ..config import load_cfg
 from .abort import abandon_threshold
@@ -298,6 +299,8 @@ async def _run_for_persona_and_intent(
     store.write_persona_card(persona_card)
     context.run_path.set(store.trace_dir)
     steps_taken = 0
+    # runs_dir is runs/<run_id> — used for cooperative cancellation checks.
+    run_id = runs_dir.name
 
     async def before_action_hook():
         if cfg.environment.recording.enabled:
@@ -374,6 +377,9 @@ async def _run_for_persona_and_intent(
         abandon_at = abandon_threshold(store.read_persona_card())
         abandoned = False
         while steps_taken < max_steps:
+            if cancellation.is_cancelled(run_id):
+                log.info("[%s] run cancelled — stopping session at step %d", run_id, steps_taken)
+                break
             store.append_observation(obs)
             if obs.get("tabs"):
                 print("Current url:", obs["tabs"][0].get("url"))
@@ -597,9 +603,15 @@ async def experiment_async(
     done = 0
     lock = asyncio.Lock()
 
+    run_id = runs_dir.name if runs_dir is not None else None
+
     async def run_one(entry: Dict[str, str]):
         nonlocal done
         async with sem:
+            # Queued personas must not start once the run is cancelled — with
+            # concurrency 1 and 50 personas, most are still waiting here.
+            if cancellation.is_cancelled(run_id):
+                return None
             trace_dir = await _run_for_persona_and_intent(
                 cfg=cfg,
                 persona_info=entry,

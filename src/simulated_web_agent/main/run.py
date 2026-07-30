@@ -13,6 +13,7 @@ import yaml
 from ..agent import gpt
 from ..config import load_cfg
 from .analysis_runner import run_all_analyses
+from . import cancellation
 from .experiment import experiment_async
 from .pagespeed import run_pagespeed_check
 from .persona import generate_personas
@@ -241,6 +242,11 @@ async def run_async(
         if isinstance(td, (Path, str)) and td
         and not isinstance(td, Exception)
     ]
+
+    if cancellation.is_cancelled(run_id):
+        log.info("Run %s cancelled — skipping analysis and report phases", run_id)
+        _finalize("cancelled")
+        return run_id
 
     # ── 3) Per-agent: survey + audit + viewport scan (parallel across agents) ─
     total_post = len(stores)
