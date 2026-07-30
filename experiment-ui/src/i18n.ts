@@ -282,6 +282,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'find.empty': 'Brak problemów dla tego filtra.',
     // survey
     'survey.avg': 'śr. {x}',
+    'survey.avgN': 'śr. {x} / {m}',
+    'survey.open': 'pytanie otwarte',
     'survey.empty': 'Brak odpowiedzi ankietowych.',
     // report view
     'rep.empty': 'Dla tej analizy nie wygenerowano zbiorczego raportu.',
@@ -628,6 +630,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'find.recommendation': 'Recommendation · ',
     'find.empty': 'No findings for this filter.',
     'survey.avg': 'avg {x}',
+    'survey.avgN': 'avg {x} / {m}',
+    'survey.open': 'open question',
     'survey.empty': 'No survey responses.',
     'rep.empty': 'No aggregated report was generated for this run.',
     'rep.toc.summary': 'Summary',

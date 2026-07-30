@@ -251,14 +251,6 @@
                     </template>
                   </div>
                 </div>
-                <div class="ux-label mt16">{{ t('pd.viewport') }}</div>
-                <div class="col gap7">
-                  <div v-for="(v, i) in detail.viewport.findings" :key="i" class="vp-row">
-                    <span class="vp-tag mono" :style="{ background: SEV[v.severity].chipBg, color: SEV[v.severity].chipFg }">{{ v.device }}</span>
-                    <span class="vp-issue">{{ v.issue }}</span>
-                  </div>
-                  <div v-if="!detail.viewport.findings.length" class="muted sm">{{ t('pd.noViewport') }}</div>
-                </div>
               </div>
             </div>
 
@@ -352,20 +344,27 @@
             <div class="survey-q">
               <span class="q-num mono">{{ String(qi + 1).padStart(2, '0') }}</span>
               <span class="survey-prompt">{{ q.prompt }}</span>
-              <span v-if="q.isScale" class="survey-avg mono">{{ t('survey.avg', { x: q.avg }) }}</span>
+              <span v-if="q.isScale" class="survey-avg mono">{{ t('survey.avgN', { x: q.avg, m: q.max }) }}</span>
+              <span v-else class="survey-tag mono">{{ t('survey.open') }}</span>
             </div>
-            <div v-if="q.isScale" class="dist">
-              <div v-for="d in q.dist" :key="d.v" class="dist-bar-col">
-                <span class="dist-c mono">{{ d.count }}</span>
-                <div class="dist-bar2" :style="{ height: d.height + '%' }"></div>
-                <span class="dist-v mono">{{ d.v }}</span>
+            <template v-if="q.isScale">
+              <div class="dist">
+                <div v-for="d in q.dist" :key="d.v" class="dist-bar-col">
+                  <span class="dist-c mono">{{ d.count || '' }}</span>
+                  <div class="dist-bar2" :style="{ height: d.height + '%' }"></div>
+                  <span class="dist-v mono">{{ d.v }}</span>
+                </div>
               </div>
-            </div>
-            <div v-else class="col gap11">
-              <div v-for="(r, ri) in q.responses" :key="ri" class="response">
-                <div class="resp-answer">“{{ r.answer }}”</div>
-                <div class="resp-persona mono">— {{ r.persona }}</div>
+              <div class="scale-track"><span class="scale-marker" :style="{ left: q.markerPct + '%' }"></span></div>
+              <div class="scale-anchors">
+                <span>{{ q.min }} · {{ q.lowLabel }}</span>
+                <span>{{ q.highLabel }} · {{ q.max }}</span>
               </div>
+              <div class="scale-n mono">n = {{ q.n }}</div>
+            </template>
+            <div v-else class="col gap8">
+              <div v-for="(a, ai) in q.answers" :key="ai" class="open-quote">„{{ a }}"</div>
+              <div v-if="!q.answers.length" class="muted sm">—</div>
             </div>
             <div v-if="surveySummaries[qi]" class="ai-summary">
               <div class="ai-badge mono">AI</div>
@@ -539,22 +538,57 @@ const sevChips = computed(() => ([
 const filteredFindings = computed(() => sevFilter.value === 'all'
   ? flatFindings.value : flatFindings.value.filter(h => h.severity === sevFilter.value))
 
-const surveyRows = computed(() => {
+type SurveyRow = {
+  prompt: string; isScale: boolean; min: number; max: number; n: number
+  lowLabel: string; highLabel: string; avg: string; markerPct: number
+  dist: { v: number; count: number; height: number }[]; answers: string[]
+}
+
+const surveyRows = computed<SurveyRow[]>(() => {
+  // Preferred: the backend's enriched, questionnaire-ordered survey stats
+  // (real prompts, correct per-question scale + anchors, response distribution,
+  // open answers) — the same source the static report uses.
+  const qs = (data.value as any)?.report?.statistics?.survey?.questions
+  if (Array.isArray(qs) && qs.length) {
+    return qs.map((q: any): SurveyRow => {
+      if (q.kind === 'scale') {
+        const cs = (q.distribution || []).map((d: any) => ({ v: d.value, count: d.count }))
+        const maxC = Math.max(...cs.map((d: any) => d.count), 1)
+        const lo = q.min ?? 1, hi = q.max ?? 5
+        const a = typeof q.avg === 'number' ? q.avg : null
+        return {
+          prompt: q.prompt, isScale: true, min: lo, max: hi, n: q.n ?? 0,
+          lowLabel: q.low_label ?? '', highLabel: q.high_label ?? '',
+          avg: a != null ? a.toFixed(2).replace('.', ',') : '—',
+          markerPct: (a != null && hi > lo) ? Math.round(((a - lo) / (hi - lo)) * 100) : 0,
+          dist: cs.map((d: any) => ({ v: d.v, count: d.count, height: Math.round((d.count / maxC) * 100) })),
+          answers: [],
+        }
+      }
+      return { prompt: q.prompt, isScale: false, min: 1, max: 5, n: 0,
+               lowLabel: '', highLabel: '', avg: '—', markerPct: 0, dist: [],
+               answers: (q.answers || []) as string[] }
+    })
+  }
+  // Legacy fallback (runs generated before enriched survey stats): per-persona.
   if (!personas.value.length) return []
   const qCount = personas.value[0].survey.length
-  return Array.from({ length: qCount }, (_, qi) => {
+  return Array.from({ length: qCount }, (_, qi): SurveyRow => {
     const prompt = personas.value[0].survey[qi]?.q ?? ''
-    const responses = personas.value.map(p => ({ persona: p.name, answer: p.survey[qi]?.answer ?? '', reasoning: p.survey[qi]?.reasoning ?? '' }))
-    const numeric = responses.every(r => /^[1-5]$/.test(r.answer))
+    const answers = personas.value.map(p => p.survey[qi]?.answer ?? '').filter(a => a !== '')
+    const numeric = answers.length > 0 && answers.every(a => /^[1-5]$/.test(a))
     let dist: { v: number; count: number; height: number }[] = []
-    let avg = '0'
+    let avg = '—', markerPct = 0
     if (numeric) {
-      const cs = [1, 2, 3, 4, 5].map(v => responses.filter(r => +r.answer === v).length)
+      const cs = [1, 2, 3, 4, 5].map(v => answers.filter(a => +a === v).length)
       const maxC = Math.max(...cs, 1)
       dist = [1, 2, 3, 4, 5].map((v, k) => ({ v, count: cs[k], height: Math.round((cs[k] / maxC) * 100) }))
-      avg = (responses.reduce((a, r) => a + +r.answer, 0) / responses.length).toFixed(1)
+      const m = answers.reduce((s, a) => s + +a, 0) / answers.length
+      avg = m.toFixed(2).replace('.', ','); markerPct = Math.round(((m - 1) / 4) * 100)
     }
-    return { prompt, isScale: numeric, avg, dist, responses }
+    return { prompt, isScale: numeric, min: 1, max: 5, n: answers.length,
+             lowLabel: 'zdecydowanie nie', highLabel: 'zdecydowanie tak',
+             avg, markerPct, dist, answers: numeric ? [] : answers }
   })
 })
 
@@ -742,6 +776,12 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .dist-c { font: 700 13px var(--mono); color: var(--muted); }
 .dist-bar2 { width: 100%; max-width: 54px; border-radius: 6px 6px 0 0; background: var(--ac); min-height: 4px; }
 .dist-v { font: 600 12px var(--mono); color: #9aa0a8; }
+.survey-tag { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .04em; color: var(--muted-2); border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; flex: none; }
+.scale-track { position: relative; height: 5px; border-radius: 3px; margin-top: 14px; background: linear-gradient(90deg, #f0b6b6, #f5e6a8 50%, #a9dcc0); }
+.scale-marker { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; background: var(--text); border: 2px solid var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.3); transform: translate(-50%, -50%); }
+.scale-anchors { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted-2); margin-top: 8px; }
+.scale-n { font: 11px var(--mono); color: var(--faint); margin-top: 8px; }
+.open-quote { font-size: 13.5px; color: var(--text-2); background: var(--surface-3); border-left: 3px solid var(--border); padding: 9px 13px; border-radius: 0 6px 6px 0; line-height: 1.5; }
 .response { background: #fcfcfd; border: 1px solid var(--border-soft); border-radius: 9px; padding: 13px 15px; }
 .resp-answer { font-size: 13.5px; color: var(--ink); line-height: 1.5; margin-bottom: 6px; }
 .resp-persona { font: 500 11.5px var(--mono); color: #9aa0a8; }

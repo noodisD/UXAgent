@@ -366,12 +366,84 @@ def _is_truncated_session(report: dict) -> bool:
     return isinstance(steps, int) and steps < MIN_VALID_SESSION_STEPS
 
 
-def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = None) -> dict:
+# Post-task metrics appended by the survey pass (not in the questionnaire); they
+# ride a 1-7 scale, not the 1-5 Likert, and each carries its own anchors + label.
+_SYNTHETIC_SCALES = {
+    "synthetic_seq": (1, 7, "bardzo trudne", "bardzo łatwe",
+                      "Łatwość wykonania zadania (SEQ)"),
+    "synthetic_confidence": (1, 7, "zupełnie niepewny/a", "bardzo pewny/a",
+                             "Pewność co do ukończenia zadania"),
+}
+
+
+def _survey_scale(qid: str, meta: dict | None) -> tuple[int, int, str, str]:
+    """(min, max, low_anchor, high_anchor) for a rated question. Numeric options
+    define the range; agreement statements read low=nie / high=tak."""
+    if qid in _SYNTHETIC_SCALES:
+        lo, hi, low, high, _ = _SYNTHETIC_SCALES[qid]
+        return lo, hi, low, high
+    opts = (meta or {}).get("options") or []
+    nums = [int(o) for o in opts if str(o).strip().isdigit()]
+    if nums:
+        return min(nums), max(nums), "zdecydowanie nie", "zdecydowanie tak"
+    return 1, 5, "zdecydowanie nie", "zdecydowanie tak"
+
+
+def _survey_prompt(qid: str, meta: dict | None) -> str:
+    if meta and meta.get("prompt"):
+        return meta["prompt"]
+    if qid in _SYNTHETIC_SCALES:
+        return _SYNTHETIC_SCALES[qid][4]
+    return qid
+
+
+def _build_survey_questions(survey_scores: dict, survey_open: dict,
+                            q_meta: list | None, avg) -> list[dict]:
+    """One entry per question in questionnaire order (synthetic metrics last):
+    rated -> value distribution + average + anchored scale; open -> the answers.
+    This is what lets the report show the real prompt, the response spread (vital
+    at n=5), and the correct scale instead of a bare '/5' bar on an id."""
+    q_list = [q for q in (q_meta or []) if isinstance(q, dict)]
+    q_map = {q.get("id"): q for q in q_list}
+    order = [q.get("id") for q in q_list]
+    for qid in list(survey_scores) + list(survey_open):
+        if qid not in order:
+            order.append(qid)  # data present but not declared (e.g. synthetic_*)
+
+    out: list[dict] = []
+    for qid in order:
+        meta = q_map.get(qid)
+        if survey_scores.get(qid):
+            vals = [v for v in survey_scores[qid] if v is not None]
+            lo, hi, low_l, high_l = _survey_scale(qid, meta)
+            counts = {v: 0 for v in range(lo, hi + 1)}
+            for v in vals:
+                iv = int(round(v))
+                if iv in counts:
+                    counts[iv] += 1
+            out.append({
+                "id": qid, "prompt": _survey_prompt(qid, meta), "kind": "scale",
+                "min": lo, "max": hi, "low_label": low_l, "high_label": high_l,
+                "avg": avg(vals), "n": len(vals),
+                "distribution": [{"value": v, "count": counts[v]}
+                                 for v in range(lo, hi + 1)],
+            })
+        elif survey_open.get(qid):
+            answers = [str(a).strip() for a in survey_open[qid] if str(a).strip()]
+            if answers:
+                out.append({"id": qid, "prompt": _survey_prompt(qid, meta),
+                            "kind": "open", "answers": answers})
+    return out
+
+
+def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = None,
+                         q_meta: list | None = None) -> dict:
     """Compute statistics across all per-agent reports.
 
     `outcomes` maps persona_dir -> outcome/ended_reason and is what turns the
     §6.2 prioritization matrix on; without it the matrix is omitted rather than
-    guessed (impact needs to know who failed).
+    guessed (impact needs to know who failed). `q_meta` is the questionnaire's
+    `questions` list — it supplies the real prompts + scales for the survey.
     """
     n = len(reports)
     if n == 0:
@@ -510,6 +582,20 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         "first_impression": {
             "avg_score": _avg(fi_scores),
             "dimension_avgs": {k: _avg(v) for k, v in fi_dimension_scores.items()},
+            # Per-dimension response distribution (1-5), so the report can show the
+            # spread + anchored scale like the survey, not just a bar.
+            "dimension_dist": {
+                k: {
+                    "avg": _avg(v),
+                    "n": len([x for x in v if x is not None]),
+                    "distribution": [
+                        {"value": i, "count": sum(
+                            1 for x in v if x is not None and int(round(x)) == i)}
+                        for i in range(1, 6)
+                    ],
+                }
+                for k, v in fi_dimension_scores.items()
+            },
         },
         "heuristic": {
             "total_findings": len(confirmed_findings),
@@ -535,6 +621,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         "survey": {
             "avg_scores": {k: _avg(v) for k, v in survey_scores.items()},
             "open_answers": {k: v for k, v in survey_open.items()},
+            # Enriched, questionnaire-ordered view: real prompts, per-value
+            # distribution, correct scale + anchors. reporter_html renders this.
+            "questions": _build_survey_questions(survey_scores, survey_open, q_meta, _avg),
             "surveys_included": n - len(excluded_surveys),
             "excluded_surveys": excluded_surveys,
         },
@@ -716,7 +805,22 @@ async def generate_aggregated_report(
             ended if ended == "persona_abandoned" else outcome
         )
 
-    stats = aggregate_statistics(reports, outcomes=outcomes)
+    # Questionnaire (from the run manifest) supplies real prompts + scales for
+    # the survey section — without it the report shows bare question ids.
+    q_meta = None
+    try:
+        if stores:
+            _mani = json.loads(
+                (stores[0].trace_dir.parent / "run_manifest.json").read_text(encoding="utf-8"))
+            _qn = _mani.get("questionnaire")
+            if isinstance(_qn, str):
+                _qn = json.loads(_qn)
+            if isinstance(_qn, dict):
+                q_meta = _qn.get("questions")
+    except Exception:
+        q_meta = None
+
+    stats = aggregate_statistics(reports, outcomes=outcomes, q_meta=q_meta)
     n = stats["participant_count"]
 
     # Determine runs/ dir and read page speed (must happen before prompt build)

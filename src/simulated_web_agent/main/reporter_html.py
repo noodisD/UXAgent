@@ -16,9 +16,12 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 SEVERITY_COLORS = {
-    "poważny":   ("#fff3cd", "#856404", "#ffc107"),   # bg, text, border
-    "drobny":    ("#d1ecf1", "#0c5460", "#17a2b8"),
-    "krytyczny": ("#f8d7da", "#721c24", "#dc3545"),
+    # bg, text, border — Havas palette (report tier: supporting + accent allowed).
+    # Critical owns Havas Red; serious steps down to Cadmium accent; minor uses a
+    # supporting blue (blues complement red). All text AA on its own bg.
+    "krytyczny": ("#FFDCDC", "#640000", "#E60000"),   # Light Pink / Maroon / Havas Red
+    "poważny":   ("#FFF3CC", "#5C4A00", "#FFDC32"),   # Cadmium tint / dark amber
+    "drobny":    ("#DCF6FA", "#145566", "#69EBF8"),   # Sky Blue tint / Petrol
 }
 
 SEVERITY_LABELS = {
@@ -42,13 +45,15 @@ def _esc(s: object) -> str:
 
 
 def _score_color(score: float | None) -> str:
+    # Havas-aligned, AA on white: good = deep seafoam/teal, mid = dark cadmium,
+    # low = Havas Red (used for large/bold numbers).
     if score is None:
-        return "#6c757d"
+        return "#6b6b6b"
     if score >= 4.0:
-        return "#28a745"
+        return "#008573"
     if score >= 3.0:
-        return "#ffc107"
-    return "#dc3545"
+        return "#B07A00"
+    return "#E60000"
 
 
 def _score_bar(score: float | None, max_score: float = 5.0) -> str:
@@ -76,12 +81,25 @@ def _severity_chip(sev: str) -> str:
 _CSS = """
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Havas brand tokens — Havas Red is purposeful accent only; neutrals dominant.
+   Baikal is the brand face; Arial is the sanctioned fallback for HTML. */
+:root {
+  --havas-red: #E60000;
+  --havas-maroon: #640000;
+  --ink: #111111;
+  --muted: #6b6b6b;
+  --line: #e7e5e0;
+  --page: #f5f4f2;
+  --card: #ffffff;
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Baikal', Arial, 'Helvetica Neue', Helvetica, sans-serif;
   font-size: 15px;
   line-height: 1.6;
-  color: #212529;
-  background: #f8f9fa;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  background: var(--page);
 }
 
 /* ── Layout ── */
@@ -89,26 +107,34 @@ body {
 
 /* ── Header ── */
 .report-header {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
-  color: #fff;
-  border-radius: 12px;
-  padding: 40px 48px;
-  margin-bottom: 32px;
+  position: relative; overflow: hidden;
+  background: #000; color: #fff;
+  border-radius: 14px;
+  padding: 46px 48px;
+  margin-bottom: 28px;
 }
-.report-header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
-.report-header .subtitle { font-size: 14px; opacity: .75; margin-bottom: 20px; }
-.header-meta { display: flex; gap: 32px; flex-wrap: wrap; margin-top: 24px; }
-.meta-item { text-align: center; }
-.meta-item .val {
-  font-size: 32px; font-weight: 800;
-  display: block;
+/* 25° "Uplift" accent — the one signature angle, used sparingly. */
+.report-header::after {
+  content: ""; position: absolute; right: -50px; top: -46px;
+  width: 240px; height: 30px; background: var(--havas-red);
+  transform: rotate(-25deg);
 }
-.meta-item .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; opacity: .7; }
+.report-header h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em;
+  text-transform: uppercase; margin-bottom: 8px; position: relative; z-index: 1; }
+.report-header .subtitle { font-size: 13.5px; color: rgba(255,255,255,.72);
+  margin-bottom: 20px; position: relative; z-index: 1; }
+.header-meta { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 26px;
+  position: relative; z-index: 1; }
+.meta-item { text-align: left; }
+.meta-item .val { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; display: block; }
+.meta-item .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em;
+  color: rgba(255,255,255,.6); margin-top: 3px; }
 
 /* ── Section ── */
-.section { background: #fff; border-radius: 10px; padding: 28px 32px; margin-bottom: 24px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-.section h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #f0f0f0; }
-.section h3 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; }
+.section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 26px 30px; margin-bottom: 20px; }
+.section h2 { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 18px; padding-left: 13px; position: relative; }
+.section h2::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 4px; border-radius: 2px; background: var(--havas-red); }
+.section h3 { font-size: 14.5px; font-weight: 600; margin: 18px 0 6px; }
 
 /* ── Score overview ── */
 .score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; }
@@ -168,30 +194,30 @@ body {
 .rec-list { counter-reset: rec; }
 .rec-item { display: flex; gap: 16px; margin-bottom: 18px; }
 .rec-num {
-  background: #0f3460; color: #fff;
+  background: #111111; color: #fff;
   border-radius: 50%; width: 32px; height: 32px;
   display: flex; align-items: center; justify-content: center;
   font-size: 14px; font-weight: 700; flex-shrink: 0; margin-top: 2px;
 }
 .rec-body .area { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
 .rec-body .action { font-size: 13px; color: #495057; }
-.rec-body .impact { font-size: 12px; color: #28a745; margin-top: 4px; font-style: italic; }
+.rec-body .impact { font-size: 12px; color: #008573; margin-top: 4px; font-style: italic; }
 
 /* ── Strengths ── */
 .strength-list { display: grid; gap: 10px; }
 .strength-item {
   display: flex; align-items: flex-start; gap: 10px;
-  background: #f0fff4; border-radius: 8px; padding: 10px 14px;
+  background: #e6fbf6; border-radius: 8px; padding: 10px 14px;
   font-size: 13px;
 }
-.strength-item::before { content: "✓"; color: #28a745; font-weight: 700; flex-shrink: 0; }
+.strength-item::before { content: "✓"; color: #008573; font-weight: 700; flex-shrink: 0; }
 
 /* ── Viewport ── */
 .viewport-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .vp-card { border-radius: 8px; padding: 14px 18px; border: 1px solid #e9ecef; }
 .vp-card .vp-label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-bottom: 6px; color: #6c757d; }
-.vp-ok { color: #28a745; font-weight: 700; }
-.vp-warn { color: #dc3545; font-weight: 700; }
+.vp-ok { color: #008573; font-weight: 700; }
+.vp-warn { color: #E60000; font-weight: 700; }
 
 /* ── Page speed ── */
 .ps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
@@ -203,10 +229,43 @@ body {
 .ps-metric:last-child { border-bottom: none; }
 .ps-metric .ps-mname { color: #495057; }
 .ps-metric .ps-mval { font-weight: 600; }
-.ps-status-good   { color: #28a745; }
-.ps-status-needs_improvement { color: #ffc107; }
-.ps-status-poor   { color: #dc3545; }
+.ps-status-good   { color: #008573; }
+.ps-status-needs_improvement { color: #B07A00; }
+.ps-status-poor   { color: #E60000; }
 .ps-status-unknown { color: #6c757d; }
+
+/* ── Survey (distribution + anchored scale) ── */
+.sv-legend { font-size: 13px; color: #5b6169; line-height: 1.55; margin: 0 0 20px;
+  padding: 12px 14px; background: #f6f7f9; border-radius: 8px; }
+.sv-q { padding: 18px 0; border-bottom: 1px solid #eef0f3; }
+.sv-q:last-child { border-bottom: none; padding-bottom: 4px; }
+.sv-q-head { display: flex; justify-content: space-between; align-items: baseline;
+  gap: 16px; margin-bottom: 14px; }
+.sv-q-text { font-weight: 600; font-size: 15px; color: #1a1d21; line-height: 1.4; }
+.sv-q-avg { font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.sv-hist { display: flex; gap: 6px; align-items: flex-end; height: 54px; }
+.sv-col { flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-end; height: 100%; }
+.sv-barwrap { flex: 1; width: 100%; display: flex; align-items: flex-end; }
+.sv-bar { width: 100%; background: #e2e5ea; border-radius: 3px 3px 0 0; min-height: 2px; }
+.sv-bar.filled { background: #E60000; }
+.sv-cnt { font: 700 11px ui-monospace, monospace; color: #E60000; height: 15px; line-height: 15px; }
+.sv-tick { font: 600 11px ui-monospace, monospace; color: #9aa1ab; margin-top: 3px; }
+.sv-track { position: relative; height: 5px; border-radius: 3px; margin-top: 8px;
+  background: linear-gradient(90deg, #f0b6b6, #f5e6a8 50%, #a9dcc0); }
+.sv-marker { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%;
+  background: #1a1d21; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35);
+  transform: translate(-50%, -50%); }
+.sv-anchors { display: flex; justify-content: space-between; font-size: 11px;
+  color: #8b929c; margin-top: 7px; }
+.sv-n { font: 11px ui-monospace, monospace; color: #b7bcc4; margin-top: 8px; }
+.sv-open .sv-q-tag { font: 600 10px ui-monospace, monospace; text-transform: uppercase;
+  letter-spacing: .04em; color: #8b929c; border: 1px solid #e2e5ea; border-radius: 4px;
+  padding: 3px 7px; white-space: nowrap; }
+.sv-answers { list-style: none; margin: 4px 0 0; padding: 0; display: flex;
+  flex-direction: column; gap: 7px; }
+.sv-answers li { font-size: 13px; color: #40454c; background: #f6f7f9;
+  border-left: 3px solid #cfd4db; padding: 9px 13px; border-radius: 0 6px 6px 0; line-height: 1.5; }
 
 /* ── Footer ── */
 .footer { font-size: 12px; color: #6c757d; text-align: center; margin-top: 40px; }
@@ -248,7 +307,7 @@ def _render_header(agg: dict, stats: dict) -> str:
   <div class="subtitle">{task}</div>
   <div class="header-meta">
     <div class="meta-item">
-      <span class="val" style="color:{score_color};">{overall if overall else "—"}/5</span>
+      <span class="val">{overall if overall else "—"}<span style="font-size:18px;font-weight:700;color:rgba(255,255,255,.45);">/5</span></span>
       <span class="lbl">Ocena UX</span>
     </div>
     <div class="meta-item">
@@ -256,7 +315,7 @@ def _render_header(agg: dict, stats: dict) -> str:
       <span class="lbl">Uczestników</span>
     </div>
     <div class="meta-item">
-      <span class="val" style="color:#ffc107;">{sc.get("poważny", 0)}</span>
+      <span class="val" style="color:#B07A00;">{sc.get("poważny", 0)}</span>
       <span class="lbl">Prob. poważnych</span>
     </div>
     <div class="meta-item">
@@ -362,60 +421,129 @@ def _render_all_issues(narr: dict) -> str:
     return out
 
 
+_FI_DIM_LABELS = {
+    "purpose_clarity": "Jasność celu",
+    "navigation_visibility": "Widoczność nawigacji",
+    "call_to_action": "Wezwanie do działania",
+    "visual_hierarchy": "Hierarchia wizualna",
+    "trustworthiness": "Wiarygodność",
+}
+
+
 def _render_first_impression(stats: dict, narr: dict) -> str:
     fi = stats.get("first_impression") or {}
+    dist = fi.get("dimension_dist") or {}
     dim = fi.get("dimension_avgs") or {}
     assessment = _esc(narr.get("first_impression_assessment", ""))
 
-    dim_labels = {
-        "purpose_clarity": "Jasność celu",
-        "navigation_visibility": "Widoczność nawigacji",
-        "call_to_action": "Wezwanie do działania",
-        "visual_hierarchy": "Hierarchia wizualna",
-        "trustworthiness": "Wiarygodność",
-    }
-    rows = ""
-    for key, label in dim_labels.items():
-        score = dim.get(key)
-        rows += f"""
-        <div class="score-row">
-          <div class="dim-label">{_esc(label)}</div>
-          {_score_bar(score)}
-        </div>"""
+    if dist:
+        # Same distribution + anchored-scale technique as the survey: each
+        # dimension shows how the participants split 1-5, the average, and what
+        # low/high mean — reusing _render_scale_question for one consistent look.
+        body = ['<p class="sv-legend">Ocena 5-sekundowa każdego wymiaru w skali '
+                '1-5. Słupki pokazują rozkład ocen uczestników; ● to średnia.</p>']
+        for key, label in _FI_DIM_LABELS.items():
+            d = dist.get(key)
+            if not d:
+                continue
+            body.append(_render_scale_question({
+                "prompt": label, "kind": "scale", "min": 1, "max": 5,
+                "low_label": "słabo", "high_label": "doskonale",
+                "avg": d.get("avg"), "n": d.get("n", 0),
+                "distribution": d.get("distribution") or [],
+            }))
+        body = "".join(body)
+    else:
+        # Legacy runs without per-dimension distribution: plain bars.
+        body = "".join(
+            f'<div class="score-row"><div class="dim-label">{_esc(label)}</div>'
+            f'{_score_bar(dim.get(key))}</div>'
+            for key, label in _FI_DIM_LABELS.items())
 
-    body = rows
     if assessment:
-        body += f'<p style="margin-top:14px;font-size:13px;color:#6c757d;">{assessment}</p>'
+        body += f'<p style="margin-top:16px;font-size:13px;color:var(--muted);">{assessment}</p>'
     return _section("Pierwsze wrażenie (test 5 sekund)", body)
+
+
+def _scale_color(avg: float | None, lo: int, hi: int) -> str:
+    """Colour a rated answer by where the average sits in its OWN range, so a
+    1-7 SEQ is not judged against 1-5 thresholds."""
+    if avg is None or hi <= lo:
+        return "#6c757d"
+    frac = (avg - lo) / (hi - lo)
+    if frac >= 0.7:
+        return "#008573"
+    if frac >= 0.45:
+        return "#d99a00"
+    return "#E60000"
+
+
+def _render_scale_question(q: dict) -> str:
+    lo, hi = q["min"], q["max"]
+    avg = q.get("avg")
+    color = _scale_color(avg, lo, hi)
+    dist = q.get("distribution") or []
+    peak = max((d["count"] for d in dist), default=0) or 1
+    cols = ""
+    for d in dist:
+        h = round(d["count"] / peak * 100)
+        filled = " filled" if d["count"] else ""
+        cols += (f'<div class="sv-col"><div class="sv-barwrap">'
+                 f'<div class="sv-bar{filled}" style="height:{h}%"></div></div>'
+                 f'<div class="sv-cnt">{d["count"] or ""}</div>'
+                 f'<div class="sv-tick">{d["value"]}</div></div>')
+    pct = round((avg - lo) / (hi - lo) * 100) if (avg is not None and hi > lo) else 0
+    avgtxt = (f"{avg:.2f}".replace(".", ",")) if avg is not None else "—"
+    return f"""
+    <div class="sv-q">
+      <div class="sv-q-head">
+        <span class="sv-q-text">{_esc(q['prompt'])}</span>
+        <span class="sv-q-avg" style="color:{color};">śr. {avgtxt} / {hi}</span>
+      </div>
+      <div class="sv-hist">{cols}</div>
+      <div class="sv-track"><span class="sv-marker" style="left:{pct}%;"></span></div>
+      <div class="sv-anchors"><span>{lo} · {_esc(q['low_label'])}</span>
+        <span>{_esc(q['high_label'])} · {hi}</span></div>
+      <div class="sv-n">n = {q.get('n', 0)}</div>
+    </div>"""
+
+
+def _render_open_question(q: dict) -> str:
+    items = "".join(f"<li>&bdquo;{_esc(a)}&rdquo;</li>" for a in q.get("answers", []))
+    return f"""
+    <div class="sv-q sv-open">
+      <div class="sv-q-head">
+        <span class="sv-q-text">{_esc(q['prompt'])}</span>
+        <span class="sv-q-tag">pytanie otwarte</span>
+      </div>
+      <ul class="sv-answers">{items}</ul>
+    </div>"""
 
 
 def _render_survey(stats: dict) -> str:
     survey = stats.get("survey") or {}
-    avg_scores = survey.get("avg_scores") or {}
-    open_answers = survey.get("open_answers") or {}
+    questions = survey.get("questions") or []
 
-    if not avg_scores and not open_answers:
-        return ""
+    if not questions:
+        # Legacy runs (no enriched questions): fall back to the old id + bar.
+        avg_scores = survey.get("avg_scores") or {}
+        if not avg_scores:
+            return ""
+        rows = "".join(
+            f'<div class="score-row"><div class="dim-label">'
+            f'{_esc(QUESTION_LABELS.get(qid, qid))}</div>{_score_bar(avg_scores[qid])}</div>'
+            for qid in sorted(avg_scores))
+        return _section("Wyniki ankiety", f'<div class="survey-grid">{rows}</div>')
 
-    rows = ""
-    for qid in sorted(avg_scores):
-        label = QUESTION_LABELS.get(qid, qid)
-        score = avg_scores[qid]
-        rows += f"""
-        <div class="score-row">
-          <div class="dim-label">{_esc(label)}</div>
-          {_score_bar(score)}
-        </div>"""
-
-    quotes_html = ""
-    for qid in sorted(open_answers):
-        label = QUESTION_LABELS.get(qid, qid)
-        answers = open_answers[qid]
-        items = "".join(f"<li>&bdquo;{_esc(a)}&rdquo;</li>" for a in answers)
-        quotes_html += f"<h3>{_esc(label)}</h3><ul class='quote-list'>{items}</ul>"
-
-    body = f'<div class="survey-grid">{rows}</div>{quotes_html}'
-    return _section("Wyniki ankiety", body)
+    legend = ('<p class="sv-legend">Słupki pokazują, ilu uczestników wybrało daną '
+              'wartość na skali; znacznik <b>●</b> to średnia. Kotwice skali (co '
+              'oznacza wartość najniższa i najwyższa) są podane pod każdym pytaniem. '
+              'Pytania otwarte cytują odpowiedzi uczestników.</p>')
+    body = [legend]
+    for q in questions:
+        body.append(_render_open_question(q) if q.get("kind") == "open"
+                    else _render_scale_question(q))
+    return _section("Wyniki ankiety", "".join(body))
 
 
 def _render_accessibility(stats: dict, narr: dict) -> str:
@@ -488,10 +616,10 @@ def _render_pagespeed(ps: dict | None) -> str:
         if score is None:
             return "#6c757d"
         if score >= 90:
-            return "#28a745"
+            return "#008573"
         if score >= 50:
-            return "#ffc107"
-        return "#dc3545"
+            return "#B07A00"
+        return "#E60000"
 
     def _status_class(status: str) -> str:
         return f"ps-status-{status}" if status else "ps-status-unknown"
@@ -502,7 +630,7 @@ def _render_pagespeed(ps: dict | None) -> str:
             return f"""
             <div class="ps-card">
               <div class="ps-device">{strategy.capitalize()}</div>
-              <div style="color:#dc3545;font-size:13px;">Błąd: {_esc(data['error'])}</div>
+              <div style="color:#E60000;font-size:13px;">Błąd: {_esc(data['error'])}</div>
             </div>"""
 
         score = data.get("performance_score")
@@ -553,10 +681,10 @@ def _render_scroll_depth(scroll: dict | None) -> str:
     hi = scroll.get("max_max_depth_pct", "—")
     sessions = scroll.get("sessions_with_depth_pct", "—")
     pct = min(100, int(avg))
-    color = "#28a745" if pct >= 60 else ("#ffc107" if pct >= 30 else "#dc3545")
+    color = "#008573" if pct >= 60 else ("#B07A00" if pct >= 30 else "#E60000")
     warning = ""
     if pct < 30:
-        warning = '<p style="margin-top:10px;color:#dc3545;font-size:13px;">⚠ Uczestnicy rzadko przewijali poniżej 30% strony — treści below-the-fold mogą być pomijane.</p>'
+        warning = '<p style="margin-top:10px;color:#E60000;font-size:13px;">⚠ Uczestnicy rzadko przewijali poniżej 30% strony — treści below-the-fold mogą być pomijane.</p>'
     body = f"""
     <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:14px;">
       <div>
@@ -584,7 +712,7 @@ def _render_broken_links(links: dict | None) -> str:
     sessions_broken = links.get("sessions_with_broken_links", 0)
 
     if not broken_urls:
-        status_html = '<p style="color:#28a745;font-weight:700;">✓ Nie wykryto uszkodzonych linków.</p>'
+        status_html = '<p style="color:#008573;font-weight:700;">✓ Nie wykryto uszkodzonych linków.</p>'
     else:
         items = "".join(
             f'<li style="padding:4px 0;font-size:12px;color:#721c24;"><code>{_esc(u)}</code></li>'
@@ -592,7 +720,7 @@ def _render_broken_links(links: dict | None) -> str:
         )
         more = f"<li style='color:#6c757d;font-size:12px;'>…i {len(broken_urls) - 10} więcej</li>" if len(broken_urls) > 10 else ""
         status_html = f"""
-        <p style="color:#dc3545;font-weight:700;margin-bottom:8px;">
+        <p style="color:#E60000;font-weight:700;margin-bottom:8px;">
           ✗ {len(broken_urls)} uszkodzony(ch) link(ów) w {sessions_broken} sesjach
         </p>
         <ul style="list-style:none;padding-left:0;">{items}{more}</ul>"""
@@ -630,7 +758,7 @@ def _render_form_funnel(forms: dict | None) -> str:
     body = (
         _step("Wszyscy uczestnicy", n, "#6c757d") +
         _step("Wypełnili pole formularza", engaged, "#17a2b8") +
-        _step("Dotarli do akcji submit", submitted, "#28a745")
+        _step("Dotarli do akcji submit", submitted, "#008573")
     )
     if avg_fields is not None:
         body += f'<p style="font-size:13px;color:#6c757d;margin-top:12px;">Średnio {avg_fields} pól na sesję.</p>'
