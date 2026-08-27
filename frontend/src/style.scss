@@ -40,30 +40,6 @@
   --mono: 'Archivo Narrow', 'Archivo', sans-serif;
 }
 
-[data-theme='dark'] {
-  --bg: #0c0d10;
-  --bg-blur: rgba(12, 13, 16, .82);
-  --surface: #17191f;
-  --surface-2: #1c1f26;
-  --surface-3: #252932;
-  --border: #2b2f39;
-  --border-2: #23272f;
-  --border-input: #353b46;
-  --text: #f4f5f7;
-  --text-2: #c9ced6;
-  --text-3: #a4aab4;
-  --text-muted: #828892;
-  --text-faint: #616772;
-  --hero: #000000;
-  --warn-bg: #332b08;
-  --warn-border: #4d3f0c;
-  --warn-text: #ffdc32;
-  --success-bg: #10321d;
-  --success-text: #aafa96;
-  --accent-tint: #280000;
-  --accent-tint-border: #640000;
-}
-
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
@@ -81,7 +57,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #d4d8df; border-radius: 6px; border: 2px solid var(--bg); }
-[data-theme='dark'] ::-webkit-scrollbar-thumb { background: #353b46; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 @keyframes uxspin { to { transform: rotate(360deg); } }
@@ -127,7 +102,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   font: 600 13.5px var(--sans); border: 1px solid var(--border-input); background: var(--surface); color: var(--text);
 }
 .btn:hover { border-color: #b9c0ca; }
-[data-theme='dark'] .btn:hover { border-color: #4a515e; }
 .btn-primary { border: none; background: var(--ac); color: #fff; }
 .btn-primary:hover { filter: brightness(1.06); border: none; }
 .btn-danger { border: 1px solid var(--accent-tint-border); color: var(--ac); }

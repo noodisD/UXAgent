@@ -27,10 +27,6 @@
       </nav>
 
       <div v-if="!collapsed" class="side-foot">
-        <div class="theme-switch">
-          <button class="theme-btn" :class="{ on: theme === 'light' }" @click="setTheme('light')">☀ {{ t('theme.light') }}</button>
-          <button class="theme-btn" :class="{ on: theme === 'dark' }" @click="setTheme('dark')">☾ {{ t('theme.dark') }}</button>
-        </div>
         <button v-if="runActive" class="run-card" @click="goScreen('running')" :title="t('run.return')">
           <div class="rc-head"><span class="rc-dot"></span><span class="rc-label mono">{{ t('run.active') }}</span><span class="rc-go">→</span></div>
           <div class="rc-msg">{{ runLabel }}</div>
@@ -42,7 +38,6 @@
         </div>
         <div class="version mono">v2.4 · {{ t('version.connected') }}<br>localhost:8000</div>
       </div>
-      <button v-else class="theme-mini" :title="t('theme.toggle')" @click="setTheme(theme === 'dark' ? 'light' : 'dark')">{{ theme === 'dark' ? '☾' : '☀' }}</button>
     </aside>
 
     <!-- MAIN -->
@@ -93,17 +88,9 @@ const { state: app, goScreen, newAudit } = useApp()
 const { data: results } = useResults()
 const { t, locale, setLocale } = useI18n()
 
-// --- sidebar + theme ---------------------------------------------------
+// --- sidebar -----------------------------------------------------------
 const collapsed = ref(localStorage.getItem('uxagent_sidebar') === 'collapsed')
 watchEffect(() => { try { localStorage.setItem('uxagent_sidebar', collapsed.value ? 'collapsed' : 'expanded') } catch {} })
-
-const saved = localStorage.getItem('uxagent_theme')
-const theme = ref<'light' | 'dark'>(saved === 'dark' ? 'dark' : 'light')
-function setTheme(v: 'light' | 'dark') {
-  theme.value = v
-  try { localStorage.setItem('uxagent_theme', v) } catch {}
-}
-watchEffect(() => { document.documentElement.setAttribute('data-theme', theme.value) })
 
 // Lightweight progress read for the sidebar/topbar (RunningScreen drives its own polling).
 const { data: progress, start } = useProgress(1500)
@@ -178,11 +165,6 @@ const header = computed(() => {
 .nav-ico.lines::before, .nav-ico.lines::after { content: ''; height: 1.5px; background: var(--text-muted); border-radius: 1px; }
 
 .side-foot { margin-top: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-.theme-switch { display: flex; gap: 4px; padding: 4px; background: var(--surface-3); border-radius: 9px; }
-.theme-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border: none; border-radius: 6px; cursor: pointer; font: 600 12px var(--sans); background: transparent; color: var(--text-muted); }
-.theme-btn.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-.theme-mini { margin: auto auto 16px; width: 34px; height: 34px; border: 1px solid var(--border); background: var(--surface); border-radius: 9px; color: var(--text-2); cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; }
-.theme-mini:hover { border-color: var(--ac); color: var(--ac); }
 
 .run-card { display: block; width: 100%; text-align: left; background: var(--accent-tint); border: 1px solid var(--accent-tint-border); border-radius: 10px; padding: 13px; cursor: pointer; transition: filter .15s ease; }
 .run-card:hover { filter: brightness(.98); }
