@@ -18,7 +18,21 @@
  * five composables each turning it into an opaque "HTTP 401" string.
  */
 
-const BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/+$/, '')
+/**
+ * Backend origin, in priority order:
+ *   1. window.UXAGENT_API_BASE from public/config.js — a plain file that can be
+ *      edited on the host after deployment. The dashboard ships as static files
+ *      to a server that cannot build anything, so without this a change of
+ *      backend URL would mean a full rebuild.
+ *   2. VITE_API_BASE baked in at build time.
+ *   3. Empty — same origin, which is what the Vite dev proxy relies on.
+ */
+const RUNTIME_BASE =
+  typeof window !== 'undefined' && typeof (window as any).UXAGENT_API_BASE === 'string'
+    ? ((window as any).UXAGENT_API_BASE as string)
+    : ''
+
+const BASE = (RUNTIME_BASE || import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
 
 const KEY_STORAGE = 'uxagent_api_key'
 
