@@ -89,22 +89,29 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
     findings are dropped: they are not confirmed defects, and ranking a harness
     bug against real findings is how a false CRITICAL reaches a client.
 
-    Returns one row per heuristic, each with its impact evidence and a 1-based
-    `priority`.
+    Returns one row per heuristic — OR one row per root_cause_id (root_cause.py)
+    when the finding has been cross-heuristic clustered, e.g. the same "search
+    doesn't refresh results" defect filed under 6 different heuristics collapses
+    to one row instead of ranking as 6 independent criticals. Each row carries
+    its impact evidence and a 1-based `priority`.
     """
-    groups: dict[int, list[dict]] = defaultdict(list)
+    groups: dict = defaultdict(list)
     for f in findings or []:
         # Gated findings (harness failures, off-site pages, verifier-rejected
         # claims) never enter the matrix — ranking a false claim against real
         # findings is how a false CRITICAL reaches a client.
         if not isinstance(f, dict) or excluded_from_report(f):
             continue
-        groups[f.get("heuristic_id", 0)].append(f)
+        # root_cause_id (str) if the cross-heuristic clustering pass tagged it,
+        # else heuristic_id (int) — a mixed-type key is fine, each finding only
+        # ever lands in one bucket.
+        groups[f.get("root_cause_id") or f.get("heuristic_id", 0)].append(f)
 
     participant_count = len(outcomes or {})
     rows: list[dict] = []
 
-    for hid, group in groups.items():
+    for key, group in groups.items():
+        is_cluster = isinstance(key, str)
         personas = {f.get("_persona_dir") for f in group if f.get("_persona_dir")}
         blocked_personas = sorted(
             p for p in personas
@@ -122,9 +129,14 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
             participant_count=participant_count,
             blocked=bool(blocked_personas),
         )
-        rows.append({
-            "heuristic_id": hid,
-            "heuristic_name": worst.get("heuristic_name", ""),
+        row = {
+            # Kept as an int for frontend/back-compat even for a cluster row —
+            # the lowest heuristic_id it was filed under; heuristics_involved
+            # below carries the full cross-heuristic picture.
+            "heuristic_id": min((f.get("heuristic_id") for f in group
+                                 if f.get("heuristic_id")), default=0),
+            "heuristic_name": worst.get("root_cause_name") if is_cluster
+                              else worst.get("heuristic_name", ""),
             "severity": worst.get("severity"),
             "severity_score": severity_score(worst),
             "impact": impact,
@@ -135,7 +147,12 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
             "blocked": bool(blocked_personas),
             "blocked_personas": blocked_personas,
             "finding_count": len(group),
-        })
+        }
+        if is_cluster:
+            row["root_cause_id"] = key
+            row["heuristics_involved"] = sorted(
+                {f.get("heuristic_id") for f in group if f.get("heuristic_id")})
+        rows.append(row)
 
     rows.sort(key=lambda r: (
         r["severity_score"],

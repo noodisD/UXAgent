@@ -68,7 +68,14 @@ Hard rules:
 5. Judge ONLY against the given evidence. Do not use knowledge of the site from
    elsewhere. If the evidence is genuinely insufficient to decide, use
    "partial" — never invent support.
-6. "reason" must be ONE short sentence IN POLISH, naming what in the
+6. If the claim's core assertion is supported ONLY by a quoted agent
+   reflection/interpretation ("Refleksja użytkownika wskazuje/potwierdza...")
+   and observation_full does NOT itself independently show that specific
+   state, the verdict is "unsupported" — not "partial". "partial" is for
+   claims that ARE grounded in the observation but overstate it; a claim whose
+   only support is the agent's own narrated conclusion is not observation-
+   grounded at all, however plausible it sounds.
+7. "reason" must be ONE short sentence IN POLISH, naming what in the
    observation decided the verdict (quote a fragment when possible).
 
 ## Output

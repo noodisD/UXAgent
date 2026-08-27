@@ -20,6 +20,7 @@ from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .pagespeed import format_pagespeed_summary, read_pagespeed
 from .prioritization import prioritize
+from .root_cause import assign_root_causes
 from .severity import excluded_from_report
 from .trace_store import TraceStore
 
@@ -483,9 +484,62 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # or the score. They remain in all_findings and are surfaced separately.
     confirmed_findings = [f for f in all_findings if not excluded_from_report(f)]
     needs_verification = sum(1 for f in all_findings if excluded_from_report(f))
-    severity_totals = Counter(f.get("severity") for f in confirmed_findings)
 
-    # Group findings by heuristic_id
+    # Root-cause clustering (root_cause.py): the same underlying defect can be
+    # filed under several different Nielsen heuristics depending on the
+    # persona's context — e.g. "search doesn't refresh results" was filed as 6
+    # separate krytyczny findings across H1/H2/H3/H4/H5/H9 in one real run.
+    # Stamps root_cause_id/root_cause_name on confirmed_findings (mutates the
+    # same dict objects also referenced by all_findings, so prioritize() sees
+    # the tags too).
+    assign_root_causes(confirmed_findings)
+
+    # Headline severity_counts must count each root-cause cluster ONCE, at its
+    # worst member severity — not once per heuristic it was filed under.
+    # Otherwise one bug inflates the critical count and, downstream, anchors
+    # the aggregate score near the floor for a defect that isn't 6x as bad as
+    # it looks.
+    root_cause_ids: dict[str, list[dict]] = defaultdict(list)
+    for f in confirmed_findings:
+        rc = f.get("root_cause_id")
+        if rc:
+            root_cause_ids[rc].append(f)
+    severity_counted: list[dict] = []
+    seen_rc: set[str] = set()
+    for f in confirmed_findings:
+        rc = f.get("root_cause_id")
+        if rc:
+            if rc in seen_rc:
+                continue
+            seen_rc.add(rc)
+            severity_counted.append(min(root_cause_ids[rc], key=_severity_sort_key))
+        else:
+            severity_counted.append(f)
+    severity_totals = Counter(f.get("severity") for f in severity_counted)
+
+    # One summary row per cluster: which heuristics it manifested under, how
+    # many personas independently hit it (union across all member findings —
+    # confirmed in N different contexts is STRONGER evidence, not weaker), and
+    # the worst severity. Fed to the aggregate-synthesis prompt explicitly so
+    # the narrator treats it as one issue, not N.
+    root_causes_summary = []
+    for rc_id, members in root_cause_ids.items():
+        heuristics_involved = sorted({m.get("heuristic_id") for m in members if m.get("heuristic_id")})
+        personas_affected = len({m.get("_persona_dir") for m in members if m.get("_persona_dir")})
+        worst = min(members, key=_severity_sort_key)
+        root_causes_summary.append({
+            "root_cause_id": rc_id,
+            "name": worst.get("root_cause_name", rc_id),
+            "worst_severity": worst.get("severity"),
+            "heuristics_involved": heuristics_involved,
+            "personas_affected": personas_affected,
+            "finding_count": len(members),
+            "example_evidence": worst.get("evidence", ""),
+        })
+
+    # Group findings by heuristic_id — kept per-heuristic for detail (which
+    # Nielsen category each manifestation was filed under); root_causes_summary
+    # above is the deduplicated cross-heuristic view.
     by_heuristic: dict[int, list[dict]] = defaultdict(list)
     for f in confirmed_findings:
         by_heuristic[f.get("heuristic_id", 0)].append(f)
@@ -606,6 +660,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 "needs_verification": needs_verification,
             },
             "by_heuristic": heuristic_summary,
+            # Cross-heuristic dedup (root_cause.py): findings for the same
+            # underlying defect, wherever the Nielsen category, collapsed once.
+            "root_causes": root_causes_summary,
         },
         # §6.2: severity x impact x confidence, worst first. Impact is derived
         # from reach and task consequence (prioritization.py), never asked of
@@ -762,6 +819,52 @@ def _aggregate_forms(stores: list[TraceStore]) -> tuple[dict, str]:
     return data, text
 
 
+def _format_root_causes(root_causes: list) -> str:
+    """Tell the narrator explicitly which heuristic_summary rows are the SAME
+    underlying defect (root_cause.py), so it reports one confirmed cross-context
+    issue instead of N independent severe failures for one bug."""
+    if not root_causes:
+        return "(brak wykrytych powiązań między różnymi heurystykami)"
+    lines = []
+    for rc in root_causes:
+        heur = ", ".join(f"H{h}" for h in rc["heuristics_involved"])
+        lines.append(
+            f"- „{rc['name']}” — JEDNA przyczyna, zgłoszona pod {len(rc['heuristics_involved'])} "
+            f"różnymi heurystykami ({heur}), potwierdzona niezależnie przez "
+            f"{rc['personas_affected']} uczestników. Najwyższa istotność: {rc['worst_severity']}."
+        )
+    return ("Poniższe pozycje w PODSUMOWANIU NARUSZEŃ HEURYSTYK dotyczą TEJ SAMEJ "
+            "przyczyny źródłowej mimo różnych numerów heurystyk — traktuj każdą "
+            "jako JEDEN potwierdzony problem, nie osobny błąd na heurystykę:\n"
+            + "\n".join(lines))
+
+
+_ADDED_RUNGS = {"cart_has_items", "order_summary_reached"}
+
+
+def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int) -> str:
+    """Measured task-completion summary for the aggregate narrator — evidence
+    from the trace (§4.2), so the UX score is anchored to what participants
+    actually achieved, not only their synthetic self-report (survey/SEQ)."""
+    if not n:
+        return "Brak danych o ukończeniu zadania."
+    c = Counter((v or "").lower() for v in outcomes.values())
+    succ, part, fail = c.get("success", 0), c.get("partial", 0), c.get("failed", 0)
+    ab = c.get("persona_abandoned", 0)
+    parts = [f"sukces: {succ}/{n}", f"częściowo: {part}/{n}", f"porażka: {fail}/{n}"]
+    if ab:
+        parts.append(f"porzucono: {ab}/{n}")
+    line2 = ""
+    if reached_rungs:
+        m = len(reached_rungs)
+        added = sum(1 for r in reached_rungs if r in _ADDED_RUNGS)
+        checkout = sum(1 for r in reached_rungs if r == "order_summary_reached")
+        line2 = (f"\n- {added}/{m} uczestników dodało produkt do koszyka; "
+                 f"{checkout}/{m} dotarło do etapu kasy / podsumowania zamówienia.")
+    return ("UKOŃCZENIE ZADANIA — zmierzone z zapisu sesji (dowód z przebiegu, "
+            "nie samoocena agenta):\n- " + "; ".join(parts) + "." + line2)
+
+
 async def generate_aggregated_report(
     stores: list[TraceStore],
     task_description: str,
@@ -792,6 +895,7 @@ async def generate_aggregated_report(
     # A persona who abandoned did not finish, whatever either concluded, so
     # ended_reason wins where it says so.
     outcomes: dict[str, str] = {}
+    reached_rungs: list[str] = []
     for s in stores:
         reflection = s.read_objective_reflection() or {}
         session = s.read_session_result() or {}
@@ -804,6 +908,8 @@ async def generate_aggregated_report(
         outcomes[s.trace_dir.name] = (
             ended if ended == "persona_abandoned" else outcome
         )
+        if eff.get("outcome_source") == "observed":
+            reached_rungs.append(str(eff.get("reached_rung") or ""))
 
     # Questionnaire (from the run manifest) supplies real prompts + scales for
     # the survey section — without it the report shows bare question ids.
@@ -846,7 +952,15 @@ async def generate_aggregated_report(
     top_issues = _top_issues_text(stats)
     survey_summary = json.dumps(stats.get("survey", {}), ensure_ascii=False, indent=2)
 
+    # Measured task-completion — anchors the score to observed reality (§4.2),
+    # not only synthetic self-report. Also recorded in stats for the payload.
+    outcome_distribution = _format_outcome_distribution(outcomes, reached_rungs, n)
+    stats["outcomes"] = {"counts": dict(Counter(outcomes.values())), "participant_count": n}
+    root_cause_summary = _format_root_causes(stats["heuristic"].get("root_causes") or [])
+
     prompt = prompt_template.format(
+        outcome_distribution=outcome_distribution,
+        root_cause_summary=root_cause_summary,
         site_context=site_context,
         analytics_context=analytics_context or "(not provided)",
         participant_count=n,

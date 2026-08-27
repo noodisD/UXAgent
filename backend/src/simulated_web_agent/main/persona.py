@@ -9,6 +9,50 @@ from ..config import load_cfg
 
 logger = logging.getLogger(__name__)
 
+# Persona names must be distinct: concurrent generation shares an initially-empty
+# "previous personas" list, so the model repeats names (the 20-persona dm run had
+# 4x "Ewa", 4x "Alex"). This is the deterministic guarantee; the prompt also asks
+# for a distinct Polish first name (audience-appropriate).
+_PERSONA_NAME_RE = re.compile(r"^Persona:\s*(\S+)", re.MULTILINE | re.IGNORECASE)
+_PL_NAME_POOL = [
+    "Anna", "Katarzyna", "Małgorzata", "Agnieszka", "Barbara", "Ewa", "Magdalena",
+    "Joanna", "Zofia", "Aleksandra", "Monika", "Karolina", "Marta", "Halina",
+    "Piotr", "Krzysztof", "Andrzej", "Tomasz", "Paweł", "Michał", "Marcin",
+    "Jakub", "Grzegorz", "Łukasz", "Adam", "Mateusz", "Rafał", "Marek", "Jan",
+]
+
+
+def _persona_name(text: str) -> str:
+    m = _PERSONA_NAME_RE.search(text or "")
+    return (m.group(1).rstrip(".,;:") if m else "").strip()
+
+
+def _ensure_unique_names(personas: list[dict]) -> list[dict]:
+    """Guarantee distinct persona names. On a collision (or missing name),
+    substitute a distinct Polish name, replacing whole-word occurrences of the
+    old name so the rest of the backstory stays coherent. Mutates and returns
+    the list."""
+    used: set[str] = set()
+    for p in personas:
+        if not isinstance(p, dict):
+            continue
+        text = p.get("persona", "") or ""
+        name = _persona_name(text)
+        if name and name.lower() not in used:
+            used.add(name.lower())
+            continue
+        fresh = next((n for n in _PL_NAME_POOL if n.lower() not in used), None)
+        if fresh is None:  # pool exhausted (n > pool size)
+            i = len(used) + 1
+            fresh = f"{name or 'Osoba'}-{i}"
+        used.add(fresh.lower())
+        if name:
+            text = re.sub(rf"\b{re.escape(name)}\b", fresh, text)
+        else:
+            text = f"Persona: {fresh}\n{text}"
+        p["persona"] = text
+    return personas
+
 
 # --- utils -------------------------------------------------------------------
 def parse_range(range_str: str) -> tuple[int, int]:
@@ -144,6 +188,7 @@ async def _generate_one(
                 + "The persona should:\n"
                 + "\n".join(other_lines)
                 + address_instruction
+                + "\n- Use a distinct, common Polish first name in the 'Persona: <Name>' line (the audience is Polish); avoid generic or non-Polish names."
                 + "\nProvide the persona in the same format as the examples."
                 + "\nOnly output the persona, no other text."
             ),
@@ -401,4 +446,6 @@ async def generate_personas(
             except Exception:
                 pass  # progress should never crash the job
 
+    # Concurrent generation can't diversify names on its own — enforce uniqueness.
+    _ensure_unique_names(results)
     return results

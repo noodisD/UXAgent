@@ -19,11 +19,25 @@ TASK: {task_description}
 
 WEBSITE: {website_url}
 
+TASK COMPLETION — MEASURED FROM THE SESSION TRACE (najmocniejszy dowód, nie samoocena):
+{outcome_distribution}
+To jest zmierzone ukończenie zadania (jaki etap ścieżki uczestnicy faktycznie osiągnęli),
+a nie ich subiektywna ocena. Traktuj to jako najsilniejszy pojedynczy sygnał przy ustalaniu
+overall_ux_score i executive_summary — mocniejszy niż ankieta/SEQ (samoocena) czy pierwsze
+wrażenie. Strona, na której znaczna część uczestników dotarła do koszyka/kasy, NIE jest oceną
+1–1.5, nawet jeśli droga była uciążliwa; opisz ją jako „wykonalne, ale z tarciem", a nie
+„niemożliwe". Jeśli zmierzone ukończenie i samoocena się rozchodzą, zaufaj zmierzonemu.
+
 FIRST IMPRESSION STATISTICS:
 {first_impression_stats}
 
 HEURISTIC VIOLATION SUMMARY (grouped by heuristic, sorted by frequency):
 {heuristic_summary}
+
+CROSS-HEURISTIC DEDUPLIKACJA (root_cause.py — deterministyczna, nie Twoja ocena):
+{root_cause_summary}
+critical_count/serious_count/minor_count poniżej JUŻ uwzględniają tę deduplikację —
+nie licz tych samych przyczyn ponownie we własnej analizie.
 
 ACCESSIBILITY SUMMARY:
 {accessibility_summary}
@@ -35,6 +49,9 @@ PAGE SPEED (Google PageSpeed Insights — mobile + desktop):
 {pagespeed_summary}
 Note — Speed Index thresholds: mobile good <3.4s / poor >5.8s; desktop good <1.3s / poor >2.3s.
 Performance score: 90–100 = good, 50–89 = needs improvement, 0–49 = poor.
+WAŻNE: jeśli pomiar PageSpeed jest niedostępny/błędny (np. „pomiar niedostępny"), to jest to
+usterka POMIARU, a nie wada strony — NIE obniżaj z tego powodu overall_ux_score ani nie opisuj
+tego jako problemu strony; możesz jedynie zalecić ponowny pomiar.
 
 TOP FINDINGS BY SEVERITY:
 Critical: {critical_count}

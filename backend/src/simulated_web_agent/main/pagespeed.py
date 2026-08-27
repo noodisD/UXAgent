@@ -197,7 +197,10 @@ def format_pagespeed_summary(ps: dict | None) -> str:
     for strategy in ("mobile", "desktop"):
         data = ps.get(strategy) or {}
         if data.get("error"):
-            lines.append(f"{strategy.capitalize()}: ERROR — {data['error']}")
+            # A measurement failure is not a site defect — phrase it so the
+            # narrator does not read it as a page problem and lower the score.
+            lines.append(f"{strategy.capitalize()}: pomiar niedostępny "
+                         f"(błąd techniczny pomiaru, nie wada strony)")
             continue
 
         score = data.get("performance_score")

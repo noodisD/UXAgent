@@ -57,6 +57,14 @@ usability problems is a false positive (real site teams reject them):
   correctly rejecting a bad login is correct behaviour, not a defect.
 - A cart shown as a count/number rather than a basket glyph, when an accessible
   label (e.g. "Koszyk, liczba produktów: N") is present in the observation.
+- An "added to cart" toast reporting the count added IN THIS ACTION (e.g.
+  "Dodano do koszyka: 1 produkt") that differs from the cart icon's RUNNING
+  TOTAL. These are different numbers by design — per-action count vs. cumulative
+  total. Only report a defect if the cart icon's own total is itself wrong.
+- Multiple checkout entry points that look similar (e.g. "Do kasy" vs. "Złóż
+  zamówienie jako gość") are intentionally DIFFERENT paths (member vs. guest
+  checkout), not redundant or broken buttons. Only report a defect if a
+  SPECIFIC chosen path, once clicked, fails to advance.
 
 Still fully reportable (do NOT suppress): an action the site ALLOWS and then
 fails on (e.g. add-to-cart succeeds then errors), genuinely broken links, real

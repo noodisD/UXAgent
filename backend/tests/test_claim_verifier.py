@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from simulated_web_agent.agent.prompt_registry import registry as _prompts
 from simulated_web_agent.main.claim_verifier import (
     run_claim_verification,
     session_capabilities,
@@ -267,3 +268,21 @@ async def test_compare_friction_claim_is_not_falsely_overridden(tmp_path):
     with patch("simulated_web_agent.main.claim_verifier.async_chat", new=mock):
         await run_claim_verification(store, findings)
     assert findings[0]["claim_verdict"] == "partial"  # untouched
+
+
+# --- reflection-primary evidence must be "unsupported", not "partial" -------
+#
+# Ground truth: 3 kept findings in the 20-persona dm.pl run (Magda H2, Alex H3,
+# Aleksy H5) cited "Refleksja użytkownika wskazuje/potwierdza..." as the
+# load-bearing evidence while the paired observation was unrelated generic page
+# text — and the LLM verified them "partial" (kept), not "unsupported"
+# (excluded). This is prompt-decided LLM behaviour, not code logic, so it can't
+# be unit-tested end to end without hitting the model — this smoke-checks the
+# rule text actually reached the prompt asset the verifier sends.
+
+def test_verify_findings_prompt_has_reflection_primary_rule():
+    prompt = _prompts.get("verify_findings")
+    lower = prompt.lower()
+    assert "refleksj" in lower
+    # the rule must explicitly distinguish "reflection-only" from "partial"
+    assert '"unsupported" — not "partial"' in lower

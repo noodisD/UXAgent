@@ -82,6 +82,36 @@ def test_one_row_per_heuristic_not_per_finding():
     assert sorted(r["heuristic_id"] for r in rows) == [2, 5]
 
 
+def test_root_cause_cluster_yields_one_row_across_heuristics():
+    """The same underlying defect (root_cause.py) filed under different
+    heuristic_ids must rank as ONE row, not N independent criticals — ground
+    truth: the dm.pl 20-persona run's "search doesn't refresh" bug hit 6
+    heuristics via 6 different personas."""
+    findings = [
+        {**_f(hid=h, persona=f"p{h}"), "root_cause_id": "search_stale_results",
+         "root_cause_name": "Wyszukiwarka nie aktualizuje wyników"}
+        for h in (1, 2, 3, 4, 5, 9)
+    ]
+    outcomes = {f"p{h}": "success" for h in (1, 2, 3, 4, 5, 9)}
+    rows = prioritize(findings, outcomes)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["root_cause_id"] == "search_stale_results"
+    assert row["heuristics_involved"] == [1, 2, 3, 4, 5, 9]
+    assert row["personas_affected"] == 6
+    assert row["heuristic_name"] == "Wyszukiwarka nie aktualizuje wyników"
+    # Backward-compat: heuristic_id still populated (lowest in the cluster) so
+    # existing frontend consumers don't break on a clustered row.
+    assert row["heuristic_id"] == 1
+
+
+def test_unclustered_findings_still_get_one_row_per_heuristic():
+    rows = prioritize([_f(hid=2, persona="p1"), _f(hid=5, persona="p2")],
+                      {"p1": "success", "p2": "success"})
+    assert sorted(r["heuristic_id"] for r in rows) == [2, 5]
+    assert all("root_cause_id" not in r for r in rows)
+
+
 def test_worst_severity_in_the_group_wins():
     rows = prioritize([_f(hid=1, severity="drobny", persona="p1"),
                        _f(hid=1, severity="krytyczny", persona="p2")],
