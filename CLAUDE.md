@@ -15,30 +15,43 @@ the UI is Polish-first with an EN toggle.
 
 ## Stack
 
-- **Backend**: Python 3.12, Flask (`src/simulated_web_agent/main/app.py`), async
-  pipeline via `asyncio`, Playwright, LiteLLM (OpenAI / Anthropic / Gemini / AWS).
-- **Frontend**: Vue 3 + TypeScript + Vite, Naive UI, in `experiment-ui/`.
-- **Packaging**: `uv` (`pyproject.toml` + `uv.lock`); editable install of `simulated_web_agent`.
+- **Backend**: Python 3.12, Flask (`backend/src/simulated_web_agent/main/app.py`),
+  async pipeline via `asyncio`, Playwright, LiteLLM (OpenAI / Anthropic / Gemini / AWS).
+- **Frontend**: Vue 3 + TypeScript + Vite, Naive UI, in `frontend/`.
+- **Packaging**: `uv` (`backend/pyproject.toml` + `backend/uv.lock`); editable
+  install of `simulated_web_agent`.
+
+## Repo layout
+
+Split into two independently deployable halves (backend → GCP container,
+frontend → static host):
+```
+backend/    Flask API + Playwright pipeline — see backend/README.md
+frontend/   Vue/Vite dashboard (formerly experiment-ui/)
+```
+Top-level docs (this file, README.md, HANDOFF.md, METHODOLOGY_PLAN.md) and
+`figures/` (referenced by README.md) stay at the project root — they describe
+the whole project, not one half.
 
 ## Run commands
 
 Backend (port 8000) — terminal 1:
 ```
-PYTHONIOENCODING=utf-8 uv run python -m simulated_web_agent.main.app
+cd backend && PYTHONIOENCODING=utf-8 uv run python -m simulated_web_agent.main.app
 ```
 Frontend (port 5173) — terminal 2:
 ```
-cd experiment-ui && npm run dev
+cd frontend && npm run dev
 ```
 Open http://localhost:5173. Vite proxies `/run`, `/progress`,
 `/generate-example-persona`, and `/runs/*` to the backend on 8000.
 
-Type-check frontend: `cd experiment-ui && npx vue-tsc --noEmit`
-Backend tests: `uv run pytest` (in `tests/`).
+Type-check frontend: `cd frontend && npx vue-tsc --noEmit`
+Backend tests: `cd backend && uv run pytest` (in `backend/tests/`).
 
 ## Environment gotchas (important)
 
-- **`.env` required** at repo root. Loaded via python-dotenv in `agent/gpt.py`;
+- **`.env` required** at `backend/`. Loaded via python-dotenv in `agent/gpt.py`;
   without it every LLM call 500s. `llm_provider: "gemini"` in `conf/base.yaml` is
   the only provider in use, and it routes through **Vertex AI**, not AI Studio —
   so the keys that actually matter are:
