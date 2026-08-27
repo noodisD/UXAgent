@@ -41,7 +41,14 @@ RUN uv sync --frozen --no-dev --no-install-project
 # ── Chromium + its system libraries ──────────────────────────────────────────
 # --with-deps runs apt-get for the shared libs chromium needs; must happen as
 # root, before dropping privileges.
-RUN uv run playwright install --with-deps chromium \
+#
+# Invoked via .venv/bin, NOT `uv run`: at this point only pyproject.toml and
+# uv.lock have been copied, and `uv run` would try to install the project
+# itself, which reads its version from src/simulated_web_agent/__about__.py —
+# a file that does not arrive until the COPY below. Keeping this layer before
+# the source copy is deliberate: it is by far the slowest step, and it must not
+# be invalidated every time a source file changes.
+RUN .venv/bin/playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Application ──────────────────────────────────────────────────────────────
@@ -49,8 +56,9 @@ COPY . .
 RUN uv sync --frozen --no-dev
 
 # Serve with gunicorn rather than Flask's dev server. Installed here, not in
-# pyproject: it is a deployment concern, not a library dependency.
-RUN uv pip install gunicorn
+# pyproject: it is a deployment concern, not a library dependency. --python
+# pins it to the project venv rather than relying on discovery.
+RUN uv pip install --python .venv/bin/python gunicorn
 
 # ── Runtime user ─────────────────────────────────────────────────────────────
 # Non-root is required, not just good practice: conf/base.yaml passes no
@@ -73,7 +81,7 @@ EXPOSE 8080
 # would be invisible to /progress served by the other.
 # --timeout 0 disables the worker kill: reading a large run's trace can take a
 # while, and the audit threads must not be reaped mid-run.
-CMD exec uv run gunicorn \
+CMD exec .venv/bin/gunicorn \
     --bind "0.0.0.0:${PORT}" \
     --workers 1 \
     --threads 8 \
