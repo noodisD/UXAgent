@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { apiFetch } from '../api'
 import type { RunHistoryRow } from '../types'
 
 export function useHistory() {
@@ -10,7 +11,7 @@ export function useHistory() {
     loading.value = true
     error.value = null
     try {
-      const res = await fetch('/runs', { headers: { 'Cache-Control': 'no-store' } })
+      const res = await apiFetch('/runs', { headers: { 'Cache-Control': 'no-store' } })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       rows.value = await res.json()
     } catch (e: any) {

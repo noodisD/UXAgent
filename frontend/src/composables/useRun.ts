@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { apiFetch } from '../api'
 import { buildRunPayload } from './useForm'
 import type { WizardForm } from '../types'
 
@@ -14,7 +15,7 @@ export function useRun() {
   async function start(form: WizardForm): Promise<string> {
     error.value = null
     const payload = buildRunPayload(form)
-    const res = await fetch('/run', {
+    const res = await apiFetch('/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

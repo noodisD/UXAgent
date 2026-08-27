@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { apiFetch } from '../api'
 import type { RunDetail } from '../types'
 
 // Module-level singleton so the App shell (header) and ResultsScreen share one payload.
@@ -10,7 +11,7 @@ async function load(runId: string) {
   loading.value = true
   error.value = null
   try {
-    const res = await fetch(`/runs/${encodeURIComponent(runId)}`, {
+    const res = await apiFetch(`/runs/${encodeURIComponent(runId)}`, {
       headers: { 'Cache-Control': 'no-store' },
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)

@@ -4,13 +4,16 @@
 # returns a run_id immediately. The frontend polls GET /progress, then fetches results
 # from GET /runs/<run_id> once status is "done".
 import asyncio
+import hmac
 import logging
+import os
 import re
 import threading
 import time
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
 from werkzeug.exceptions import BadRequest
 
 from . import cancellation, results_api
@@ -20,6 +23,91 @@ from .run import mark_run_status, new_run_id, run, site_slug
 log = logging.getLogger("simulated_web_agent.main.app")
 
 app = Flask(__name__)
+
+# ---------------------------------------------------------------------------
+# Cross-origin access + auth
+#
+# The dashboard is served from a different origin than this API once deployed
+# (static host vs. GCP), so both are required. Neither engages locally: with
+# CORS_ORIGINS and UXAGENT_API_KEY unset the app behaves exactly as before,
+# which is what keeps `npm run dev` + the test suite working untouched.
+# ---------------------------------------------------------------------------
+
+# Comma-separated allowlist, e.g. "https://ux.example.com,https://staging.example.com".
+# Empty (the default) means same-origin only — nothing is loosened by accident.
+def configure_cors(flask_app, origins: list[str]) -> bool:
+    """Apply the cross-origin allowlist. Separate function so the header
+    allowlist (our decision, not flask-cors') is testable without reimporting
+    the module with a different environment. Returns whether CORS was enabled."""
+    if not origins:
+        return False
+    CORS(
+        flask_app,
+        origins=origins,
+        # Both are actually sent by the frontend; without them the preflight fails.
+        allow_headers=["Content-Type", "X-API-Key", "Cache-Control"],
+        # The key travels in a header, not a cookie, so credentialed CORS (and its
+        # ban on wildcard origins) never comes into play.
+        supports_credentials=False,
+    )
+    return True
+
+
+_CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+if configure_cors(app, _CORS_ORIGINS):
+    log.info("[auth] CORS enabled for: %s", ", ".join(_CORS_ORIGINS))
+
+_API_KEY = os.getenv("UXAGENT_API_KEY", "").strip()
+
+# Browsers cannot attach a custom header to an <img src> or a target="_blank"
+# navigation, so these four accept the key as a ?key= query parameter instead.
+# They are exactly the routes the UI loads that way (screenshots + the report).
+_QUERY_KEY_PREFIXES = ("/runs/",)
+_QUERY_KEY_SUFFIXES = ("/report.html",)
+
+# Unauthenticated: preflight carries no custom header, and a health probe must
+# work without a secret.
+_PUBLIC_PATHS = {"/health"}
+
+
+def _asset_route_allows_query_key(path: str) -> bool:
+    """True for the browser-loaded routes: /runs/<id>/report.html and the three
+    /runs/... screenshot variants."""
+    if not path.startswith(_QUERY_KEY_PREFIXES):
+        return False
+    return path.endswith(_QUERY_KEY_SUFFIXES) or "/screenshot/" in path
+
+
+def _key_ok(supplied: str) -> bool:
+    # compare_digest, not ==, so a wrong key cannot be recovered by timing.
+    return bool(supplied) and hmac.compare_digest(supplied, _API_KEY)
+
+
+@app.before_request
+def _require_api_key():
+    if not _API_KEY:
+        return None  # unset -> open API (local dev / tests); warned about at boot
+    if request.method == "OPTIONS" or request.path in _PUBLIC_PATHS:
+        return None
+    if _key_ok(request.headers.get("X-API-Key", "")):
+        return None
+    if _asset_route_allows_query_key(request.path) and _key_ok(request.args.get("key", "")):
+        return None
+    return jsonify({"status": "error", "error": "unauthorized"}), 401
+
+
+@app.get("/health")
+def health_endpoint():
+    """Unauthenticated liveness probe for the container platform."""
+    return jsonify({"status": "ok"})
+
+
+if not _API_KEY:
+    log.warning(
+        "[auth] UXAGENT_API_KEY is not set — every endpoint is OPEN. That is fine "
+        "locally, but a public deployment without it lets anyone start runs "
+        "against your LLM budget."
+    )
 
 PHASE_LABELS = {
     "personas": "Generating personas",

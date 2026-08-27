@@ -1,4 +1,5 @@
 import { onUnmounted, ref } from 'vue'
+import { apiFetch } from '../api'
 
 export type LiveMemory = { kind: string; content: string }
 export type LiveStep = { step: number; description: string; duration_s: number | null; current: boolean }
@@ -29,7 +30,7 @@ export function useLive(pollMs = 1500) {
   async function fetchOnce() {
     if (!runId) return
     try {
-      const res = await fetch(`/runs/${encodeURIComponent(runId)}/live`, { headers: { 'Cache-Control': 'no-store' } })
+      const res = await apiFetch(`/runs/${encodeURIComponent(runId)}/live`, { headers: { 'Cache-Control': 'no-store' } })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       personas.value = data.personas || []

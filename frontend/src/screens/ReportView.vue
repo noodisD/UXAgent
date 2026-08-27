@@ -247,6 +247,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { apiAssetUrl } from '../api'
 import { SEV, scoreColor, pageSpeedColor, sevLabel, outcomeLabel, OUTCOME } from '../theme'
 import { useApp } from '../composables/useApp'
 import { useI18n } from '../i18n'
@@ -317,8 +318,11 @@ const appendixRows = computed(() => [
 ])
 
 function evUrl(ex: AggIssueExample): string {
-  // ex.screenshot is run-relative (<persona_dir>/screenshot/<file>.png)
-  return `/runs/${app.viewRunId}/${ex.screenshot}`
+  // ex.screenshot is run-relative (<persona_dir>/screenshot/<file>.png), so
+  // encode each segment individually — encoding the whole string would escape
+  // the separators and break the path.
+  const rel = String(ex.screenshot ?? '').split('/').map(encodeURIComponent).join('/')
+  return apiAssetUrl(`/runs/${encodeURIComponent(app.viewRunId ?? '')}/${rel}`)
 }
 
 const report = computed(() => props.report)

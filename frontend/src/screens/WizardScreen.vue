@@ -295,6 +295,7 @@
 
 <script setup lang="ts">
 import { computed, inject } from 'vue'
+import { apiFetch } from '../api'
 import { FORM_KEY, type WizardForm } from '../types'
 import { useApp } from '../composables/useApp'
 import { useRun } from '../composables/useRun'
@@ -346,7 +347,7 @@ async function fillSettings() {
   fillLoading.value = true
   fillError.value = null
   try {
-    const res = await fetch('/generate-audit-settings', {
+    const res = await apiFetch('/generate-audit-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ start_url: form.experiment.startUrl }),
@@ -377,7 +378,7 @@ async function generatePersona() {
   genLoading.value = true
   genError.value = null
   try {
-    const res = await fetch('/generate-example-persona', {
+    const res = await apiFetch('/generate-example-persona', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -415,7 +416,7 @@ async function generateSlotPersona(i: number) {
   slotGenLoading.value = i
   slotError.value = null
   try {
-    const res = await fetch('/generate-example-persona', {
+    const res = await apiFetch('/generate-example-persona', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

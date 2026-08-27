@@ -129,6 +129,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { apiAssetUrl, apiFetch } from '../api'
 import { useProgress } from '../composables/useProgress'
 import { useApp } from '../composables/useApp'
 import { useRun } from '../composables/useRun'
@@ -190,7 +191,7 @@ const elapsedStr = computed(() => fmt(elapsed.value))
 const liveId = computed<string | null>(() => (snap.value && snap.value.run_id) || runId.value || app.runId || null)
 
 function shotUrl(p: { id: string; step: number }) {
-  return `/runs/${encodeURIComponent(liveId.value || '')}/screenshot/${encodeURIComponent(p.id)}?t=${p.step}`
+  return apiAssetUrl(`/runs/${encodeURIComponent(liveId.value || '')}/screenshot/${encodeURIComponent(p.id)}?t=${p.step}`)
 }
 function streamOpacity(i: number) { return Math.max(0.45, 1 - i * 0.08) }
 
@@ -249,7 +250,17 @@ async function goNewAudit() {
   stop(); stopLive()
   // Ask the backend to abort the run; navigate away regardless of outcome.
   const id = runId.value || app.runId
-  if (id) { try { await fetch(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }) } catch {} }
+  if (id) {
+    try {
+      const res = await apiFetch(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' })
+      if (!res.ok) console.error(`[cancel] backend refused the cancel: HTTP ${res.status}`)
+    } catch (e) {
+      // Still navigate away — trapping the user helps nobody — but never
+      // silently: if this call fails the run keeps going, burning LLM budget,
+      // and the old empty `catch {}` made that completely invisible.
+      console.error('[cancel] request failed; the run may still be running:', e)
+    }
+  }
   newAudit()
 }
 </script>

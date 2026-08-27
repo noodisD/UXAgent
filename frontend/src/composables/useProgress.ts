@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import { apiFetch } from '../api'
 
 type Snapshot =
   | { status: 'idle'; message: string }
@@ -19,7 +20,7 @@ export function useProgress(pollMs = 1000) {
 
   const fetchOnce = async () => {
     try {
-      const res = await fetch('/progress', { headers: { 'Cache-Control': 'no-store' } })
+      const res = await apiFetch('/progress', { headers: { 'Cache-Control': 'no-store' } })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       data.value = await res.json()
       error.value = null

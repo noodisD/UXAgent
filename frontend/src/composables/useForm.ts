@@ -1,5 +1,6 @@
 // src/composables/useForm.ts
 import { reactive, watch } from 'vue'
+import { apiFetch } from '../api'
 import type { PersonaSlot, WizardForm } from '../types'
 
 export function getWizardDefaults(): WizardForm {
@@ -191,7 +192,7 @@ export function buildRunPayload(form: WizardForm): RunPayload {
 
 export async function submitWizardForm(form: WizardForm) {
   const payload = buildRunPayload(form)
-  const res = await fetch('/run', {
+  const res = await apiFetch('/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)

@@ -383,6 +383,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { apiAssetUrl } from '../api'
 import { useResults } from '../composables/useResults'
 import { useApp } from '../composables/useApp'
 import { SEV, OUTCOME, SEV_ORDER, initials, scoreColor, pageSpeedColor, outcomeOf, sevLabel, outcomeLabel, heuristicName, type Severity } from '../theme'
@@ -471,7 +472,9 @@ const flatFindings = computed(() => {
 })
 
 function shotUrl(personaId: string, step: number | null): string {
-  return `/runs/${app.viewRunId}/screenshot/${personaId}/${step ?? 0}`
+  return apiAssetUrl(
+    `/runs/${encodeURIComponent(app.viewRunId ?? '')}/screenshot/${encodeURIComponent(personaId)}/${step ?? 0}`
+  )
 }
 
 // Backend-supplied extras (present once the run detail includes them)

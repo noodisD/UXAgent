@@ -1,5 +1,11 @@
 <template>
-  <div class="shell">
+  <!-- Blank while probing so the gate doesn't flash for an already-authorised
+       (or unauthenticated, i.e. local) backend. -->
+  <div v-if="authState === 'checking'" class="boot"></div>
+
+  <AuthGate v-else-if="authState === 'locked'" @unlocked="authState = 'open'" />
+
+  <div v-else class="shell">
     <!-- top progress bar (active run) -->
     <div v-if="runActive" class="topbar"><div class="topbar-fill" :style="{ width: topPct + '%' }"></div></div>
 
@@ -36,7 +42,7 @@
           <button class="lang-btn" :class="{ on: locale === 'pl' }" @click="setLocale('pl')">PL</button>
           <button class="lang-btn" :class="{ on: locale === 'en' }" @click="setLocale('en')">EN</button>
         </div>
-        <div class="version mono">v2.4 · {{ t('version.connected') }}<br>localhost:8000</div>
+        <div class="version mono">v2.4 · {{ t('version.connected') }}<br>{{ apiOrigin() }}</div>
       </div>
     </aside>
 
@@ -69,7 +75,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, provide, ref, watchEffect } from 'vue'
+import { computed, onMounted, provide, ref, watchEffect } from 'vue'
+import { apiAssetUrl, apiOrigin, getKey, onUnauthorized, verifyKey } from './api'
+import AuthGate from './components/AuthGate.vue'
 import { FORM_KEY } from './types'
 import { createWizardForm } from './composables/useForm'
 import { useApp } from './composables/useApp'
@@ -116,7 +124,22 @@ const topPct = computed(() => {
   return Math.min(99, Math.round(idx * per + within * per))
 })
 
-const reportUrl = computed(() => app.viewRunId ? `/runs/${encodeURIComponent(app.viewRunId)}/report.html` : '#')
+const reportUrl = computed(() =>
+  app.viewRunId ? apiAssetUrl(`/runs/${encodeURIComponent(app.viewRunId)}/report.html`) : '#')
+
+// --- auth gate ----------------------------------------------------------
+// The backend decides whether a key is required: probing /progress returns 401
+// only when UXAGENT_API_KEY is configured. So local development, where it is
+// unset, never sees the gate — no build flag needed to tell the two apart.
+const authState = ref<'checking' | 'locked' | 'open'>('checking')
+
+onMounted(async () => {
+  authState.value = (await verifyKey(getKey())) ? 'open' : 'locked'
+})
+
+// Any 401 mid-session (key revoked or rotated) drops straight back to the gate
+// rather than leaving a dead screen full of failed requests.
+onUnauthorized(() => { authState.value = 'locked' })
 
 const header = computed(() => {
   void locale.value
@@ -137,6 +160,7 @@ const header = computed(() => {
 
 <style scoped lang="scss">
 .shell { display: flex; min-height: 100vh; background: var(--bg); color: var(--text); }
+.boot { min-height: 100vh; background: var(--bg); }
 .topbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 60; background: var(--border); }
 .topbar-fill { height: 100%; background: var(--ac); transition: width .35s ease; }
 
