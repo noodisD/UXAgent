@@ -29,9 +29,8 @@ frontend → static host):
 backend/    Flask API + Playwright pipeline — see backend/README.md
 frontend/   Vue/Vite dashboard (formerly experiment-ui/)
 ```
-Top-level docs (this file, README.md, HANDOFF.md, METHODOLOGY_PLAN.md) and
-`figures/` (referenced by README.md) stay at the project root — they describe
-the whole project, not one half.
+Top-level docs (this file, README.md, HANDOFF.md, METHODOLOGY_PLAN.md, LICENSE,
+NOTICE) stay at the project root — they describe the whole project, not one half.
 
 ## Run commands
 
