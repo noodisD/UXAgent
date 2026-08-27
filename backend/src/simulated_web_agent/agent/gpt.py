@@ -21,7 +21,6 @@ from dotenv import load_dotenv
 from litellm.router import Router
 
 from . import context
-from .gateway import LLMGateway
 from .prompt_registry import registry as _prompt_registry
 
 provider = "openai"  # kept for backward-compat; use configure() to change
@@ -303,7 +302,7 @@ async def async_chat(
     max_tokens=64000,
     enable_thinking=None,
     **kwargs,
-):  # noqa: D401 — shim; implementation lives in LLMGateway
+):
     """
     Async chat completion that returns the string LLM output.
 
@@ -526,24 +525,16 @@ def load_audit_prompt(prompt_name: str) -> str:
 
 
 # ------------------------------------------------------------------
-# Gateway management
+# Provider configuration
 # ------------------------------------------------------------------
 
-_gateway: LLMGateway | None = None
-
-
 def configure(new_provider: str) -> None:
-    """Set the active provider and wire up the module-level gateway.
+    """Set the active provider.
 
     Call once at pipeline startup (replaces the old ``gpt.provider = ...``
-    mutation scattered across experiment.py and persona.py).
+    mutation scattered across experiment.py and persona.py). `async_chat` /
+    `chat` read the module-level ``provider`` to pick the router and its
+    provider-specific parameters.
     """
-    global provider, _gateway
+    global provider
     provider = new_provider
-    _gateway = LLMGateway(new_provider, chat_router, slow_chat_router, embed_router)
-
-
-def _get_gateway() -> LLMGateway:
-    if _gateway is None:
-        configure(provider)
-    return _gateway  # type: ignore[return-value]

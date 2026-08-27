@@ -189,11 +189,15 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
     # iso_metrics effectiveness) over the LLM's declared self-rating; fall back
     # to declared where the target was undecidable. Surface both + the source so
     # the UI can label "zmierzone" vs "deklarowane" and flag disagreement.
+    #
+    # `outcome` MUST come from _effective_outcome — the single definition shared
+    # with list_runs() and _build_comparison(). A previous inline copy here
+    # dropped its empty-observed_outcome fallback, so a persona's detail card
+    # could disagree with its own history row.
     iso = _as_dict(store.read_iso_metrics())
     eff = _as_dict(iso.get("effectiveness"))
-    declared_outcome = reflection.get("outcome", "partial")
-    outcome = (eff.get("observed_outcome")
-               if eff.get("outcome_source") == "observed" else declared_outcome)
+    declared_outcome = reflection.get("outcome") or "partial"
+    outcome = _effective_outcome(store)
 
     return {
         "id": trace_dir.name,
