@@ -3,9 +3,13 @@
 # Base image choice: python:3.12-slim + `playwright install --with-deps`,
 # rather than mcr.microsoft.com/playwright/python:vX.Y.Z. The Playwright image
 # pins the browser version in the image tag, which then has to be kept in sync
-# with uv.lock by hand — and this project has already drifted there (uv.lock
-# resolves playwright 1.48.0 on old Pythons and 1.59.0 on 3.12). Installing the
-# browser from the resolved package guarantees the binary matches the library.
+# with uv.lock by hand. Installing the browser from the resolved package
+# guarantees the binary matches the library instead.
+#
+# (uv.lock used to carry two playwright versions at once — 1.48.0 and 1.59.0 —
+# because requires-python said ">=3.8" while everything else said 3.12. Raising
+# the floor to 3.12 collapsed the lockfile from ~175 packages with duplicate
+# resolutions to 83 with one version each.)
 #
 # Build (from backend/):    docker build -t uxagent-backend .
 # Run locally:              docker run --rm -p 8080:8080 --env-file .env uxagent-backend
@@ -57,8 +61,11 @@ RUN uv sync --frozen --no-dev
 
 # Serve with gunicorn rather than Flask's dev server. Installed here, not in
 # pyproject: it is a deployment concern, not a library dependency. --python
-# pins it to the project venv rather than relying on discovery.
-RUN uv pip install --python .venv/bin/python gunicorn
+# pins it to the project venv rather than relying on discovery, and the
+# version is pinned because this install is outside uv.lock — unpinned, every
+# rebuild could pull a different gunicorn, which is exactly the drift the uv
+# pin above exists to prevent.
+RUN uv pip install --python .venv/bin/python 'gunicorn==23.0.0'
 
 # ── Runtime user ─────────────────────────────────────────────────────────────
 # Non-root is required, not just good practice: conf/base.yaml passes no
