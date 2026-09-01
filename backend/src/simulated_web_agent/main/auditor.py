@@ -24,7 +24,7 @@ from .claim_verifier import run_claim_verification
 from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
 from .site_scope import flag_off_site, target_url_for
-from .trace_store import TraceStore
+from .trace_store import TraceStore, parse_action
 
 log = logging.getLogger(__name__)
 
@@ -188,13 +188,9 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
         observations.append(f"[step {i}] {url} :: {text}")
 
     actions = []
-    for i, a in enumerate(action_trace):
-        if isinstance(a, str):
-            try:
-                a = json.loads(a)
-            except Exception:
-                a = {"description": a}
-        if isinstance(a, dict):
+    for i, raw in enumerate(action_trace):
+        a = parse_action(raw)
+        if a:
             actions.append(f"[step {i}] {a.get('description', json.dumps(a))}")
 
     if not observations and not reflections and not actions:
@@ -221,15 +217,6 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
         return []
 
 
-def _step_urls(store: TraceStore) -> list[str]:
-    """The URL at each step, positionally — index i is step i's URL."""
-    urls = []
-    for obs in store.read_observations():
-        tabs = obs.get("tabs") or []
-        urls.append((tabs[0].get("url") or "") if tabs else "")
-    return urls
-
-
 async def _run_accessibility_summary(store: TraceStore) -> dict:
     # Deterministic checks decide what is broken (a11y_checks.py); the LLM only
     # narrates and scores. Pasting the raw trees here built a 1.66M-char prompt
@@ -239,7 +226,7 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
     # step mapping, so the model had to guess which URL a cited step meant — and
     # it guessed wrong in prose, where resolve_all cannot correct it.
     step_urls = "\n".join(
-        f"- step {i}: {url}" for i, url in enumerate(_step_urls(store)) if url
+        f"- step {i}: {url}" for i, url in enumerate(store.step_urls()) if url
     ) or "(unknown)"
     prompt = _prompts.get("accessibility_summarize").format(
         candidates=json.dumps(scan["candidates"], ensure_ascii=False, indent=2),

@@ -1,4 +1,4 @@
-import type { InjectionKey, Ref } from 'vue'
+import type { InjectionKey } from 'vue'
 
 export type RangeBin = { id: number; min: number; max: number; mass: number };
 export type GenderBin = { id: number; label: string; mass: number };
@@ -47,16 +47,7 @@ export type WizardForm = {
   persona: PersonaConfig;
 };
 
-export interface WizardNav {
-  current: Ref<number>
-  steps: number
-  next: () => void
-  prev: () => void
-  finish: () => void
-}
-
 export const FORM_KEY: InjectionKey<WizardForm> = Symbol('WizardForm')
-export const NAV_KEY: InjectionKey<WizardNav> = Symbol('WizardNav')
 
 // ---- Results dashboard payloads (mirror backend results_api.py) ----
 

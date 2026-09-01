@@ -17,7 +17,7 @@ from ..executor.env import WebAgentEnv
 from ..config import load_cfg
 from .abort import abandon_threshold
 from .model import AgentPolicy  # noqa
-from .trace_store import TraceStore
+from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger("simulated_web_agent.main.experiment")
 logging.basicConfig(level=logging.INFO)
@@ -25,14 +25,6 @@ logging.basicConfig(level=logging.INFO)
 _RESERVED_KEYS = {"persona", "intent", "site_context", "analytics_context"}
 
 
-def _parse_action_dict(action_json: str) -> dict:
-    """Parse an action-trace JSON string into a dict ({} on any failure)."""
-    try:
-        a = json.loads(action_json)
-        a = a[0] if isinstance(a, list) and a else a
-        return a if isinstance(a, dict) else {}
-    except Exception:
-        return {}
 
 
 def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Optional[str]]:
@@ -448,7 +440,7 @@ async def _run_for_persona_and_intent(
                     "Blocking action that failed %d times: %s",
                     fail_counts[intended_key], intended_key,
                 )
-                blocked_desc = _parse_action_dict(action).get("description", "")
+                blocked_desc = _parse_action(action).get("description", "")
                 await policy.agent.memory.add_memory_piece(
                     Thought(
                         "I already tried this several times and it kept failing: "
@@ -468,7 +460,7 @@ async def _run_for_persona_and_intent(
             # repeat guard can't see. Advisory thought on the 2nd click of a
             # target, error-channel escalation from the 3rd.
             revisit_error = None
-            parsed_action = _parse_action_dict(action)
+            parsed_action = _parse_action(action)
             if parsed_action.get("action") == "click" and parsed_action.get("target"):
                 _target = str(parsed_action["target"])
                 revisit_thought, revisit_error = _revisit_warning(

@@ -26,7 +26,8 @@ checked; only the abstain path still rests on the LLM, and it says so.
 """
 from __future__ import annotations
 
-from .attribution import _parse_action, harness_suspect_steps
+from .attribution import harness_suspect_steps
+from .trace_store import parse_action as _parse_action
 from .session_goal_state import observed_outcome
 from .site_scope import target_url_for
 from .trace_store import TraceStore

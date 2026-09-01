@@ -20,13 +20,12 @@ from typing import Any
 
 from .persona_matrix import build_persona_task_matrix
 from .run import read_manifest
-from .severity import severity_score
-from .trace_store import TraceStore
+from .severity import SEVERITY_EN, severity_score
+from .trace_store import TraceStore, parse_action as _parse_action
 
 RUNS_ROOT = Path("runs")
 
 # Polish severity -> dashboard severity
-_SEV_EN = {"krytyczny": "critical", "poważny": "serious", "drobny": "minor"}
 
 # first_impression.scores keys -> dashboard firstImpression keys
 _FI_MAP = {
@@ -245,7 +244,7 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
         "viewport": {"findings": _viewport_rows(viewport)},
         "heuristics": [
             {
-                "severity": _SEV_EN.get(h.get("severity"), "minor"),
+                "severity": SEVERITY_EN.get(h.get("severity"), "minor"),
                 "id": h.get("heuristic_id"),
                 "evidence": h.get("evidence", ""),
                 "recommendation": h.get("recommendation", ""),
@@ -482,14 +481,6 @@ def _build_comparison(
     }
 
 
-def _parse_action(entry: Any) -> dict:
-    """action_trace entries may be dicts or JSON strings — normalize to a dict."""
-    if isinstance(entry, str):
-        try:
-            return json.loads(entry)
-        except Exception:
-            return {"description": entry}
-    return entry if isinstance(entry, dict) else {}
 
 
 def _latest_observation_text(trace_dir: Path) -> str:

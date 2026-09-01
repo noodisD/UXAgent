@@ -22,13 +22,16 @@ from ..agent.prompt_registry import registry as _prompts
 from .pagespeed import format_pagespeed_summary, read_pagespeed
 from .prioritization import prioritize
 from .root_cause import assign_root_causes
-from .severity import excluded_from_report, heuristic_id as _heuristic_id
+from .severity import (
+    SEVERITY_EN,
+    excluded_from_report,
+    heuristic_id as _heuristic_id,
+    severity_rank,
+)
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
 
-SEVERITY_ORDER = {"krytyczny": 0, "poważny": 1, "drobny": 2}
-SEVERITY_EN = {"krytyczny": "critical", "poważny": "serious", "drobny": "minor"}
 HEURISTIC_NAMES = {
     1: "Widoczność statusu systemu",
     2: "Zgodność systemu z rzeczywistością",
@@ -44,7 +47,8 @@ HEURISTIC_NAMES = {
 
 
 def _severity_sort_key(finding: dict) -> int:
-    return SEVERITY_ORDER.get(finding.get("severity", "drobny"), 99)
+    """Ascending sort key (worst first) over severity.severity_rank."""
+    return -severity_rank(finding)
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +532,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             if rc in seen_rc:
                 continue
             seen_rc.add(rc)
-            severity_counted.append(min(root_cause_ids[rc], key=_severity_sort_key))
+            severity_counted.append(max(root_cause_ids[rc], key=severity_rank))
         else:
             severity_counted.append(f)
     severity_totals = Counter(f.get("severity") for f in severity_counted)
@@ -542,7 +546,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     for rc_id, members in root_cause_ids.items():
         heuristics_involved = sorted({m.get("heuristic_id") for m in members if m.get("heuristic_id")})
         personas_affected = len({m.get("_persona_dir") for m in members if m.get("_persona_dir")})
-        worst = min(members, key=_severity_sort_key)
+        worst = max(members, key=severity_rank)
         root_causes_summary.append({
             "root_cause_id": rc_id,
             "name": worst.get("root_cause_name", rc_id),
@@ -583,7 +587,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         # impossible frequencies ("10 z 5 uczestników") that the narrative then
         # repeated to the client verbatim.
         personas_affected = len({f.get("_persona_dir") for f in group if f.get("_persona_dir")}) or 1
-        worst_severity = min(group, key=_severity_sort_key).get("severity", "drobny")
+        worst_severity = max(group, key=severity_rank).get("severity", "drobny")
         verified_group = [f for f in group if f.get("verified")]
         examples = [_example(f) for f in (verified_group or group)[:3]]
         heuristic_summary.append({
@@ -598,7 +602,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "examples": examples,
             "verified": bool(verified_group),
         })
-    heuristic_summary.sort(key=lambda x: (-x["frequency"], SEVERITY_ORDER.get(x["worst_severity"], 99)))
+    heuristic_summary.sort(key=lambda x: (-x["frequency"], -severity_rank(x["worst_severity"])))
 
     # Accessibility
     a11y_scores = [

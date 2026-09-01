@@ -10,7 +10,8 @@ import logging
 
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
-from .attribution import _parse_action, harness_suspect_steps
+from .attribution import harness_suspect_steps
+from .trace_store import parse_action as _parse_action
 from .auditor import _safe_json
 from .trace_store import TraceStore
 

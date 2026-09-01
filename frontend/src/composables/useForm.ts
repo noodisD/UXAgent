@@ -1,6 +1,5 @@
 // src/composables/useForm.ts
 import { reactive, watch } from 'vue'
-import { apiFetch } from '../api'
 import type { PersonaSlot, WizardForm } from '../types'
 
 export function getWizardDefaults(): WizardForm {
@@ -190,17 +189,7 @@ export function buildRunPayload(form: WizardForm): RunPayload {
   }
 }
 
-export async function submitWizardForm(form: WizardForm) {
-  const payload = buildRunPayload(form)
-  const res = await apiFetch('/run', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
-  if (!res.ok) {
-    // surface server’s error body to help you debug (400 shows missing fields)
-    const text = await res.text()
-    throw new Error(`Submit failed: ${res.status} ${text}`)
-  }
-  return await res.json()
-}
+// NOTE: POST /run lives in composables/useRun.ts and nowhere else. A second
+// implementation used to sit here, never imported, and without useRun's 409
+// "attach to the existing run" handling — so reviving it would have surfaced a
+// double-submit as `Submit failed: 409` instead of reattaching.

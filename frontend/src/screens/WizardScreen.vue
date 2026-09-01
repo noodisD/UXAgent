@@ -311,12 +311,23 @@ const { state: app, nextStep, prevStep, goStep, goScreen } = useApp()
 const { start } = useRun()
 const { t } = useI18n()
 
-// A run with an empty/invalid URL used to launch happily and die on
-// Page.goto("") — burning every session. Block it at the button.
+// One rule for what counts as a usable start URL, mirroring the backend's
+// check in app.py. There used to be three: this gate required a scheme, the
+// inline field feedback below accepted a bare host (silently prepending
+// https:// just to parse it), and the backend had a third regex — so typing
+// "example.com" showed a green valid-domain chip AND blocked the Run button.
+// A run with an empty/invalid URL launches happily and dies on Page.goto(""),
+// burning every session, so this must stay strict.
+const START_URL_RE = /^https?:\/\/[^\s.]+\.[^\s]+$/i
+
+function startUrlOk(v: string): boolean {
+  return START_URL_RE.test(v.trim())
+}
+
 const runBlockedReason = computed<string | null>(() => {
   const url = (form.experiment.startUrl || '').trim()
   if (!url) return t('w3.needUrl')
-  if (!/^https?:\/\/.+\..+/i.test(url)) return t('w3.badUrl')
+  if (!startUrlOk(url)) return t('w3.badUrl')
   if (!(form.persona.generalIntent || '').trim()) return t('w3.needIntent')
   return null
 })
@@ -334,15 +345,12 @@ const fillError = ref<string | null>(null)
 const urlError = computed(() => {
   const v = form.experiment.startUrl.trim()
   if (!v) return false
-  try {
-    const u = new URL(/^https?:\/\//.test(v) ? v : 'https://' + v)
-    return !u.hostname.includes('.')
-  } catch { return true }
+  return !startUrlOk(v)
 })
 const urlDomain = computed(() => {
   const v = form.experiment.startUrl.trim()
   if (!v || urlError.value) return ''
-  try { return new URL(/^https?:\/\//.test(v) ? v : 'https://' + v).hostname.replace(/^www\./, '') } catch { return '' }
+  try { return new URL(v).hostname.replace(/^www\./, '') } catch { return '' }
 })
 
 async function fillSettings() {

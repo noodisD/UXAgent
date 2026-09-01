@@ -5,7 +5,8 @@ thoughts on the 2nd click of a target and error-channel escalation from the
 
 import json
 
-from simulated_web_agent.main.experiment import _parse_action_dict, _revisit_warning
+from simulated_web_agent.main.experiment import _revisit_warning
+from simulated_web_agent.main.trace_store import parse_action
 
 
 def test_first_click_no_warning():
@@ -28,15 +29,15 @@ def test_third_click_escalates_to_error():
     assert "poduszka_dekoracyjna" in error
 
 
-def test_parse_action_dict_json_string():
-    a = _parse_action_dict(json.dumps({"action": "click", "target": "x"}))
+def test_parse_action_json_string():
+    a = parse_action(json.dumps({"action": "click", "target": "x"}))
     assert a == {"action": "click", "target": "x"}
 
 
-def test_parse_action_dict_list_wrapped():
-    a = _parse_action_dict(json.dumps([{"action": "click", "target": "x"}]))
+def test_parse_action_list_wrapped():
+    a = parse_action(json.dumps([{"action": "click", "target": "x"}]))
     assert a["target"] == "x"
 
 
-def test_parse_action_dict_garbage():
-    assert _parse_action_dict("not json") == {}
+def test_parse_action_garbage():
+    assert parse_action("not json") == {"description": "not json"}

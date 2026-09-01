@@ -13,11 +13,10 @@ This module flags findings whose cited step coincides with a harness
 interaction failure, so they can be excluded from the headline severity counts
 and rendered as "needs verification" rather than shipped as confirmed defects.
 """
-import json
 import logging
 import re
 
-from .trace_store import TraceStore
+from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger(__name__)
 
@@ -37,13 +36,6 @@ _FALLBACK_MARKERS = ("nie działał", "nie działała", "wybieram inną", "innej
 _REPEAT_THRESHOLD = 3
 
 
-def _parse_action(entry) -> dict:
-    if isinstance(entry, str):
-        try:
-            return json.loads(entry)
-        except Exception:
-            return {"description": entry}
-    return entry if isinstance(entry, dict) else {}
 
 
 # Perception-artifact signature: the observation text says (almost) nothing
@@ -196,5 +188,13 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
             continue
         suspected = _is_suspect(f)
         f["harness_suspect"] = suspected
+        # Two keys, not one, and they are not synonyms even though this writer
+        # sets both from the same bool:
+        #   harness_suspect      — we caused it, so it is probably not a defect.
+        #   requires_human_check — nobody can settle it from the trace alone.
+        # Everything harness-suspect needs a human, hence the same value here,
+        # but the converse does not hold: viewport_scan flags drag affordances
+        # requires_human_check without any harness failure. That is why
+        # severity.severity_score ORs the two rather than reading one.
         f["requires_human_check"] = suspected
     return findings

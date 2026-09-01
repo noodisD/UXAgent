@@ -17,6 +17,27 @@ _LABEL_TO_SCORE = {
     "drobny": 2,
 }
 
+# The Polish label is the stored one; English is what the dashboard's types use.
+# This map lived twice (reporter.SEVERITY_EN and results_api._SEV_EN).
+SEVERITY_EN = {"krytyczny": "critical", "poważny": "serious", "drobny": "minor"}
+
+
+def severity_rank(finding_or_label) -> int:
+    """Worst-first ordering rank for a severity label. Higher = worse.
+
+    One direction, one home. There were three incompatible scales for the same
+    three labels — reporter's ascending 0/1/2 (worst = min), prioritization's
+    descending 1/2/3 (worst = max) and this module's NN/g 0-4 — and
+    prioritization.prioritize used two of them in adjacent lines. Adding a
+    fourth label meant finding all three.
+
+    Unlike severity_score, this ignores the exclusion gates: it orders labels,
+    it does not judge findings.
+    """
+    label = (finding_or_label.get("severity") if isinstance(finding_or_label, dict)
+             else finding_or_label)
+    return _LABEL_TO_SCORE.get(label, 1)
+
 
 def heuristic_id(finding: dict) -> int:
     """A finding's Nielsen heuristic number, always an int.

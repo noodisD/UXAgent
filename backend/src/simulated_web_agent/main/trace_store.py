@@ -14,6 +14,28 @@ import json
 from pathlib import Path
 from typing import Any
 
+
+def parse_action(entry: Any) -> dict:
+    """Normalise one action_trace entry to a dict.
+
+    Entries are written as dicts, as JSON strings, and occasionally as a
+    single-element list wrapping the dict; every consumer has to cope with all
+    three. This lived in six places (results_api, attribution, claim_verifier,
+    session_goal_state, an inline copy in auditor, and experiment's
+    _parse_action_dict) and they did not agree: five kept the raw text as
+    `description` when the JSON was unparseable, the sixth returned {}, so the
+    same malformed trace yielded a description at five call sites and nothing at
+    the last. iso_metrics reached across modules for attribution's private copy.
+    """
+    if isinstance(entry, str):
+        try:
+            entry = json.loads(entry)
+        except Exception:
+            return {"description": entry}
+    if isinstance(entry, list):
+        entry = entry[0] if entry else {}
+    return entry if isinstance(entry, dict) else {}
+
 _SUBDIRS = (
     "simp_html",
     "raw_html",
@@ -110,6 +132,19 @@ class TraceStore:
             if tab.get("url", "").startswith("http"):
                 return tab["url"]
         return ""
+
+    def step_urls(self) -> list[str]:
+        """The URL at each step, positionally — index i is step i's URL.
+
+        Same definition as url_at_step, deliberately: auditor used to build the
+        accessibility prompt from its own copy that always took tabs[0], while
+        the heuristic prompt used url_at_step (active tab, http-only). When the
+        agent had a second tab open the two passes cited different URLs for the
+        same step — and evidence.resolve_evidence rewrites findings using
+        url_at_step only, so the accessibility finding's `url` field was
+        corrected while the prose the model wrote from the other list was not.
+        """
+        return [self.url_at_step(i) for i in range(len(self.read_observations()))]
 
     def read_observation_step_text(self, step: int) -> str:
         path = self.trace_dir / "observation_trace" / f"observation_trace_{step}.txt"

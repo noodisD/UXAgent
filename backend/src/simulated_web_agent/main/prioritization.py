@@ -43,7 +43,12 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
-from .severity import excluded_from_report, heuristic_id as _heuristic_id, severity_score
+from .severity import (
+    excluded_from_report,
+    heuristic_id as _heuristic_id,
+    severity_rank,
+    severity_score,
+)
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +67,6 @@ _CONFIDENCE_RANK = {"high": 2, "medium": 1, "low": 0}
 # is an ended_reason rather than an outcome, but it is the same fact.
 _BLOCKED_OUTCOMES = {"failed", "persona_abandoned"}
 
-_SEVERITY_ORDER = {"krytyczny": 3, "poważny": 2, "drobny": 1}
 
 
 def derive_impact(*, personas_affected: int, participant_count: int,
@@ -117,7 +121,7 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
             p for p in personas
             if str(outcomes.get(p, "")).strip().lower() in _BLOCKED_OUTCOMES
         )
-        worst = max(group, key=lambda f: _SEVERITY_ORDER.get(f.get("severity"), 0))
+        worst = max(group, key=severity_rank)
         # The group's weakest confidence: one shaky finding should not inherit a
         # sibling's certainty.
         confidence = min(

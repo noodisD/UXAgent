@@ -37,7 +37,7 @@ import logging
 from ..agent.gpt import _parse_json_response, async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .session_goal_state import has_marker as _has, session_capabilities
-from .trace_store import TraceStore
+from .trace_store import TraceStore, parse_action as _parse_action
 
 # `session_capabilities` is re-exported (moved to session_goal_state so there is
 # one "what the session did" module); imported here for the deterministic
@@ -54,13 +54,6 @@ _MAX_OBS_CHARS = 4000
 _MAX_REASON_CHARS = 300
 
 
-def _parse_action(entry) -> dict:
-    if isinstance(entry, str):
-        try:
-            entry = json.loads(entry)
-        except Exception:
-            return {"description": entry}
-    return entry if isinstance(entry, dict) else {}
 
 
 # --- what the session actually PROVED (deterministic, from the trace) -------

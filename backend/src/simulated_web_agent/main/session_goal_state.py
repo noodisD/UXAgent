@@ -39,11 +39,10 @@ intent) or the trace has no on-site evidence, `observed_outcome` returns
 """
 from __future__ import annotations
 
-import json
 import re
 
 from .site_scope import same_site, target_url_for
-from .trace_store import TraceStore
+from .trace_store import TraceStore, parse_action as _parse_action
 
 # --- the ladder ------------------------------------------------------------
 RUNGS = (
@@ -125,13 +124,6 @@ def _url_has(url: str, markers) -> bool:
     return any(m in url for m in markers)
 
 
-def _parse_action(entry) -> dict:
-    if isinstance(entry, str):
-        try:
-            entry = json.loads(entry)
-        except Exception:
-            return {"description": entry}
-    return entry if isinstance(entry, dict) else {}
 
 
 def _checkout_initiated_step(store: TraceStore, min_step: int = 0) -> tuple[int, str] | None:
