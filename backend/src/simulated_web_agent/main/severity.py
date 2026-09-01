@@ -18,6 +18,24 @@ _LABEL_TO_SCORE = {
 }
 
 
+def heuristic_id(finding: dict) -> int:
+    """A finding's Nielsen heuristic number, always an int.
+
+    The value comes from an LLM, so it arrives as an int, as the string "3", or
+    as an explicit null. `.get("heuristic_id", 0)` does not defend against the
+    last two: null and "3" both end up as dict keys, and the resulting mixed
+    str/int/None key set raises TypeError the moment anything sorts or mins it.
+    That crashed aggregate_statistics, which run.py caught and then still
+    finalised as "done" — a run with no report showing as complete, score 0.0.
+    """
+    raw = finding.get("heuristic_id")
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return n if 1 <= n <= 10 else 0
+
+
 def excluded_from_report(finding: dict) -> bool:
     """Should this finding stay out of headline counts, aggregate grouping and
     the prioritization matrix?

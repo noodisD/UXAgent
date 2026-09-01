@@ -150,7 +150,7 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
     for f in findings or []:
         if isinstance(f, dict):
             f.pop("claim_verdict", None)
-            f.pop("verdict_reason", None)
+            f.pop("claim_verdict_reason", None)
 
     # Only findings still standing after the deterministic gates: the others
     # are already excluded/capped — no LLM cost re-judging them.
@@ -218,7 +218,7 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
     stamped = overridden = 0
     for local_id, (_, f) in enumerate(to_verify):
         if local_id in by_id:
-            f["claim_verdict"], f["verdict_reason"] = by_id[local_id]
+            f["claim_verdict"], f["claim_verdict_reason"] = by_id[local_id]
             stamped += 1
         # Deterministic override: the session/observation refutes a broken/absent
         # claim — force unsupported, winning over an LLM "supported"/"partial".
@@ -228,7 +228,7 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
             f.get("evidence", ""), obs_by_local.get(local_id, ""), caps)
         if reason and f.get("claim_verdict") != "unsupported":
             f["claim_verdict"] = "unsupported"
-            f["verdict_reason"] = reason
+            f["claim_verdict_reason"] = reason
             overridden += 1
 
     counts: dict[str, int] = {}

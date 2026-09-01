@@ -414,6 +414,7 @@ async def _run_for_persona_and_intent(
             # following its plan. If it picks the SAME action a 3rd time, we
             # physically override it with a 'back' navigation to force a new
             # page state — a stuck agent burns 5-10 minutes per wasted step.
+            forced_escape = False
             if repeat_count >= 2 and _action_key(action) == prev_action_key:
                 log.warning("Forcing escape from action loop: %s", prev_action_key)
                 action = json.dumps({
@@ -427,7 +428,14 @@ async def _run_for_persona_and_intent(
                         policy.agent.memory,
                     )
                 )
-                repeat_count = 0
+                # Deliberately does NOT reset repeat_count, and the tracking
+                # below leaves prev_action_key alone. This escape is our
+                # intervention, not the persona making progress: resetting here
+                # capped repeat_count at 2 while the smallest abandon_at is 3,
+                # so `abandoned` could never become True and every consumer of
+                # it (abort.py, the persona_abandoned outcome, prioritization's
+                # blocked branch, the "porzucono" report line) was dead code.
+                forced_escape = True
 
             # Failed-action circuit breaker: the consecutive-repeat guard is
             # defeated when the model alternates (click X fails → scroll →
@@ -492,7 +500,14 @@ async def _run_for_persona_and_intent(
             # looping. Warn it via memory; escalate via the error channel it
             # already reads (observation["error"] -> last_action_error).
             action_key = _action_key(action)
-            if action_key == prev_action_key and _current_url(obs) == url_before:
+            if forced_escape:
+                # The 'back' we injected is not the persona's own choice, so it
+                # is neither a repeat nor progress. Hold both the counter and
+                # prev_action_key so that if the model returns to the same dead
+                # end next step, it still registers as a consecutive no-progress
+                # step rather than starting over.
+                pass
+            elif action_key == prev_action_key and _current_url(obs) == url_before:
                 repeat_count += 1
                 warning = (
                     "I already tried exactly this action and the page did not change. "
@@ -518,7 +533,8 @@ async def _run_for_persona_and_intent(
                     break
             else:
                 repeat_count = 0
-            prev_action_key = action_key
+            if not forced_escape:
+                prev_action_key = action_key
 
             if revisit_error and not obs.get("error"):
                 obs["error"] = revisit_error
@@ -573,7 +589,12 @@ async def _run_for_persona_and_intent(
             pass
         try:
             log.info(f"[{run_uid}] closing env...")
-            await asyncio.wait_for(asyncio.shield(env.close()), timeout=10)
+            # No asyncio.shield: shielding meant the 10s timeout cancelled only
+            # the waiter, leaving close() pending. run_async then returned and
+            # asyncio.run tore the loop down, destroying that task before it
+            # released the shared-driver claim — which is what made the next run
+            # hang. Cancelling close() for real lets its finally block run.
+            await asyncio.wait_for(env.close(), timeout=10)
             log.info(f"[{run_uid}] env.close() completed")
         except Exception as e:
             log.exception(f"[{run_uid}] env.close() raised: {e!r}")

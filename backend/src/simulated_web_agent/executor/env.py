@@ -468,6 +468,11 @@ class ElementHighlight:
 class WebAgentEnv:
     _shared_playwright: ClassVar[Playwright | None] = None
     _shared_playwright_users: ClassVar[int] = 0
+    # Guards the check-then-start in _ensure_playwright. Without it, concurrent
+    # run_one tasks each see None and each start a driver; every assignment but
+    # the last is leaked, and the refcount then describes an instance nobody
+    # holds, so _cleanup_playwright can never reach 0 for the leaked ones.
+    _shared_playwright_lock: ClassVar[asyncio.Lock | None] = None
     before_action_hook: Callable[[], None] = None
     after_action_hook: Callable[[], None] = (None,)
     wait_hook: Callable[[], None] = None
@@ -507,20 +512,52 @@ class WebAgentEnv:
             )
 
     @classmethod
-    async def _ensure_playwright(cls) -> Playwright:
-        """Ensure shared Playwright instance exists and return it"""
-        if cls._shared_playwright is None:
-            cls._shared_playwright = await async_playwright().start()
-        cls._shared_playwright_users += 1
-        return cls._shared_playwright
+    def reset_shared_playwright(cls) -> None:
+        """Forget any shared driver left over from a previous event loop.
+
+        Each run() is its own asyncio.run(), i.e. its own event loop, and runs
+        are serialised. A Playwright object created under a destroyed loop is
+        unusable: awaiting it hangs forever rather than raising. If a previous
+        run ended abnormally (cancellation, a hung browser close) the refcount
+        could be left above zero, so the driver was never stopped and the stale
+        object would be handed to the next run. Called at the start of a run,
+        when no env can legitimately be alive.
+        """
+        cls._shared_playwright = None
+        cls._shared_playwright_users = 0
+        cls._shared_playwright_lock = None
 
     @classmethod
-    async def _cleanup_playwright(cls) -> None:
-        """Cleanup shared Playwright instance if no more users"""
-        cls._shared_playwright_users -= 1
+    async def _ensure_playwright(cls) -> Playwright:
+        """Ensure shared Playwright instance exists and return it"""
+        if cls._shared_playwright_lock is None:
+            cls._shared_playwright_lock = asyncio.Lock()
+        async with cls._shared_playwright_lock:
+            if cls._shared_playwright is None:
+                cls._shared_playwright = await async_playwright().start()
+            cls._shared_playwright_users += 1
+            return cls._shared_playwright
+
+    @classmethod
+    def _release_playwright(cls) -> Playwright | None:
+        """Drop this env's claim on the shared driver. Synchronous, on purpose.
+
+        Returns the driver to stop() if this was the last user, else None.
+
+        The bookkeeping must not contain an await. close() runs under a
+        wait_for timeout, so an await here can be interrupted and leave the
+        refcount permanently above zero — after which the driver is never
+        stopped and the next run inherits a Playwright object bound to a
+        destroyed event loop, which hangs instead of failing. Stopping is
+        best-effort and belongs to the caller; the count is what must be exact.
+        """
+        # max(0, ...) so a double-close cannot drive the count negative, which
+        # would make the `== 0` test unreachable for every later env.
+        cls._shared_playwright_users = max(0, cls._shared_playwright_users - 1)
         if cls._shared_playwright_users == 0 and cls._shared_playwright is not None:
-            await cls._shared_playwright.stop()
-            cls._shared_playwright = None
+            pw, cls._shared_playwright = cls._shared_playwright, None
+            return pw
+        return None
 
     async def _setup_tracing(self) -> None:
         """Setup Playwright tracing if enabled in config"""
@@ -1496,35 +1533,44 @@ class WebAgentEnv:
         return content
 
     async def close(self):
-        """Clean up pages/contexts/browsers deterministically, then shrink PW refcount."""
-        # 1) Stop tracing/recording scoped to this context
-        with contextlib.suppress(Exception):
-            await self._stop_tracing()
+        """Clean up pages/contexts/browsers deterministically, then shrink PW refcount.
 
-        # 2) Close per-env resources (these are always safe to close)
-        with contextlib.suppress(Exception):
-            if self.page:
-                await self.page.close()
-        with contextlib.suppress(Exception):
-            if self.context:
-                await self.context.close()
+        Steps 1-3 talk to a browser that may already be wedged, so the caller
+        runs this under a timeout. Everything that must happen regardless lives
+        in the finally: releasing the shared-driver claim is what the *next*
+        run depends on, and it cannot be allowed to depend on a hung browser.
+        """
+        try:
+            # 1) Stop tracing/recording scoped to this context
+            with contextlib.suppress(Exception):
+                await self._stop_tracing()
 
-        # 3) Close this env's browser (you launch a new browser per env in setup)
-        with contextlib.suppress(Exception):
-            if self.browser:
-                await self.browser.close()
+            # 2) Close per-env resources (these are always safe to close)
+            with contextlib.suppress(Exception):
+                if self.page:
+                    await self.page.close()
+            with contextlib.suppress(Exception):
+                if self.context:
+                    await self.context.close()
 
-        # 4) Null out handles (helps debugging and double-close safety)
-        self.page = None
-        self.context = None
-        self.browser = None
+            # 3) Close this env's browser (you launch a new browser per env in setup)
+            with contextlib.suppress(Exception):
+                if self.browser:
+                    await self.browser.close()
 
-        # 5) Decrement the shared Playwright user count; stop PW only when last user is gone
-        #    (stopping PW early would nuke other running envs)
-        with contextlib.suppress(Exception):
-            if self.context_manager:  # you use this as the "shared PW" handle
-                await self._cleanup_playwright()
+            # 4) Null out handles (helps debugging and double-close safety)
+            self.page = None
+            self.context = None
+            self.browser = None
+        finally:
+            # 5) Release the shared Playwright claim; stop the driver only when
+            #    the last user is gone (stopping early would nuke other envs).
+            if self.context_manager:  # doubles as the "shared PW" handle
                 self.context_manager = None
+                pw = self._release_playwright()
+                if pw is not None:
+                    with contextlib.suppress(Exception):
+                        await pw.stop()
 
     async def _delete_container_with_retry(
         self,

@@ -18,7 +18,7 @@ from werkzeug.exceptions import BadRequest
 
 from . import cancellation, results_api
 from .persona import generate_audit_settings, generate_example_persona
-from .run import mark_run_status, new_run_id, run, site_slug
+from .run import mark_run_status, new_run_id, read_manifest, run, site_slug
 
 log = logging.getLogger("simulated_web_agent.main.app")
 
@@ -178,8 +178,15 @@ def _run_thread(run_id: str, payload: dict):
             on_progress=_make_on_progress(run_id),
             run_id=run_id,
         )
+        # run_async returns normally on the cancelled path AND on the
+        # report-failed path, so an unconditional "done" here overwrote both:
+        # /progress said "report ready" for a run that produced no report,
+        # while list_runs() read the real status from the manifest. Two
+        # authorities, one run, opposite answers. The manifest is durable and
+        # survives a restart, so mirror it rather than assuming success.
+        manifest = read_manifest(Path("runs") / run_id) or {}
         with _runs_lock:
-            RUNS[run_id]["status"] = "done"
+            RUNS[run_id]["status"] = manifest.get("status") or "done"
     except Exception as e:
         log.exception("Run %s failed: %s", run_id, e)
         with _runs_lock:
@@ -311,7 +318,18 @@ def cancel_run_endpoint(run_id: str):
     current step, but the dashboard treats the run as ended immediately."""
     with _runs_lock:
         entry = RUNS.get(run_id)
-        if not entry or entry.get("status") != "running":
+        if entry is None:
+            # No in-memory entry: the process restarted since this run started,
+            # so its worker thread is gone and it cannot still be running. The
+            # manifest may nonetheless say "running", which left the history
+            # screen showing an in-progress run that could never be stopped.
+            # Settle the manifest rather than 404-ing forever.
+            try:
+                mark_run_status(run_id, "cancelled")
+            except Exception:
+                pass
+            return jsonify({"status": "cancelled", "run_id": run_id, "stale": True}), 200
+        if entry.get("status") != "running":
             return jsonify({"status": "error", "error": "no active run with that id"}), 404
         entry["status"] = "cancelled"
     # Flag it for the agent loop: sessions stop after their current step and

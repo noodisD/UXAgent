@@ -30,16 +30,6 @@ SEVERITY_LABELS = {
     "krytyczny": "KRYTYCZNY",
 }
 
-QUESTION_LABELS = {
-    "q1": "Łatwość znalezienia produktu",
-    "q2": "Przejrzystość i czytelność",
-    "q3": "Łatwość sprawdzenia dostępności / znalezienia sklepu",
-    "q4": "Sprawność działania strony",
-    "q5": "Największa trudność",
-    "q6": "Czego nie udało się znaleźć",
-}
-
-
 def _esc(s: object) -> str:
     return html.escape(str(s or ""))
 
@@ -315,6 +305,10 @@ def _render_header(agg: dict, stats: dict) -> str:
       <span class="lbl">Uczestników</span>
     </div>
     <div class="meta-item">
+      <span class="val" style="color:#E60000;">{sc.get("krytyczny", 0)}</span>
+      <span class="lbl">Prob. krytycznych</span>
+    </div>
+    <div class="meta-item">
       <span class="val" style="color:#B07A00;">{sc.get("poważny", 0)}</span>
       <span class="lbl">Prob. poważnych</span>
     </div>
@@ -531,7 +525,7 @@ def _render_survey(stats: dict) -> str:
             return ""
         rows = "".join(
             f'<div class="score-row"><div class="dim-label">'
-            f'{_esc(QUESTION_LABELS.get(qid, qid))}</div>{_score_bar(avg_scores[qid])}</div>'
+            f'{_esc(qid)}</div>{_score_bar(avg_scores[qid])}</div>'
             for qid in sorted(avg_scores))
         return _section("Wyniki ankiety", f'<div class="survey-grid">{rows}</div>')
 
@@ -772,8 +766,6 @@ def _render_stats_table(stats: dict) -> str:
     fi_avg = (stats.get("first_impression") or {}).get("avg_score")
     a11y_avg = (stats.get("accessibility") or {}).get("avg_score")
     vp = stats.get("viewport") or {}
-    survey = stats.get("survey") or {}
-    q3 = (survey.get("avg_scores") or {}).get("q3")
 
     def row(label, value, color=None):
         style = f' style="color:{color};font-weight:700;"' if color else ""
@@ -783,11 +775,11 @@ def _render_stats_table(stats: dict) -> str:
     rows = (
         row("Uczestnicy", n) +
         row("Łącznie problemów", total) +
+        row("Problemy krytyczne", sc.get("krytyczny", 0), "#E60000") +
         row("Problemy poważne", sc.get("poważny", 0), "#856404") +
         row("Problemy drobne", sc.get("drobny", 0), "#0c5460") +
         row("Pierwsze wrażenie (śr.)", f"{fi_avg}/5" if fi_avg else "—") +
         row("Dostępność (śr.)", f"{a11y_avg}/5" if a11y_avg else "—") +
-        row("Prostota koszyka (q3)", f"{q3:.2f}/5" if q3 is not None else "—", _score_color(q3)) +
         row("Overflow mobile", f"{vp.get('mobile_overflow_sessions',0)}/{n} sesji") +
         row("Overflow tablet", f"{vp.get('tablet_overflow_sessions',0)}/{n} sesji")
     )
@@ -818,12 +810,10 @@ def _render_methodology(narr: dict) -> str:
 
 def generate_html_report(agg: dict) -> str:
     stats = agg.get("statistics") or {}
-    narr = agg.get("narrative") or {}
     ps = agg.get("pagespeed")
 
-    from .reporter import _narrative_from_stats  # avoid circular at module level
-    if not narr or "error" in narr or not narr.get("executive_summary"):
-        narr = _narrative_from_stats(stats)
+    from .reporter import resolve_narrative  # avoid circular at module level
+    narr = resolve_narrative(agg)
 
     scroll = agg.get("scroll")
     links = agg.get("links")

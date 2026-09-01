@@ -353,16 +353,35 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
     }
 
 
-def _issue_map(report: dict | None) -> dict[int, str]:
-    """heuristic_id -> short impact text for all critical+serious narrative issues."""
+def _issue_key(issue: dict) -> str | None:
+    """Stable identity for a narrative issue across runs.
+
+    root_cause_id when the clustering pass assigned one, else the Nielsen
+    number. Keying on heuristic_id alone gave only ten possible buckets, so
+    every distinct issue filed under H4 collapsed into one and "resolved" meant
+    "nothing was filed under that Nielsen number this time" rather than "a
+    defect was fixed" — the exact conflation root_cause.py exists to prevent.
+    """
+    rc = issue.get("root_cause_id")
+    if rc:
+        return f"rc:{rc}"
+    h_id = issue.get("heuristic_id")
+    return f"h:{h_id}" if h_id is not None else None
+
+
+def _issue_map(report: dict | None) -> dict[str, str]:
+    """issue key -> short impact text for all critical+serious narrative issues."""
     narrative = (report or {}).get("narrative") or {}
-    out: dict[int, str] = {}
+    out: dict[str, str] = {}
     for key in ("critical_issues", "serious_issues"):
         for issue in narrative.get(key) or []:
-            if isinstance(issue, dict) and issue.get("heuristic_id") is not None:
-                h_id = issue["heuristic_id"]
-                text = (issue.get("impact") or issue.get("heuristic_name") or "")[:160]
-                out.setdefault(h_id, text)
+            if not isinstance(issue, dict):
+                continue
+            k = _issue_key(issue)
+            if k is None:
+                continue
+            text = (issue.get("impact") or issue.get("heuristic_name") or "")[:160]
+            out.setdefault(k, text)
     return out
 
 
@@ -414,9 +433,21 @@ def _build_comparison(
     prev_ok, prev_all = _successes(prev_dir)
 
     def _trend(now, prev, higher_is_better=True):
+        """One vocabulary: "better" | "worse" | "flat".
+
+        It used to return up/down for higher-is-better metrics and
+        better/worse for the rest, so a single field carried five values from
+        two dialects and every consumer had to handle both. The direction is
+        already encoded by higher_is_better — the caller wants to know whether
+        the number moved the right way, not which way it moved.
+        """
         if now is None or prev is None or now == prev:
             return "flat"
-        return ("up" if now > prev else "down") if higher_is_better else ("better" if now < prev else "worse")
+        improved = (now > prev) if higher_is_better else (now < prev)
+        return "better" if improved else "worse"
+
+    def _rate(ok, total):
+        return (ok / total) if total else None
 
     now_crit = now_sc.get("krytyczny", 0)
     prev_crit = prev_sc.get("krytyczny", 0)
@@ -426,8 +457,10 @@ def _build_comparison(
     metrics = [
         {"label": "Overall score", "now": now_score if now_score is not None else "—",
          "prev": prev_score if prev_score is not None else "—", "trend": _trend(now_score, prev_score)},
+        # Compared as a rate, because it is displayed as one: trending on the
+        # raw numerator labelled 2/2 after 3/8 a regression.
         {"label": "Task success", "now": f"{now_ok}/{now_all}", "prev": f"{prev_ok}/{prev_all}",
-         "trend": _trend(now_ok, prev_ok)},
+         "trend": _trend(_rate(now_ok, now_all), _rate(prev_ok, prev_all))},
         {"label": "Critical findings", "now": now_crit, "prev": prev_crit,
          "trend": _trend(now_crit, prev_crit, higher_is_better=False)},
         {"label": "Total findings", "now": now_total, "prev": prev_total,

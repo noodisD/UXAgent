@@ -68,7 +68,7 @@ async def test_unsupported_is_demoted_and_excluded(tmp_path):
         await run_claim_verification(_store(tmp_path), findings)
     f = findings[0]
     assert f["claim_verdict"] == "unsupported"
-    assert f["verdict_reason"] == "powód 0"
+    assert f["claim_verdict_reason"] == "powód 0"
     assert excluded_from_report(f) is True
     cap_confidence(findings)
     assert f["confidence"] == "low"

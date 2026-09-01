@@ -43,7 +43,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
-from .severity import excluded_from_report, severity_score
+from .severity import excluded_from_report, heuristic_id as _heuristic_id, severity_score
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
         # root_cause_id (str) if the cross-heuristic clustering pass tagged it,
         # else heuristic_id (int) — a mixed-type key is fine, each finding only
         # ever lands in one bucket.
-        groups[f.get("root_cause_id") or f.get("heuristic_id", 0)].append(f)
+        groups[f.get("root_cause_id") or _heuristic_id(f)].append(f)
 
     participant_count = len(outcomes or {})
     rows: list[dict] = []
@@ -133,8 +133,8 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
             # Kept as an int for frontend/back-compat even for a cluster row —
             # the lowest heuristic_id it was filed under; heuristics_involved
             # below carries the full cross-heuristic picture.
-            "heuristic_id": min((f.get("heuristic_id") for f in group
-                                 if f.get("heuristic_id")), default=0),
+            "heuristic_id": min((_heuristic_id(f) for f in group
+                                 if _heuristic_id(f)), default=0),
             "heuristic_name": worst.get("root_cause_name") if is_cluster
                               else worst.get("heuristic_name", ""),
             "severity": worst.get("severity"),
@@ -151,7 +151,7 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
         if is_cluster:
             row["root_cause_id"] = key
             row["heuristics_involved"] = sorted(
-                {f.get("heuristic_id") for f in group if f.get("heuristic_id")})
+                {_heuristic_id(f) for f in group if _heuristic_id(f)})
         rows.append(row)
 
     rows.sort(key=lambda r: (

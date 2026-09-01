@@ -10,6 +10,7 @@ Aggregated (called after ALL agents finish):
 
 import json
 import logging
+import math
 import re
 import statistics
 from collections import Counter, defaultdict
@@ -21,7 +22,7 @@ from ..agent.prompt_registry import registry as _prompts
 from .pagespeed import format_pagespeed_summary, read_pagespeed
 from .prioritization import prioritize
 from .root_cause import assign_root_causes
-from .severity import excluded_from_report
+from .severity import excluded_from_report, heuristic_id as _heuristic_id
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -143,12 +144,27 @@ def _render_md(report: dict) -> str:
     findings = report.get("heuristic_findings") or []
     counts = report.get("severity_counts") or {}
     h(2, "Ocena heurystyczna (Nielsen)")
-    p(
-        f"Znaleziono **{len(findings)}** problemów: "
+    # The headline must be the sum of the breakdown beside it. It used to be
+    # len(findings) — every finding, including the ones the gates demoted —
+    # while the three counts came from `confirmed` only, so a persona with 9
+    # findings of which 6 were harness-suspect rendered as "Found 9 problems:
+    # 1 critical, 1 serious, 1 minor".
+    confirmed_total = (
+        counts.get("krytyczny", 0) + counts.get("poważny", 0) + counts.get("drobny", 0)
+    )
+    gated = counts.get("needs_verification", 0)
+    summary = (
+        f"Znaleziono **{confirmed_total}** potwierdzonych problemów: "
         f"{counts.get('krytyczny', 0)} krytycznych, "
         f"{counts.get('poważny', 0)} poważnych, "
         f"{counts.get('drobny', 0)} drobnych."
     )
+    if gated:
+        summary += (
+            f" Dodatkowo {gated} zgłoszeń odrzucono lub oznaczono do weryfikacji "
+            f"(nie wliczono ich powyżej)."
+        )
+    p(summary)
     if findings:
         for f in findings:
             severity_badge = f.get("severity", "drobny").upper()
@@ -542,7 +558,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # above is the deduplicated cross-heuristic view.
     by_heuristic: dict[int, list[dict]] = defaultdict(list)
     for f in confirmed_findings:
-        by_heuristic[f.get("heuristic_id", 0)].append(f)
+        by_heuristic[_heuristic_id(f)].append(f)
 
     def _example(f: dict) -> dict:
         screenshot = f.get("screenshot")
@@ -689,7 +705,11 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
 
 def _top_issues_text(stats: dict, threshold: float = 0.5) -> str:
     n = stats.get("participant_count", 1)
-    cutoff = max(1, round(n * threshold))
+    # ceil, not round: "≥50%" must mean at least half. Python's round() is
+    # banker's rounding, so round(5 * 0.5) is 2 — the cutoff became 2 of 5
+    # (40%) at the most common panel size, under a literal that promises 50%,
+    # both in the report text and in the prompt slot this fills.
+    cutoff = max(1, math.ceil(n * threshold))
     top = [
         h for h in stats["heuristic"]["by_heuristic"]
         # Unique personas, not finding counts — "in ≥50% of sessions" must mean
@@ -1097,6 +1117,24 @@ def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
                 issue["verified"] = False
 
 
+def resolve_narrative(agg: dict) -> dict:
+    """The narrative to render, with the LLM-failure fallback already applied.
+
+    One function because the same three-clause guard used to be written out in
+    both renderers, and only the Markdown copy called _attach_issue_evidence.
+    When the aggregate LLM call failed, aggregated_report.md showed screenshots,
+    URLs, quotes and correct `verified` flags while report.html — the artifact
+    actually served to the client — showed the same issues stripped of all
+    evidence. Both now take this path.
+    """
+    stats = agg.get("statistics") or {}
+    narr = agg.get("narrative") or {}
+    if not narr or "error" in narr or not narr.get("executive_summary"):
+        narr = _narrative_from_stats(stats)
+    _attach_issue_evidence(narr, stats)
+    return narr
+
+
 def _narrative_from_stats(stats: dict) -> dict:
     """Build a minimal narrative dict purely from statistics (no LLM needed)."""
     n = stats.get("participant_count", 0)
@@ -1108,15 +1146,21 @@ def _narrative_from_stats(stats: dict) -> dict:
     by_h = heur.get("by_heuristic") or []
     a11y_avg = (stats.get("accessibility") or {}).get("avg_score")
     vp = stats.get("viewport") or {}
-    survey = stats.get("survey") or {}
-    q3_avg = (survey.get("avg_scores") or {}).get("q3")
 
+    # Bucket by worst_severity. `critical` used to have no bucket at all, so a
+    # heuristic whose worst finding was krytyczny matched neither list and was
+    # silently dropped from the fallback report — while critical_issues was
+    # additionally hardcoded to []. A site with critical findings therefore
+    # rendered a report showing none.
+    critical = [h for h in by_h if h.get("worst_severity") == "krytyczny"]
     serious = [h for h in by_h if h.get("worst_severity") == "poważny"]
     minor = [h for h in by_h if h.get("worst_severity") == "drobny"]
 
-    exec_parts = [f"Badanie z udziałem {n} uczestników ujawniło {sc.get('poważny', 0)} poważnych i {sc.get('drobny', 0)} drobnych naruszeń heurystyk Nielsena."]
-    if q3_avg is not None:
-        exec_parts.append(f"Kluczową barierą był brak ścieżki zakupu online — uczestnicy ocenili prostotę dodania do koszyka na {q3_avg:.1f}/5.")
+    exec_parts = [
+        f"Badanie z udziałem {n} uczestników ujawniło "
+        f"{sc.get('krytyczny', 0)} krytycznych, {sc.get('poważny', 0)} poważnych "
+        f"i {sc.get('drobny', 0)} drobnych naruszeń heurystyk Nielsena."
+    ]
     if fi_avg is not None:
         exec_parts.append(f"Pierwsze wrażenie oceniono na {fi_avg:.2f}/5.")
 
@@ -1136,7 +1180,7 @@ def _narrative_from_stats(stats: dict) -> dict:
         }
 
     recs = []
-    for i, h in enumerate(serious[:5], 1):
+    for i, h in enumerate((critical + serious)[:5], 1):
         recs.append({
             "priority": i,
             "area": h.get("heuristic_name", ""),
@@ -1147,9 +1191,9 @@ def _narrative_from_stats(stats: dict) -> dict:
     return {
         "executive_summary": " ".join(exec_parts),
         "overall_ux_score": round(fi_avg, 1) if fi_avg else None,
-        "score_rationale": f"Ocena odzwierciedla wyniki testu pierwszego wrażenia ({fi_avg:.2f}/5) oraz dominację problemów poważnych ({sc.get('poważny', 0)}) i drobnych ({sc.get('drobny', 0)})." if fi_avg else "",
+        "score_rationale": f"Ocena odzwierciedla wyniki testu pierwszego wrażenia ({fi_avg:.2f}/5) oraz rozkład naruszeń: {sc.get('krytyczny', 0)} krytycznych, {sc.get('poważny', 0)} poważnych, {sc.get('drobny', 0)} drobnych." if fi_avg else "",
         "key_strengths": strengths or ["Brak wyraźnych mocnych stron możliwych do wyodrębnienia z danych."],
-        "critical_issues": [],
+        "critical_issues": [_to_issue(h) for h in critical],
         "serious_issues": [_to_issue(h) for h in serious],
         "minor_issues": [_to_issue(h) for h in minor],
         "accessibility_assessment": f"Średnia ocena dostępności: {a11y_avg}/5." if a11y_avg else "",
@@ -1163,11 +1207,7 @@ def _narrative_from_stats(stats: dict) -> dict:
 def _render_aggregated_md(agg: dict) -> str:
     lines: list[str] = []
     stats = agg.get("statistics") or {}
-    narr = agg.get("narrative") or {}
-    # Fall back to stats-derived narrative when LLM call failed or returned empty
-    if not narr or "error" in narr or not narr.get("executive_summary"):
-        narr = _narrative_from_stats(stats)
-        _attach_issue_evidence(narr, stats)
+    narr = resolve_narrative(agg)
     n = stats.get("participant_count", 0)
 
     def h(level: int, text: str):

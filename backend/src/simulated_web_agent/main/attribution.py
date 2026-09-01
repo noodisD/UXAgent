@@ -15,6 +15,7 @@ and rendered as "needs verification" rather than shipped as confirmed defects.
 """
 import json
 import logging
+import re
 
 from .trace_store import TraceStore
 
@@ -131,11 +132,35 @@ def _suspect_targets(store: TraceStore, suspect: set[int]) -> set[str]:
     element in their evidence text — e.g. Kacper's "pola wyszukiwania
     'wyszukaj_lokalizacje'" at step 28, after the loop ended at step 24."""
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
-    return {
+    targets = {
         str(actions[i].get("target"))
         for i in suspect
         if i < len(actions) and actions[i].get("target")
     }
+    # Ids shorter than this carry no signal: matched against Polish prose, a
+    # target like "1", "q" or "cart" hits unrelated findings and demotes them to
+    # harness_suspect, which zeroes severity_score, drops them from headline
+    # counts and the prioritization matrix, and caps confidence to low. The
+    # match is only meaningful for distinctive parser ids ("wyszukaj_lokalizacje").
+    return {t for t in targets if len(t) >= _MIN_TARGET_LEN}
+
+
+_MIN_TARGET_LEN = 5
+
+
+def _names_target(text: str, targets: set[str]) -> bool:
+    """Does the finding's prose name one of these elements?
+
+    Whole-token match, not a substring: these are identifiers quoted inside the
+    text ("pola wyszukiwania 'wyszukaj_lokalizacje'"), so a bare `t in text`
+    also fired on any word that merely contained the id. Unlike the Polish stem
+    markers in session_goal_state, a full boundary is correct here — an
+    identifier is not inflected.
+    """
+    return any(
+        re.search(r"(?<!\w)" + re.escape(t) + r"(?!\w)", text, re.IGNORECASE)
+        for t in targets
+    )
 
 
 def flag_harness_suspects(store: TraceStore, findings: list) -> list:
@@ -158,7 +183,7 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         if step is not None and step in suspect:
             return True
         text = f"{f.get('evidence', '')} {f.get('recommendation', '')}"
-        if any(t and t in text for t in targets):
+        if _names_target(text, targets):
             return True
         if search_contradicted and _claims_search_broken(f):
             return True

@@ -111,6 +111,12 @@ def has_marker(text: str, markers) -> bool:
     "nie przechodz" does not match "wielokrotNIE PRZECHODZić" (a real false
     match caught on a legit compare-friction finding). For Polish observation
     text only — URL markers use plain substring (a leading "/" has no boundary).
+
+    Leading boundary only, and deliberately so: markers are truncated stems that
+    must still match Polish inflection ("porówn" -> porównaj / porównanie /
+    porównać). A trailing boundary would reject all of those. The cost is that a
+    stem short enough to prefix an unrelated word matches it too, so the length
+    of each marker is load-bearing — see the note on _TARGET_KEYWORDS.
     """
     return any(re.search(r"(?<!\w)" + re.escape(m), text) for m in markers)
 
@@ -198,9 +204,24 @@ def compute_goal_state(store: TraceStore, target_url: str) -> dict:
         # item was added even without opening the cart page.
         if has_marker(o, _ADDED_TO_CART_OBS_MARKERS):
             _mark("cart_has_items", step, url)
-        # Order summary: the summary block in the observation, or a checkout URL.
-        if ((has_marker(o, _SUMMARY_HEADING_MARKERS) and has_marker(o, _SUMMARY_CTA_MARKERS))
-                or _url_has(u, _CHECKOUT_URL_MARKERS)):
+        # Order summary: the summary block in the observation, or a checkout URL
+        # — but only once we already know items were in the cart.
+        #
+        # _CART_URL_MARKERS and _CHECKOUT_URL_MARKERS both contain "checkout"
+        # and "/kasa", so a single URL used to grant cart_reached AND
+        # order_summary_reached in the same iteration while cart_has_items — the
+        # rung between them, and the _PARTIAL_FLOOR — stayed False. The ladder
+        # is meant to be monotonic, so that lifted the reached index straight to
+        # the top and scored the persona `success` on a task whose target is
+        # cart_has_items, with nothing in the trace showing anything was ever
+        # added. This is the same "only counts once items were in the cart" rule
+        # the checkout-click and login-gate paths below already apply.
+        summary_in_observation = (
+            has_marker(o, _SUMMARY_HEADING_MARKERS) and has_marker(o, _SUMMARY_CTA_MARKERS)
+        )
+        if summary_in_observation or (
+            _url_has(u, _CHECKOUT_URL_MARKERS) and ladder["cart_has_items"]["reached"]
+        ):
             _mark("order_summary_reached", step, url)
         # The login/checkout gate (dm forces sign-in at checkout) — recorded, but
         # only counts once we know items were in the cart (below).
@@ -243,8 +264,17 @@ _TARGET_KEYWORDS = (
                                "zamówieni", "zamowieni", "sfinalizuj", "złóż zam",
                                "zloz zam")),
     ("cart_has_items", ("koszyk", "do koszyk", "cart", "dodaj do")),
+    # Stems are deliberately truncated to catch Polish inflection ("porówn"
+    # matches porównaj/porównanie), so they must still be long enough to be
+    # unambiguous. "cen" was not: with only a leading word boundary it matched
+    # centrum, centralny and cennik, so "sprawdź godziny otwarcia centrum
+    # handlowego" was classified as a product-viewing shopping task and then
+    # scored against a ladder that does not apply to it. Spelled out instead of
+    # shortened — a tighter matcher cannot fix a stem this generic without
+    # breaking the longer stems around it.
     ("product_viewed", ("porówn", "porown", "znajd", "wyszuk", "sprawdź", "sprawdz",
-                        "cen", "obejrz", "przegląd", "przeglad")),
+                        "cena", "ceny", "cenę", "cene", "cenie", "cenow", "cennik",
+                        "obejrz", "przegląd", "przeglad")),
 )
 
 

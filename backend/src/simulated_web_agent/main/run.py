@@ -12,6 +12,7 @@ import yaml
 
 from ..agent import gpt
 from ..config import load_cfg
+from ..executor.env import WebAgentEnv
 from .analysis_runner import run_all_analyses
 from . import cancellation
 from .experiment import experiment_async
@@ -117,6 +118,12 @@ async def run_async(
 ):
     ping = lambda e: _safe_ping(on_progress, e)
 
+    # Every run() is its own asyncio.run(), so its own event loop, and runs are
+    # serialised by the RUNS registry. Any shared Playwright driver still on the
+    # class here belongs to a destroyed loop — awaiting it hangs rather than
+    # raising. Drop it before anything can pick it up.
+    WebAgentEnv.reset_shared_playwright()
+
     cfg = load_cfg()
     gpt.configure(cfg.llm_provider)
 
@@ -153,7 +160,7 @@ async def run_async(
         },
     )
 
-    def _finalize(status: str) -> None:
+    def _finalize(status: str, failure: Optional[dict] = None) -> None:
         ended_at = datetime.now(timezone.utc)
         manifest = read_manifest(run_dir) or {}
         manifest.update(
@@ -163,6 +170,10 @@ async def run_async(
                 "status": status,
             }
         )
+        if failure:
+            # Same shape mark_run_status writes, so the dashboard's failed-run
+            # modal reads both paths identically.
+            manifest["failure"] = failure
         _write_manifest(run_dir, manifest)
 
     # ── 1) Personas ──────────────────────────────────────────────────────────
@@ -276,6 +287,7 @@ async def run_async(
             log.exception("Page speed check failed (non-fatal): %s", e)
 
     # ── 5) Aggregated report ──────────────────────────────────────────────────
+    report_error: Exception | None = None
     if stores:
         ping({"phase": "report", "status": "start", "total": 1})
         try:
@@ -288,7 +300,25 @@ async def run_async(
             )
         except Exception as e:
             log.exception("Aggregated report generation failed: %s", e)
+            report_error = e
         ping({"phase": "report", "status": "progress", "current": 1, "total": 1})
+
+    if report_error is not None:
+        # The report is the deliverable. Finalising "done" after it failed
+        # showed the run as complete with score 0.0 in the history, which reads
+        # as "we audited the site and found nothing" rather than "we produced
+        # nothing" — the two are indistinguishable to the user.
+        _finalize("error", failure={
+            "phase": "report",
+            "failedAt": "",
+            "error": str(report_error)[:600],
+            "suggestion": (
+                "Sessions and per-persona analyses completed; only the aggregated "
+                "report failed. Re-run the report over the existing trace rather "
+                "than repeating the whole audit."
+            ),
+        })
+        return run_id
 
     _finalize("done")
     return run_id
