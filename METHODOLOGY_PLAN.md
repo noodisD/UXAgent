@@ -17,17 +17,19 @@ Legend: 🟢 quick win · 🟡 contained feature · 🔴 larger effort / process
 
 ## Phase 1 — Honest signals & labeling (🟢, do first)
 
-### 1.1 ISO 9241-11 signal separation (§1.1)
+### 1.1 ISO 9241-11 signal separation (§1.1) — ✅ DONE (`main/iso_metrics.py`)
 Split each persona run's result into the three ISO dimensions instead of one
 blended narrative.
 
 - **effectiveness**: `task_success | partial_success | failed`,
-  `goal_state_reached`, `critical_error`. Be precise about provenance, because
-  these do not share one: `task_success` and `goal_state_reached` are both
-  `objective_reflection.outcome` — an LLM's verdict on its own run, not a
-  checked goal state. Only `critical_error`/`ended_reason` come from
-  `session_result.json`. §4.2 is what would make this measured; until it lands,
-  the report must not present effectiveness as observed.
+  `goal_state_reached`, `critical_error`. Provenance matters here and is now
+  explicit. §4.2 has shipped: `main/session_goal_state.py` derives the outcome
+  from what the trace shows, and `iso_metrics` labels each result `observed` or
+  `declared` — falling back to the LLM's self-rating only when the target rung
+  is undecidable. The report presents the observed outcome as the headline and
+  flags disagreement with the declared one, so "observed" is never claimed for a
+  value that was not measured. `critical_error`/`ended_reason` come from
+  `session_result.json` as before.
 - **efficiency**: `step_count`, `tap_count`, `backtracks` (count of `back`
   actions), `loop_detected` (already computable —
   `attribution.harness_suspect_steps()` finds exactly these loops),
@@ -50,7 +52,7 @@ the per-persona report. Tests: `tests/test_iso_metrics.py`.
   (hipoteza)" in report templates + ReportView.vue label.
 
 Files: `audit_prompts/aggregate_synthesize.txt`, `main/reporter.py`,
-`main/reporter_html.py`, `experiment-ui/src/screens/ReportView.vue`, i18n.
+`main/reporter_html.py`, `frontend/src/screens/ReportView.vue`, i18n.
 
 ### 1.3 Finding schema upgrade (§8.3)
 Extend every heuristic finding with the doc's issue schema. Already have:
@@ -99,9 +101,9 @@ with the triggering condition. Drop-off becomes a first-class UX signal
 
 Files: `agent/shop_prompts/planning.txt`, `main/experiment.py`,
 `main/model.py`, `trace_store.py` (session_result shape), tests
-`test_abort_conditions.py`.
+`tests/test_abort.py`.
 
-### 2.3 Bias guardrail pass (§1.4, §11.4)
+### 2.3 Bias guardrail pass (§1.4, §11.4) — ✅ DONE (`main/bias_audit.py`)
 New post-run audit using the §11.4 prompt verbatim: check each finding /
 reflection rationale for (a) stereotype-based vs persona-data-based reasoning,
 (b) identity traits used without task relevance, (c) flattening. Output
@@ -115,7 +117,7 @@ Files: new `main/bias_audit.py` + `audit_prompts/bias_audit.txt`, wired into
 
 ## Phase 3 — Evaluation engine upgrades (🟡)
 
-### 3.1 Severity 0–4 (NN/g) replacing the 3-level scale (§4.4)
+### 3.1 Severity 0–4 (NN/g) replacing the 3-level scale (§4.4) — ✅ DONE (`main/severity.py`)
 Current: krytyczny/poważny/drobny. Doc: 0–4 with 0 = "not a problem / false
 positive" — which is exactly where `harness_suspect` findings belong. Map:
 4=katastrofa(stop-ship), 3=major(≈krytyczny), 2=minor(≈poważny),
@@ -126,7 +128,7 @@ Files: `heuristic_evaluate.txt`, `reporter*.py` (SEVERITY_ORDER maps),
 frontend `theme.ts` SEV map + i18n, migration shim for old runs (read old
 labels → numeric).
 
-### 3.2 Cognitive walkthrough layer (§4.4)
+### 3.2 Cognitive walkthrough layer (§4.4) — ✅ DONE (`main/cognitive_walkthrough.py`)
 Per step (or per failed step), evaluate the four CW questions: right intent?
 action noticed? action↔result association? feedback visible? Emitted as
 `cognitive_walkthrough.json` hypotheses feeding heuristic evaluation evidence.
@@ -136,7 +138,7 @@ errors) to control token cost.
 Files: new `audit_prompts/cognitive_walkthrough.txt`, `main/auditor.py`
 (second pass over friction steps), report section.
 
-### 3.3 Post-task SEQ + confidence (§4.3)
+### 3.3 Post-task SEQ + confidence (§4.3) — ✅ DONE (`main/survey.py`, synthetic_seq / synthetic_confidence)
 Add SEQ ("Jak łatwe było wykonanie zadania?" 1–7) and confidence (1–7) as
 fixed synthetic post-task questions independent of the user's questionnaire,
 stored as `synthetic_seq`, `synthetic_confidence` with the MeasuringU 5.5
@@ -203,11 +205,11 @@ Design: split config into
   injected into the *action executor* context only, never into perceive/
   reflect/audit prompts, and excluded from the auditor's inputs.
 
-Files: `conf/runConfig.yaml` schema, `main/run.py`, `main/experiment.py`,
+Files: `backend/conf/runConfig.yaml` schema, `main/run.py`, `main/experiment.py`,
 `agent/agent.py` prompt assembly, wizard field split. This is the subtlest
 change — verify with an A/B run that agents still navigate pepco.
 
-### 4.2 Machine-checkable success criteria (§3.1 "Kryterium sukcesu")
+### 4.2 Machine-checkable success criteria (§3.1 "Kryterium sukcesu") — ✅ DONE (`main/session_goal_state.py`)
 Each task gets an explicit `success_condition` the harness can verify (URL
 pattern, element present, state reached) so `goal_state_reached` in Phase 1.1
 is evidence, not LLM opinion.

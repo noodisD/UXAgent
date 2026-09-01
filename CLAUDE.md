@@ -17,7 +17,9 @@ the UI is Polish-first with an EN toggle.
 
 - **Backend**: Python 3.12, Flask (`backend/src/simulated_web_agent/main/app.py`),
   async pipeline via `asyncio`, Playwright, LiteLLM (OpenAI / Anthropic / Gemini / AWS).
-- **Frontend**: Vue 3 + TypeScript + Vite, Naive UI, in `frontend/`.
+- **Frontend**: Vue 3 + TypeScript + Vite, in `frontend/`. Hand-written SFCs +
+  `src/style.scss` — there is no component library (package.json declared
+  `naive-ui` and `@vicons/*` for a long time with zero imports).
 - **Packaging**: `uv` (`backend/pyproject.toml` + `backend/uv.lock`); editable
   install of `simulated_web_agent`.
 
@@ -43,9 +45,16 @@ Frontend (port 5173) — terminal 2:
 cd frontend && npm run dev
 ```
 Open http://localhost:5173. Vite proxies `/run`, `/progress`,
-`/generate-example-persona`, and `/runs/*` to the backend on 8000.
+`/generate-example-persona`, `/generate-audit-settings` and `/runs/*` to the
+backend on 8000.
 
-Type-check frontend: `cd frontend && npx vue-tsc --noEmit`
+Type-check frontend: `cd frontend && npm run typecheck`.
+**Not** `npx vue-tsc --noEmit`: `tsconfig.json` is a solution file (`"files": []`
+plus project references), so the bare form resolves zero input files and exits 0.
+It reported success for months while the build was broken. The npm script points
+at `tsconfig.app.json`, which is what `vue-tsc -b` (and therefore `npm run build`)
+actually checks.
+
 Backend tests: `cd backend && uv run pytest` (in `backend/tests/`).
 
 ## Environment gotchas (important)
@@ -62,6 +71,15 @@ Backend tests: `cd backend && uv run pytest` (in `backend/tests/`).
 
   `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / AWS keys are only
   read if you switch `llm_provider`; nothing uses them today.
+- **`UXAGENT_API_KEY`** — the shared password the dashboard asks for, compared
+  against the `X-API-Key` header. **Unset means every endpoint is open**, which
+  is what keeps local dev and the test suite working — and what makes a public
+  deployment without it a way for strangers to spend your LLM budget. `app.py`
+  logs a loud warning at boot when it is unset.
+- **`CORS_ORIGINS`** — comma-separated origin allowlist, needed once the
+  dashboard is served from a different host than the API. Empty = same-origin.
+- **`PORT`** — honoured by the Dockerfile's gunicorn CMD. `app.py`'s `__main__`
+  block hardcodes 8000 and ignores it, so that path is dev-only.
 - **OneDrive / cloud-synced folder**: `uv sync` / `uv add` must be prefixed with
   `UV_LINK_MODE=copy` (hardlinks fail on OneDrive). Plain `uv run` is fine.
 - **Windows console encoding**: prefix runs with `PYTHONIOENCODING=utf-8` (Polish chars).
@@ -78,18 +96,34 @@ Pipeline (`main/run.py` `run_async`): generate personas → `experiment_async`
 `generate_aggregated_report`. Outputs to `runs/<run_id>/<persona_dir>/...` plus a
 run-level `run_manifest.json` and `aggregated_report.{json,md,html}`.
 
-### Endpoints (`main/app.py`)
+### Endpoints (`main/app.py`) — all 13
+- `GET /health` → unauthenticated liveness probe (the container platform's).
 - `POST /run` → starts run, returns `{run_id, site_slug}` (202).
 - `GET /progress[?run_id=]` → `{run_id, status, phase, current, total, label, message}`
   or `{status:"idle"}`. Phases: personas → agents → analysis → report.
+  `status` is one of running | done | error | cancelled.
+- `POST /runs/<run_id>/cancel` → cooperative cancel; sessions stop after the
+  current step and queued personas never start.
 - `POST /generate-example-persona` → LLM-generates one persona for the wizard.
+- `POST /generate-audit-settings` → LLM-suggests wizard settings for a URL.
 - `GET /runs` → run-history rows.
-- `GET /runs/<run_id>` → full results: `{meta, personas[], report}` (report =
-  aggregated narrative).
+- `GET /runs/<run_id>` → full results: `{meta, personas[], report, comparison}`.
 - `GET /runs/<run_id>/live` → per-persona live state `{step, url, action,
   observation, stream[]}` read incrementally from the trace during a run.
 - `GET /runs/<run_id>/screenshot/<persona_id>` → latest screenshot PNG (no-cache).
+- `GET /runs/<run_id>/screenshot/<persona_id>/<step>` → that step's screenshot.
+- `GET /runs/<run_id>/<persona_id>/screenshot/<filename>` → a named screenshot.
 - `GET /runs/<run_id>/report.html` → static aggregated report.
+
+### Auth model (`app.py`, `@before_request`)
+`UXAGENT_API_KEY` unset → open. Set → every route needs `X-API-Key`, compared
+with `hmac.compare_digest`. Two deliberate exemptions:
+- `OPTIONS` (a CORS preflight carries no custom header) and `/health`.
+- The four browser-loaded routes — the three `/runs/.../screenshot/...` variants
+  and `/runs/<id>/report.html` — also accept the key as `?key=`, because a
+  browser cannot attach a header to an `<img src>` or a `target="_blank"`
+  navigation. `frontend/src/api.ts` is the only place that knows this:
+  `apiFetch` sends the header, `apiAssetUrl` appends the query parameter.
 
 `main/results_api.py` owns reading the on-disk trace and mapping it to API
 shapes. `main/trace_store.py` is the single I/O authority for the trace dir
@@ -106,10 +140,11 @@ schema (every `read_*`/`write_*`). Never construct trace paths outside TraceStor
 `first_impression.json`, `accessibility_findings.json`, `viewport_findings.json`,
 `scroll_summary.json`, `form_funnel.json`, `link_findings.json`,
 `survey_result.json`, `objective_reflection.json` (structured: summary/blockers/
-wins/priorityFix/outcome), `ux_report.{json,md}`, `action_trace.json`,
-`observation_trace/`, `memory_trace.json`, `screenshot/`.
+wins/priorityFix/outcome), `iso_metrics.json`, `bias_audit.json`,
+`cognitive_walkthrough.json`, `session_result.json`, `ux_report.{json,md}`,
+`action_trace.json`, `observation_trace/`, `memory_trace.json`, `screenshot/`.
 
-## Frontend structure (`experiment-ui/src/`)
+## Frontend structure (`frontend/src/`)
 
 - `App.vue` — shell (sidebar, header, screen router, language switch, active-run card).
 - `screens/WizardScreen.vue` — 3-step new-audit wizard (recruitment, survey, review)
@@ -123,14 +158,23 @@ wins/priorityFix/outcome), `ux_report.{json,md}`, `action_trace.json`,
 - `composables/` — `useApp` (nav state), `useRun` (start/persist run_id), `useProgress`,
   `useLive`, `useResults`, `useHistory`, `useForm`.
 - `i18n.ts` — reactive `locale` (default `pl`) + `t()` + pl/en dictionaries.
-- `theme.ts` — colors + locale-aware `sevLabel`/`outcomeLabel`/`heuristicName`.
+- `theme.ts` — colours, the normalisers `outcomeOf`/`sevOf` (every raw backend
+  string goes through one before it is used as a map key) and the locale-aware
+  `sevLabel`/`outcomeLabel`/`heuristicName`.
+- `api.ts` — **the only seam to the backend.** Owns the absolute origin
+  (`window.UXAGENT_API_BASE` from `public/config.js`, else `VITE_API_BASE`, else
+  same-origin), the `X-API-Key` header, the `?key=` variant for browser-loaded
+  assets, and central 401 handling. Nothing else should call `fetch` directly.
+- `components/AuthGate.vue` — the password gate shown when a key is required.
+- `public/config.js` — backend URL, editable on the static host without a
+  rebuild. Deliberately empty in git.
 
 ## Conventions
 
-- This worktree is the **post-pepco** baseline (chosen over `master`); the dashboard,
-  live view, AI-persona, and i18n were built on top of it. See `HANDOFF.md` for the
-  branch story.
-- TDD where practical (`tests/`), `vue-tsc` must pass before declaring frontend done.
+- Work happens on `feat/ux-methodology`. See `HANDOFF.md` for orientation.
+- TDD where practical (`tests/`). `npm run typecheck` must pass before declaring
+  frontend done — and it must be that script, not a bare `vue-tsc --noEmit`,
+  for the reason given under Run commands.
 - Dynamic content (persona narratives, findings, report prose) is produced in Polish
   by the LLM; only UI chrome is translated via `i18n.ts`.
 - Add a new analysis pass via the recipe at the top of `main/analysis_runner.py`.

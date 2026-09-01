@@ -56,8 +56,10 @@ static files.
 
 ```bash
 cd backend
-uv sync
-uv run playwright install chromium
+# UV_LINK_MODE=copy is required on OneDrive or any cloud-synced folder —
+# uv's hardlinks fail there. Harmless everywhere else.
+UV_LINK_MODE=copy uv sync
+UV_LINK_MODE=copy uv run playwright install chromium
 cp .env.example .env      # then fill it in
 ```
 
@@ -73,7 +75,8 @@ npm install
 Two terminals:
 
 ```bash
-cd backend && uv run python -m simulated_web_agent.main.app     # :8000
+# PYTHONIOENCODING=utf-8 is required on Windows — the report prose is Polish.
+cd backend && PYTHONIOENCODING=utf-8 uv run python -m simulated_web_agent.main.app   # :8000
 ```
 
 ```bash

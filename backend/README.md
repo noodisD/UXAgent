@@ -14,9 +14,19 @@ uv run playwright install chromium
 On a OneDrive-synced checkout, prefix `uv sync`/`uv add` with
 `UV_LINK_MODE=copy` (hardlinks fail on OneDrive).
 
-Copy `.env` here (repo-root-relative to this directory) with the required
-keys — see the "Environment gotchas" section of `../CLAUDE.md` for what each
-one is for and which ones actually matter under the active `llm_provider`.
+Create the environment file **in this directory** — `backend/.env`, not the
+repository root. `agent/gpt.py` calls `load_dotenv()`, which resolves relative
+to the process working directory, and that must be `backend/`; a root `.env` is
+silently never loaded and every LLM call then 500s.
+
+```bash
+cp .env.example .env      # then fill it in
+```
+
+`.env.example` documents every variable. See the "Environment gotchas" section
+of `../CLAUDE.md` for which ones actually matter under the active
+`llm_provider`, and for `UXAGENT_API_KEY` / `CORS_ORIGINS`, which decide whether
+a deployment is reachable and whether it is open to the internet.
 
 ## Run
 
@@ -25,7 +35,8 @@ PYTHONIOENCODING=utf-8 uv run python -m simulated_web_agent.main.app
 ```
 
 Serves the API on port 8000. The frontend's dev server proxies `/run`,
-`/progress`, `/generate-example-persona`, and `/runs/*` to this port.
+`/progress`, `/generate-example-persona`, `/generate-audit-settings` and
+`/runs/*` to this port.
 
 ## Test
 

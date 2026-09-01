@@ -1,5 +1,14 @@
 # UXAgent — Frontend Designer Brief
 
+> **Historical — superseded.** This is the original design brief, kept for the
+> reasoning behind the dashboard's shape. It no longer describes the code:
+> it predates the Vertex/gemini move (it says OpenAI / AWS Bedrock), lists 2 of
+> the 13 endpoints, states that the frontend only ever talks to its own origin
+> (no longer true — see `frontend/src/api.ts` and `public/config.js`), and its
+> "What's Missing" section describes screens that have since shipped. For the
+> current picture read `CLAUDE.md` and `HANDOFF.md`.
+
+
 ## What the App Does
 
 UXAgent is an **AI-powered UX research platform**. Instead of recruiting real human participants, it generates synthetic personas and sends AI agents (powered by an LLM) to browse a website autonomously. Each agent behaves like a real user — it perceives the page, forms a plan, takes actions, and reflects on what it experienced. After all sessions complete, the platform produces a full UX audit report: heuristic violations, accessibility issues, responsiveness problems, scroll behaviour, form engagement, and a post-session questionnaire.

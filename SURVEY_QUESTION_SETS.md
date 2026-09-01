@@ -7,6 +7,15 @@ stronie-katalogu centrum handlowego jak Westfield też. Dlatego zamiast jednego
 uniwersalnego zestawu używamy **rdzenia uniwersalnego + dodatku zależnego od
 kategorii strony**.
 
+> **Stan implementacji.** Kreator (`frontend/src/surveyPresets.ts`) udostępnia
+> obecnie **4 z 8** kategorii opisanych poniżej: `ecommerce`, `catalog`,
+> `directory`, `corporate`. Zestawy `media`, `booking`, `fintech` i `public` są
+> tu udokumentowane, ale nie są jeszcze wybieralne w UI.
+>
+> Implementacja nie używa też opisanego niżej modelu „rdzeń + dodatek": każda
+> kategoria to jeden płaski zestaw ~10 pytań, w którym pytania rdzeniowe są już
+> wpisane. Ten dokument opisuje zamierzoną strukturę, kod — obecną.
+
 ## Na czym oparte
 
 - **SUPR-Q** (Sauro / MeasuringU, 2015) — standard jakości UX strony: 4 wymiary —

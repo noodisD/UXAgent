@@ -3,7 +3,7 @@ results_api — pure transforms from on-disk run artifacts to dashboard payloads
 
 The Flask layer (app.py) stays thin: it calls these functions and JSON-encodes the
 result. Everything here reads the filesystem via TraceStore + run_manifest.json and
-maps it to the shapes the frontend consumes (see experiment-ui sample-data.js).
+maps it to the shapes the frontend consumes (see frontend/src/types.ts).
 
 Layout produced by run.py:
     runs/<run_id>/run_manifest.json

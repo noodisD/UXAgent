@@ -95,15 +95,33 @@ CMD exec .venv/bin/gunicorn \
 #   gcloud run deploy uxagent-backend --source . \
 #     --region europe-central2 --memory 4Gi --cpu 2 \
 #     --no-cpu-throttling --timeout 3600 \
-#     --min-instances 1 --max-instances 1
+#     --min-instances 1 --max-instances 1 \
+#     --set-secrets UXAGENT_API_KEY=<secret-name>:latest \
+#     --set-env-vars VERTEXAI_PROJECT=<project>,VERTEXAI_LOCATION=<region> \
+#     --set-env-vars CORS_ORIGINS=https://<your-dashboard-host>
 #
+#   Every flag above is load-bearing. This block used to list only the first
+#   four, and a deployment made from it was OOM-killed 21 seconds into every
+#   run while serving an unauthenticated API.
+#
+#   * UXAGENT_API_KEY: without it app.py leaves EVERY endpoint open — anyone
+#     with the URL can start runs against your LLM budget. It warns at boot.
+#   * CORS_ORIGINS: without it a dashboard on another host cannot call the API,
+#     and for screenshots the failure is a silent broken image, because browsers
+#     do not apply CORS to <img src>.
+#   * VERTEXAI_PROJECT / VERTEXAI_LOCATION: litellm resolves the Vertex endpoint
+#     from the environment, not from conf/base.yaml. Gemini model availability
+#     differs by region — a model-not-found at run time points here.
 #   * --no-cpu-throttling (CPU always allocated) is REQUIRED. The audit runs in
 #     a background thread after the HTTP response returns; with the default
 #     request-scoped CPU it would be throttled to a stop mid-run.
 #   * --min/--max-instances 1 for the same reason as --workers 1: run state is
 #     in-memory, so it must not be spread across instances.
 #   * Memory: chromium is heavy and personas run concurrently. 4Gi is a
-#     starting point — raise it if sessions die at higher concurrency.
+#     starting point — raise it if sessions die at higher concurrency. The
+#     symptom is a "Memory limit of N MiB exceeded" line seconds after
+#     POST /run, which from the dashboard looks like a persona that never
+#     starts rather than an infrastructure failure.
 #
 # Credentials: do NOT bake .env or a service-account key into the image. On
 # Cloud Run, attach a service account and let Application Default Credentials

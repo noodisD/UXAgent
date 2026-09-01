@@ -4,7 +4,7 @@ requires = ["hatchling"]
 
 [project]
 authors = [
-  {name = "Yuxuan Lu", email = "luyuxuanleo@gmail.com"},
+  {name = "Robert Krivic"},
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -46,7 +46,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "werkzeug>=3.0.6",
 ]
-description = ''
+description = "UXAgent backend — LLM-driven Playwright agents that audit a website as synthetic UX-research participants."
 dynamic = ["version"]
 keywords = []
 license = "MIT"
@@ -61,9 +61,9 @@ dev = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/Yuxuan Lu/simulated-web-agent#readme"
-Issues = "https://github.com/Yuxuan Lu/simulated-web-agent/issues"
-Source = "https://github.com/Yuxuan Lu/simulated-web-agent"
+Documentation = "https://github.com/robertkrivic/UX_AGENT#readme"
+Issues = "https://github.com/robertkrivic/UX_AGENT/issues"
+Source = "https://github.com/robertkrivic/UX_AGENT"
 
 [tool.hatch.version]
 path = "src/simulated_web_agent/__about__.py"

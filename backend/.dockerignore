@@ -4,6 +4,7 @@ runs/
 browser_cache/
 browser_session/
 personas.json
+*.log
 
 # Secrets — provided at runtime as env vars / the attached service account,
 # never baked into a layer.
