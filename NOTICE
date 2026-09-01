@@ -1,0 +1,19 @@
+# Third-party attribution
+
+This project is derived from **UXAgent**, an open-source research system for
+simulating usability testing with LLM agents:
+
+  https://github.com/neuhai/UXAgent
+  "UXAgent: A System for Simulating Usability Testing of Web Design with LLM"
+  arXiv:2504.09407 — Yuxuan Lu, Bingsheng Yao, Hansu Gu, Jing Huang,
+  Jessie Wang, Laurence Li, Haiyang Zhang, Qi He, Toby Jia-Jun Li, Dakuo Wang
+
+The upstream project is MIT licensed. Substantial parts of the agent loop,
+browser executor, and memory system originate there and are used under those
+terms; the MIT licence requires this notice be retained in derivative works.
+
+Work in this repository that is not from upstream — the audit and reporting
+pipeline (Nielsen heuristic evaluation, evidence resolution, claim
+verification, root-cause clustering, grounded task-completion outcome), the
+Vue dashboard, and the deployment setup — is covered by the LICENSE file at
+the repository root.

@@ -1,0 +1,21 @@
+Przeprowadź cognitive walkthrough (NN/g) dla wskazanych kroków sesji. Dla
+każdego kroku odpowiedz na cztery pytania z perspektywy persony jako nowego
+użytkownika, opierając się WYŁĄCZNIE na widocznej obserwacji i akcji:
+
+1. right_intent — Czy persona rozumie, że ten krok jest potrzebny do celu?
+2. action_noticed — Czy właściwa akcja jest widoczna i rozpoznawalna?
+3. action_result_assoc — Czy etykieta/ikona odpowiada oczekiwanemu rezultatowi
+   (mental model użytkownika)?
+4. feedback_visible — Czy po akcji widać potwierdzenie postępu?
+
+Każda odpowiedź to "yes" | "no" | "unclear".
+
+Zwróć WYŁĄCZNIE JSON — listę obiektów:
+[{"step": 0, "right_intent": "yes|no|unclear", "action_noticed": "yes|no|unclear",
+  "action_result_assoc": "yes|no|unclear", "feedback_visible": "yes|no|unclear",
+  "note": "<krótko po polsku>"}]
+
+Persona: {persona}
+Cel wizyty: {intent}
+Kroki (obserwacja ekranu + wykonana akcja):
+{steps}

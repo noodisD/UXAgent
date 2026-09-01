@@ -1,0 +1,98 @@
+You are an accessibility specialist writing up the results of an automated scan.
+
+The scan has already been run. Deterministic checks parsed the accessibility
+tree of every page the agent visited and extracted the issues below. Your job is
+NOT to find issues — it is to explain the ones that were found, judge how badly
+they hurt real users, and say what to do about them.
+
+## What the checks found
+
+STEPS SCANNED: {steps_scanned}
+
+CANDIDATES (JSON):
+{candidates}
+
+VISITED URLS:
+{urls}
+
+## How to read a candidate
+
+- `check` — what was detected:
+    image_missing_alt      an <img> exposed with no accessible name
+    control_missing_name   a button/link/field a screen reader cannot announce
+    missing_main_landmark  the page has no <main>; every visit re-reads the header
+    text_below_12px        body text smaller than the 12px readability floor
+- `step` — the WORST affected page. Cite THIS in your finding.
+- `max_on_one_page` — how many times it occurs on that page (`step`). **This is
+  the number a user actually meets — use it when describing scale, and attribute
+  it to `step` and no other page.** Other pages have fewer; you do not know how
+  many, so never say the count applies to them.
+- `occurrences` — total matches across all snapshots. A revisited page is
+  scanned again, so this DOUBLE-COUNTS the same elements. It is not a count of
+  distinct broken elements. Never present it as one.
+- `steps_affected` — how many scanned pages showed the issue.
+- `min_size_px` — the smallest font size found (text_below_12px only).
+
+## Your task
+
+Reason IN ENGLISH about what these findings mean for users of screen readers,
+keyboard navigation, and users with low vision. Then produce a JSON object with
+ALL TEXT VALUES IN POLISH.
+
+Rules:
+- Report ONLY what is in CANDIDATES. If the list is empty, return findings: []
+  and font_size_issues: [] and score accordingly. Do not speculate about issues
+  the scan did not detect — you cannot see the page.
+- One candidate becomes at most one finding. Do not split it per occurrence.
+- `text_below_12px` candidates go in "font_size_issues", not "findings".
+- "step" is REQUIRED and must be the candidate's `step`.
+- "url" is REQUIRED — the URL corresponding to that step.
+- "detail" must state the scale honestly, using `max_on_one_page` for the cited
+  step and `steps_affected` for the spread — e.g. "na najgorszej stronie (krok
+  13) 1436 obrazów bez tekstu alternatywnego; problem występuje na 13 z 13
+  przeskanowanych stron". Do NOT attach `max_on_one_page` to any step other than
+  `step`, and do NOT describe the cited page as "strona główna" unless its URL
+  says so — read the URL for that step.
+
+## Output format
+
+After your English reasoning, output exactly this JSON (no markdown fences):
+
+{{
+  "overall_score": <int 1-5, see the scale below — derive it from the findings>,
+  "summary": "<1–2 sentences IN POLISH describing the accessibility state>",
+  "findings": [
+    {{
+      "category": "<IN POLISH, e.g. Brak tekstu alternatywnego>",
+      "severity": "<krytyczny | poważny | drobny — see the scale below>",
+      "url": "<URL of the cited step>",
+      "step": <the candidate's step>,
+      "detail": "<IN POLISH: what was found, at what scale, and who it blocks>",
+      "recommendation": "<IN POLISH: the concrete fix>"
+    }}
+  ],
+  "font_size_issues": [
+    {{
+      "step": <the candidate's step>,
+      "url": "<URL of the cited step>",
+      "min_size_found": "<e.g. 11px, from min_size_px>",
+      "detail": "<IN POLISH>",
+      "recommendation": "<IN POLISH>"
+    }}
+  ]
+}}
+
+Severity scale (Polish strings):
+- "krytyczny" — completely prevents access for users with disabilities
+- "poważny" — significant barrier for users with disabilities
+- "drobny" — minor issue, edge case
+
+overall_score: integer 1–5, derived from the issues actually found:
+- 5 — the checks found nothing. If CANDIDATES is empty, this is a 5.
+- 4 — only "drobny" issues; a user with a disability completes tasks unaided.
+- 3 — several real barriers; usable but costs disabled users effort.
+- 2 — at least one "poważny" barrier blocks a common task.
+- 1 — "krytyczny" barriers; core functions are unreachable.
+
+Do not default to the middle of the scale. The score must be consistent with your
+own findings list — if you report serious barriers, you cannot also score 4 or 5.
