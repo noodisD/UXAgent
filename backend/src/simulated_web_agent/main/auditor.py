@@ -243,12 +243,6 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
         return {"error": str(e)}
 
 
-def _target_url(store: TraceStore) -> str:
-    """The site under test, for domain-scoping findings. Single definition in
-    site_scope.target_url_for, shared with session_goal_state / iso_metrics."""
-    return target_url_for(store)
-
-
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -274,7 +268,7 @@ async def run_audit_analysis(store: TraceStore) -> dict:
     # Findings about pages outside the site under test (agents wandering to
     # doz.pl / gemini.pl fed the target site's report) are excluded up front —
     # compared on the trace-resolved URL, which resolve_all just stamped.
-    heuristic_findings = flag_off_site(heuristic_findings, _target_url(store))
+    heuristic_findings = flag_off_site(heuristic_findings, target_url_for(store))
     # Flag findings whose cited step lands on a harness interaction failure
     # (stuck click/type loop, perception artifact) so they aren't shipped as
     # confirmed site defects.

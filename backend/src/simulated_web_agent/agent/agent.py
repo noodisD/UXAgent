@@ -20,7 +20,13 @@ logger = logging.getLogger(__name__)
 class LogApiCall:
     def __enter__(self):
         Agent.api_call_count += 1
-        logger.info("API call count: %s", Agent.api_call_count)
+        # Captured here, not re-read in __exit__. AgentPolicy.slow_loop runs
+        # reflect/wonder concurrently with perceive/plan/act in the SAME
+        # persona, so two LogApiCall blocks overlap; re-reading the class
+        # counter on exit made both write api_trace_<same-n>.json and one
+        # silently overwrote the other.
+        self.call_index = Agent.api_call_count
+        logger.info("API call count: %s", self.call_index)
         self.method_name = inspect.currentframe().f_back.f_code.co_name
         self.retrieve_result = []
         self.request = []
@@ -33,7 +39,7 @@ class LogApiCall:
         with open(
             context.run_path.get()
             / "api_trace"
-            / f"api_trace_{Agent.api_call_count}.json",
+            / f"api_trace_{self.call_index}.json",
             "w",
         ) as f:
             json.dump(
@@ -319,7 +325,7 @@ class Agent:
                 resp = json.loads(resp)
                 if "plan" in resp and "rationale" in resp and "next_step" in resp:
                     new_plan = resp["plan"]
-                    rationale = resp["rationale"] if "rationale" in resp else "N/A"
+                    rationale = resp["rationale"]
                     next_step = resp["next_step"]
                     # make sure they are str
                     if isinstance(new_plan, str) and isinstance(rationale, str):

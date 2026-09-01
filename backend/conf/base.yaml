@@ -1,6 +1,12 @@
 # Configuration for UXAgent.
-# Override any setting from the command line:
-#   python -m src.simulated_web_agent.main environment.browser.headless=true environment.proxy.enabled=false
+#
+# NOTE: Hydra CLI overrides do NOT work for the server path. config.py builds
+# this with compose() rather than @hydra.main, so there is no argv parsing —
+# the only override hook is the ${oc.env:...} interpolation below (HEADLESS).
+# The previous header documented `python -m src.simulated_web_agent.main ...`,
+# which is both the wrong module path (the installed package is
+# simulated_web_agent) and an override of environment.proxy, a key that has
+# never existed in this file.
 
 # ============================================================================
 # ENVIRONMENT CONFIGURATION
@@ -10,11 +16,6 @@ environment:
   # Recording configuration
   recording:
     enabled: false                     # Enable screen recording using QuickRecorder
-
-  # Site configurations - mapping of site names to their hostnames
-  # These hostnames will be rewritten to actual IP addresses by the proxy
-  sites:
-    shopping: "https://www.amazon.com/"
 
   init_script_path: "src/simulated_web_agent/executor/parser/initscript.js"   # Path to JavaScript init script
   parser_script_path: "src/simulated_web_agent/executor/parser/parser.js"     # Path to JavaScript parser script
@@ -65,9 +66,7 @@ environment:
       default: 10000        # Timeout for locator actions (click, type, etc.)
       page_load_domcontent: 10000 # Timeout for DOM content loaded
       page_load_networkidle: 3000 # Timeout for network idle (longer for full page loads)
-      element_wait: 2000          # Timeout for waiting for specific elements
       custom_network_idle: 3000    # Time to wait for no network activity before considering idle
-      container_health_check: 3000 # Timeout for container health checks (in milliseconds)
 
     # Sleep configuration (in seconds)
     sleep_after_action: 1      # Sleep time after each action (observation already waits for network idle)
@@ -81,24 +80,10 @@ environment:
     sources: true                            # Include source code in traces
 
 # ============================================================================
-# SURVEY CONFIGURATION
-# ============================================================================
-survey:
-  questionnaire: src/simulated_web_agent/surveys/questionnaire.json
-  memory_dir: src/simulated_web_agent/surveys/memory_trace
-  out_dir: src/simulated_web_agent/surveys/out
-
-# ============================================================================
 # LLM CONFIGURATION
 # ============================================================================
 # Large Language Model provider settings
 llm_provider: "gemini"  # Provider: "openai" | "gemini" (cheapest) | "aws" | "anthropic"
-
-# ============================================================================
-# GENERAL SETTINGS
-# ============================================================================
-debug: false           # Enable debug logging and detailed output
-log_level: DEBUG        # Logging level: DEBUG, INFO, WARNING, ERROR
 
 # ============================================================================
 # HYDRA SETTINGS

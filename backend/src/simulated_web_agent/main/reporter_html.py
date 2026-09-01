@@ -348,7 +348,11 @@ def _render_issues_group(title: str, issues: list) -> str:
         return ""
     cards = ""
     for issue in issues:
-        sev = issue.get("severity") or ("poważny" if "poważn" in title.lower() else "drobny")
+        # _render_all_issues setdefaults `severity` on every issue before
+        # calling this, so the old `or (guess from the group title)` fallback
+        # was unreachable — and it could only ever produce poważny/drobny, so
+        # had it run on a critical group it would have mislabelled it.
+        sev = issue.get("severity", "drobny")
         bg, fg, border = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
         h_id = issue.get("heuristic_id", "?")
         h_name = _esc(issue.get("heuristic_name", ""))

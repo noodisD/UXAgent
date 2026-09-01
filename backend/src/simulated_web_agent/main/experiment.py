@@ -259,9 +259,7 @@ async def _run_for_persona_and_intent(
     start_url: str,
     max_steps: int,
     runs_dir: Optional[pathlib.Path] = None,
-    wait_for_login: bool = False,
-    env_setup_hook: Callable = None,
-    env_wait_hook: Callable = None,
+    headless: Optional[bool] = None,
 ) -> pathlib.Path:
     persona_card = build_persona_card(persona_info)
     # The agent reads only the persona text — state the home location explicitly
@@ -325,21 +323,23 @@ async def _run_for_persona_and_intent(
         except Exception as exc:
             log.warning("font size collection failed at step %d: %s", steps_taken, exc)
 
-    env = WebAgentEnv(
-        cfg.environment, before_action_hook=before_action_hook, wait_hook=env_wait_hook
-    )
+    # wait_hook was only ever threaded a permanent None: env_wait_hook, like
+    # wait_for_login and env_setup_hook, was a parameter no caller ever passed.
+    env = WebAgentEnv(cfg.environment, before_action_hook=before_action_hook)
 
     log.info(f"[{run_uid}] env created")
     try:
         policy = AgentPolicy(persona, intent)
-        print("setting up env with headless = " + str(cfg.environment.browser.launch_options.headless))
-        await env.setup(task_to_use, headless=cfg.environment.browser.launch_options.headless)
-
-        if wait_for_login:
-            env.debug_pause()
-
-        if env_setup_hook:
-            await env_setup_hook(env)
+        # The caller's choice wins; the config value is the fallback. This
+        # parameter used to be accepted by experiment_async and never read, so
+        # the wizard's headless toggle changed viewport_scan and link_checker
+        # (which do receive it) but not the agent sessions themselves — the
+        # flag half-worked, which is worse than not existing.
+        use_headless = (
+            cfg.environment.browser.launch_options.headless if headless is None else headless
+        )
+        print("setting up env with headless = " + str(use_headless))
+        await env.setup(task_to_use, headless=use_headless)
 
         await dismiss_cookie_banners(env.page)
 
@@ -631,6 +631,7 @@ async def experiment_async(
                 start_url=start_url,
                 max_steps=max_steps,
                 runs_dir=runs_dir,
+                headless=headless,
             )
         async with lock:
             done += 1
