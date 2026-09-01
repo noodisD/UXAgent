@@ -14,7 +14,7 @@ The trace already answers it. Impact = reach x task consequence:
 Both components ship with the label so a reader can disagree with the rule
 rather than take "high" on faith.
 """
-from src.simulated_web_agent.main.prioritization import derive_impact, prioritize
+from simulated_web_agent.main.prioritization import derive_impact, prioritize
 
 
 def _f(hid=1, severity="poważny", persona="p1", confidence="high", step=0):

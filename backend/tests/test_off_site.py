@@ -11,7 +11,7 @@ The URL compared is the trace-resolved one (evidence.py overwrites the LLM's
 claimed url with the trace's), so the gate rides on ground truth, not on what
 the model wrote.
 """
-from src.simulated_web_agent.main.site_scope import (
+from simulated_web_agent.main.site_scope import (
     flag_off_site,
     registrable_domain,
     same_site,

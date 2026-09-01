@@ -11,8 +11,8 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from src.simulated_web_agent.main.survey import run_survey
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.survey import run_survey
+from simulated_web_agent.main.trace_store import TraceStore
 
 
 @pytest.mark.asyncio
@@ -27,7 +27,7 @@ async def test_survey_reads_memory_and_writes_result(store: TraceStore):
     expected = {"q1": "tak", "q2": "nie"}
     mock_chat = AsyncMock(return_value=json.dumps(expected))
 
-    with patch("src.simulated_web_agent.main.survey.async_chat", new=mock_chat):
+    with patch("simulated_web_agent.main.survey.async_chat", new=mock_chat):
         result = await run_survey(store, questionnaire={"q1": "Czy znalazłeś to, czego szukałeś?"})
 
     assert result == expected
@@ -45,7 +45,7 @@ async def test_survey_includes_questionnaire_in_llm_call(store: TraceStore):
         captured_messages.extend(messages)
         return json.dumps({"navigation_clarity": "yes"})
 
-    with patch("src.simulated_web_agent.main.survey.async_chat", new=AsyncMock(side_effect=capture)):
+    with patch("simulated_web_agent.main.survey.async_chat", new=AsyncMock(side_effect=capture)):
         await run_survey(store, questionnaire=questionnaire)
 
     user_content = " ".join(
@@ -61,7 +61,7 @@ async def test_survey_stores_fallback_on_invalid_json(store: TraceStore):
     store.write_memory_trace([])
     mock_chat = AsyncMock(return_value="Przepraszam, nie mogę odpowiedzieć.")
 
-    with patch("src.simulated_web_agent.main.survey.async_chat", new=mock_chat):
+    with patch("simulated_web_agent.main.survey.async_chat", new=mock_chat):
         result = await run_survey(store, questionnaire={})
 
     assert isinstance(result, dict)

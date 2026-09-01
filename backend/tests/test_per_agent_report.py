@@ -10,8 +10,8 @@ import pytest
 from pathlib import Path
 
 from tests.conftest import make_finding
-from src.simulated_web_agent.main.reporter import generate_per_agent_report
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.reporter import generate_per_agent_report
+from simulated_web_agent.main.trace_store import TraceStore
 
 
 def _write_trace_fixtures(store: TraceStore, findings: list[dict] | None = None) -> None:

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.trace_store import TraceStore
 
 
 def make_agent_report(

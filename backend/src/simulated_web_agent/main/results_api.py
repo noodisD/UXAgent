@@ -384,6 +384,29 @@ def _issue_map(report: dict | None) -> dict[str, str]:
     return out
 
 
+def _trend(now, prev, higher_is_better=True) -> str:
+    """One vocabulary: "better" | "worse" | "flat".
+
+    It used to return up/down for higher-is-better metrics and better/worse for
+    the rest, so a single field carried five values from two dialects and every
+    consumer had to handle both. The direction is already encoded by
+    higher_is_better — the caller wants to know whether the number moved the
+    right way, not which way it moved.
+
+    Module level rather than nested inside _build_comparison so it can be
+    tested directly; it is a pure function of two numbers.
+    """
+    if now is None or prev is None or now == prev:
+        return "flat"
+    improved = (now > prev) if higher_is_better else (now < prev)
+    return "better" if improved else "worse"
+
+
+def _rate(ok, total):
+    """Success rate, or None when there is nothing to divide by."""
+    return (ok / total) if total else None
+
+
 def _build_comparison(
     run_id: str, manifest: dict, report: dict | None, personas: list[dict], runs_root: Path
 ) -> dict | None:
@@ -430,23 +453,6 @@ def _build_comparison(
     now_sc, prev_sc = _sev_counts(report), _sev_counts(prev_report)
     now_ok, now_all = sum(1 for p in personas if p.get("outcome") == "success"), len(personas)
     prev_ok, prev_all = _successes(prev_dir)
-
-    def _trend(now, prev, higher_is_better=True):
-        """One vocabulary: "better" | "worse" | "flat".
-
-        It used to return up/down for higher-is-better metrics and
-        better/worse for the rest, so a single field carried five values from
-        two dialects and every consumer had to handle both. The direction is
-        already encoded by higher_is_better — the caller wants to know whether
-        the number moved the right way, not which way it moved.
-        """
-        if now is None or prev is None or now == prev:
-            return "flat"
-        improved = (now > prev) if higher_is_better else (now < prev)
-        return "better" if improved else "worse"
-
-    def _rate(ok, total):
-        return (ok / total) if total else None
 
     now_crit = now_sc.get("krytyczny", 0)
     prev_crit = prev_sc.get("krytyczny", 0)

@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.simulated_web_agent.main.persona import _generate_one
+from simulated_web_agent.main.persona import _generate_one
 
 
 @pytest.mark.asyncio

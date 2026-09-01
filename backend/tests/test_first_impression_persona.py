@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.simulated_web_agent.agent.prompt_registry import registry as _prompts
-from src.simulated_web_agent.main.auditor import _run_first_impression
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.agent.prompt_registry import registry as _prompts
+from simulated_web_agent.main.auditor import _run_first_impression
+from simulated_web_agent.main.trace_store import TraceStore
 
 _REPLY = json.dumps({
     "overall_score": 2.6,
@@ -52,7 +52,7 @@ async def test_persona_reaches_the_prompt(tmp_path):
         "description": "Persona: Michał\nAge: 28\nProfession: marketer",
     })
     mock = AsyncMock(return_value=_REPLY)
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         await _run_first_impression(store)
     text = _sent_text(mock)
     assert "Michał" in text
@@ -74,7 +74,7 @@ async def test_two_personas_get_different_prompts(tmp_path):
                        ("Marcin", "Age: 61\nProfession: emeryt")]:
         store = _store_with_screenshot(tmp_path / name,
                                        {"name": name, "description": desc})
-        with patch("src.simulated_web_agent.main.auditor.async_chat", new=capture):
+        with patch("simulated_web_agent.main.auditor.async_chat", new=capture):
             await _run_first_impression(store)
 
     assert sent[0] != sent[1]
@@ -85,7 +85,7 @@ async def test_missing_persona_card_still_scores(tmp_path):
     """Older runs have no persona_card.json; the pass must degrade, not crash."""
     store = _store_with_screenshot(tmp_path, persona_card=None)
     mock = AsyncMock(return_value=_REPLY)
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_first_impression(store)
     assert result["scores"]["purpose_clarity"] == 3
 
@@ -94,7 +94,7 @@ def test_safe_json_prefers_the_object_over_prose_arrays():
     """A long array in the model's reasoning must not beat the real object.
     Picking the longest match of any shape is how a bare weakness array got
     persisted as a first_impression and 500'd the report."""
-    from src.simulated_web_agent.main.auditor import _safe_json
+    from simulated_web_agent.main.auditor import _safe_json
 
     raw = (
         'Reasoning. Weaknesses I considered: '
@@ -112,7 +112,7 @@ async def test_bare_array_reply_is_retried_then_accepted(tmp_path):
     """The bad shape is intermittent and does not reproduce on retry."""
     store = _store_with_screenshot(tmp_path, {"name": "X", "description": "d"})
     mock = AsyncMock(side_effect=['["tylko", "lista", "slabosci"]', _REPLY])
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_first_impression(store)
     assert mock.await_count == 2
     assert result["scores"]["purpose_clarity"] == 3
@@ -122,7 +122,7 @@ async def test_bare_array_reply_is_retried_then_accepted(tmp_path):
 async def test_persistently_bad_shape_degrades_rather_than_persisting(tmp_path):
     store = _store_with_screenshot(tmp_path, {"name": "X", "description": "d"})
     mock = AsyncMock(return_value='["tylko", "lista"]')
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_first_impression(store)
     assert mock.await_count == 2
     assert result["error"] == "unexpected_shape"

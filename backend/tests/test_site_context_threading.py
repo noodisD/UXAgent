@@ -16,9 +16,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.simulated_web_agent.main.auditor import _run_first_impression
-from src.simulated_web_agent.main.reporter import generate_objective_reflection
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.auditor import _run_first_impression
+from simulated_web_agent.main.reporter import generate_objective_reflection
+from simulated_web_agent.main.trace_store import TraceStore
 
 _REPLY = '''{
   "overall_score": 3.0,
@@ -51,7 +51,7 @@ def _sent_text(mock) -> str:
 async def test_site_context_reaches_first_impression_prompt(tmp_path):
     store = _store(tmp_path, site_context="Katalog produktów bez zakupów online; wyszukiwarka sklepów stacjonarnych.")
     mock = AsyncMock(return_value=_REPLY)
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         await _run_first_impression(store)
     assert "bez zakupów online" in _sent_text(mock)
 
@@ -60,7 +60,7 @@ async def test_site_context_reaches_first_impression_prompt(tmp_path):
 async def test_missing_site_context_does_not_crash(tmp_path):
     store = _store(tmp_path, site_context="")
     mock = AsyncMock(return_value=_REPLY)
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_first_impression(store)
     assert result["scores"]["purpose_clarity"] == 3
 
@@ -91,7 +91,7 @@ async def test_site_context_reaches_reflection_prompt(tmp_path):
     store = _reflection_store(
         tmp_path, site_context="Katalog produktow bez zakupow online.")
     mock = AsyncMock(return_value=_REFLECTION_REPLY)
-    with patch("src.simulated_web_agent.main.reporter.async_chat", new=mock):
+    with patch("simulated_web_agent.main.reporter.async_chat", new=mock):
         await generate_objective_reflection(store)
     sent = mock.await_args.args[0][1]["content"]
     assert "bez zakupow online" in sent
@@ -101,6 +101,6 @@ async def test_site_context_reaches_reflection_prompt(tmp_path):
 async def test_missing_site_context_reflection_does_not_crash(tmp_path):
     store = _reflection_store(tmp_path, site_context="")
     mock = AsyncMock(return_value=_REFLECTION_REPLY)
-    with patch("src.simulated_web_agent.main.reporter.async_chat", new=mock):
+    with patch("simulated_web_agent.main.reporter.async_chat", new=mock):
         result = await generate_objective_reflection(store)
     assert result["outcome"] == "success"

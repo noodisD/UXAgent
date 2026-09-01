@@ -10,7 +10,7 @@ is guessing at: resolve_evidence stamps `verified`, and attribution stamps
 So the model may lower its confidence, never raise it above what the evidence
 supports.
 """
-from src.simulated_web_agent.main.confidence import cap_confidence
+from simulated_web_agent.main.confidence import cap_confidence
 
 
 def _f(**kw):

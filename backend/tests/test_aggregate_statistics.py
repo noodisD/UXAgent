@@ -7,7 +7,7 @@ Behavior under test:
   3. Heuristic violations are grouped by heuristic_id and sorted by frequency
 """
 from tests.conftest import make_agent_report, make_finding
-from src.simulated_web_agent.main.reporter import aggregate_statistics
+from simulated_web_agent.main.reporter import aggregate_statistics
 
 
 # ---------------------------------------------------------------------------

@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from src.simulated_web_agent.main.trace_store import TraceStore
-from src.simulated_web_agent.main.viewport_scan import run_viewport_scan
+from simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.viewport_scan import run_viewport_scan
 
 # ---------------------------------------------------------------------------
 # Local HTTP server fixture

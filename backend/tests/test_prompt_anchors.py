@@ -19,7 +19,7 @@ import re
 
 import pytest
 
-from src.simulated_web_agent.agent.prompt_registry import registry as _prompts
+from simulated_web_agent.agent.prompt_registry import registry as _prompts
 
 # Judgement fields, and the prompt(s) that must not pre-fill them.
 _JUDGEMENT_FIELDS = (

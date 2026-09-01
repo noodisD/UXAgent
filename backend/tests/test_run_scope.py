@@ -6,7 +6,7 @@ only place that knows, so it has to record it at run time — this cannot be
 back-filled, which is why runs made before this exists will honestly show
 `null` rather than a guess.
 """
-from src.simulated_web_agent.agent.prompt_registry import PromptRegistry
+from simulated_web_agent.agent.prompt_registry import PromptRegistry
 
 
 def _reg(tmp_path, **prompts):

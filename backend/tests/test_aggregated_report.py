@@ -13,8 +13,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from tests.conftest import make_agent_report, make_finding
-from src.simulated_web_agent.main.reporter import generate_aggregated_report
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.reporter import generate_aggregated_report
+from simulated_web_agent.main.trace_store import TraceStore
 
 
 def _store_with_report(runs_dir: Path, idx: int, findings=None) -> TraceStore:
@@ -48,7 +48,7 @@ async def test_aggregated_report_saved_to_runs_dir(tmp_path: Path):
     ]
     mock_chat = AsyncMock(return_value=json.dumps(_NARRATIVE))
 
-    with patch("src.simulated_web_agent.main.reporter.async_chat", new=mock_chat):
+    with patch("simulated_web_agent.main.reporter.async_chat", new=mock_chat):
         result = await generate_aggregated_report(
             stores=stores,
             task_description="Kup buty",
@@ -78,7 +78,7 @@ async def test_aggregated_report_statistics_reflect_all_agents(tmp_path: Path):
     ]
     mock_chat = AsyncMock(return_value=json.dumps(_NARRATIVE))
 
-    with patch("src.simulated_web_agent.main.reporter.async_chat", new=mock_chat):
+    with patch("simulated_web_agent.main.reporter.async_chat", new=mock_chat):
         result = await generate_aggregated_report(
             stores=stores,
             task_description="Test",

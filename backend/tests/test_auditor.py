@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.simulated_web_agent.main.auditor import run_audit_analysis
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.auditor import run_audit_analysis
+from simulated_web_agent.main.trace_store import TraceStore
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -125,7 +125,7 @@ def _make_routed_mock():
 async def test_first_impression_json_saved_when_llm_returns_valid_json(store: TraceStore):
     _setup_store(store)
 
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=_make_routed_mock()):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=_make_routed_mock()):
         await run_audit_analysis(store)
 
     fi = store.read_first_impression()
@@ -143,7 +143,7 @@ async def test_first_impression_json_saved_when_llm_returns_valid_json(store: Tr
 async def test_heuristic_findings_json_is_a_list_with_required_fields(store: TraceStore):
     _setup_store(store)
 
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=_make_routed_mock()):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=_make_routed_mock()):
         await run_audit_analysis(store)
 
     findings = store.read_heuristic_findings()
@@ -163,7 +163,7 @@ async def test_heuristic_findings_json_is_a_list_with_required_fields(store: Tra
 async def test_accessibility_findings_json_is_saved(store: TraceStore):
     _setup_store(store)
 
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=_make_routed_mock()):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=_make_routed_mock()):
         await run_audit_analysis(store)
 
     a11y = store.read_accessibility_findings()

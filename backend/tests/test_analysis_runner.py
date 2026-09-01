@@ -9,10 +9,10 @@ Behavior under test:
 import pytest
 from unittest.mock import AsyncMock, call, patch
 
-from src.simulated_web_agent.main.analysis_runner import run_all_analyses
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.analysis_runner import run_all_analyses
+from simulated_web_agent.main.trace_store import TraceStore
 
-_PATCH = "src.simulated_web_agent.main.analysis_runner.{}"
+_PATCH = "simulated_web_agent.main.analysis_runner.{}"
 
 
 @pytest.mark.asyncio

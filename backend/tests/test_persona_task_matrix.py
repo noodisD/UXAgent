@@ -9,7 +9,7 @@ Every column is already computed elsewhere; this only arranges them. The point
 is the labelling: effectiveness is an LLM's verdict (iso_metrics docstring), so
 the matrix must not present it as observed.
 """
-from src.simulated_web_agent.main.persona_matrix import build_persona_task_matrix
+from simulated_web_agent.main.persona_matrix import build_persona_task_matrix
 
 
 def _persona(name="Michał", outcome="success", steps=17, backtracks=0,

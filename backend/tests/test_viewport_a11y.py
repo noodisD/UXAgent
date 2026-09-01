@@ -18,8 +18,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from src.simulated_web_agent.main.trace_store import TraceStore
-from src.simulated_web_agent.main.viewport_scan import run_viewport_scan
+from simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.viewport_scan import run_viewport_scan
 
 
 def _make_server(html: bytes) -> tuple[HTTPServer, str]:
@@ -213,7 +213,7 @@ async def test_page_without_drag_reports_nothing(store: TraceStore):
 # --- degradation ---------------------------------------------------------
 
 def test_dashboard_rows_separate_wcag_failures_from_advice():
-    from src.simulated_web_agent.main.results_api import _viewport_rows
+    from simulated_web_agent.main.results_api import _viewport_rows
 
     rows = _viewport_rows([{
         "viewport": "mobile",
@@ -234,7 +234,7 @@ def test_dashboard_rows_separate_wcag_failures_from_advice():
 def test_dashboard_says_nothing_when_the_page_never_loaded():
     """None means unmeasured. Emitting no row is right; emitting a clean row
     would claim we checked."""
-    from src.simulated_web_agent.main.results_api import _viewport_rows
+    from simulated_web_agent.main.results_api import _viewport_rows
 
     rows = _viewport_rows([{
         "viewport": "mobile", "error": "timeout", "horizontal_overflow": None,

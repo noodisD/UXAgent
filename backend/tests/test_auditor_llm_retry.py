@@ -16,11 +16,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.simulated_web_agent.main.auditor import (
+from simulated_web_agent.main.auditor import (
     _run_accessibility_summary,
     _run_heuristic_evaluation,
 )
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.trace_store import TraceStore
 
 _FINDINGS = json.dumps([
     {"heuristic_id": 2, "severity": "poważny", "step": 0,
@@ -45,7 +45,7 @@ async def test_heuristics_survive_one_bad_shape(tmp_path):
     """A stray object where a list belongs used to silently drop every finding
     — no error, no findings, a clean-looking empty audit."""
     mock = AsyncMock(side_effect=['{"nie": "lista"}', _FINDINGS])
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_heuristic_evaluation(_store(tmp_path))
     assert mock.await_count == 2
     assert len(result) == 1
@@ -54,7 +54,7 @@ async def test_heuristics_survive_one_bad_shape(tmp_path):
 @pytest.mark.asyncio
 async def test_heuristics_survive_one_transport_error(tmp_path):
     mock = AsyncMock(side_effect=[RuntimeError("503 upstream"), _FINDINGS])
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_heuristic_evaluation(_store(tmp_path))
     assert len(result) == 1
 
@@ -62,7 +62,7 @@ async def test_heuristics_survive_one_transport_error(tmp_path):
 @pytest.mark.asyncio
 async def test_heuristics_degrade_to_empty_when_reply_never_usable(tmp_path):
     mock = AsyncMock(return_value='{"nie": "lista"}')
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_heuristic_evaluation(_store(tmp_path))
     assert mock.await_count == 2
     assert result == []
@@ -72,7 +72,7 @@ async def test_heuristics_degrade_to_empty_when_reply_never_usable(tmp_path):
 async def test_accessibility_survives_one_bad_shape(tmp_path):
     """The exact failure that cost Marcin his accessibility findings."""
     mock = AsyncMock(side_effect=['["bare", "array"]', _A11Y])
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_accessibility_summary(_store(tmp_path))
     assert mock.await_count == 2
     assert result["overall_score"] == 2
@@ -81,7 +81,7 @@ async def test_accessibility_survives_one_bad_shape(tmp_path):
 @pytest.mark.asyncio
 async def test_accessibility_survives_one_transport_error(tmp_path):
     mock = AsyncMock(side_effect=[RuntimeError("503 upstream"), _A11Y])
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_accessibility_summary(_store(tmp_path))
     assert result["overall_score"] == 2
 
@@ -90,7 +90,7 @@ async def test_accessibility_survives_one_transport_error(tmp_path):
 async def test_accessibility_reports_the_error_when_never_usable(tmp_path):
     """Degrading is fine; degrading *silently* is what caused the cascade."""
     mock = AsyncMock(return_value='["bare", "array"]')
-    with patch("src.simulated_web_agent.main.auditor.async_chat", new=mock):
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock):
         result = await _run_accessibility_summary(_store(tmp_path))
     assert mock.await_count == 2
     assert "error" in result

@@ -18,11 +18,11 @@ Input is Playwright's aria-snapshot text, e.g.
       - 'combobox "Language selector. Currently selected: Polski"':
         - option "Polski"
 """
-from src.simulated_web_agent.main.a11y_checks import (
+from simulated_web_agent.main.a11y_checks import (
     extract_a11y_candidates,
     parse_aria_snapshot,
 )
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.trace_store import TraceStore
 
 
 def _store(tmp_path, snapshots, font_sizes=None):
