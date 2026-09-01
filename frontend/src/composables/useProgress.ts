@@ -5,7 +5,10 @@ type Snapshot =
   | { status: 'idle'; message: string }
   | {
       run_id: string
-      status: 'running' | 'done' | 'error'
+      // 'cancelled' is emitted by app.py's cancel endpoint and passed through
+      // by /progress. Omitting it forced both consumers to cast `as any`,
+      // which defeated the union entirely and hid the gap.
+      status: 'running' | 'done' | 'error' | 'cancelled'
       phase: string
       label: string
       current: number

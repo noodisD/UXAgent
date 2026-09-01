@@ -5,9 +5,9 @@
     <template v-else-if="data">
       <!-- tabs -->
       <div class="tabs">
-        <button v-for="t in tabs" :key="t.key" class="tab" :class="{ on: tab === t.key }" @click="tab = t.key">
-          {{ t.label }}
-          <span v-if="t.count !== null" class="tab-count mono" :class="{ on: tab === t.key }">{{ t.count }}</span>
+        <button v-for="tb in tabs" :key="tb.key" class="tab" :class="{ on: tab === tb.key }" @click="tab = tb.key">
+          {{ tb.label }}
+          <span v-if="tb.count !== null" class="tab-count mono" :class="{ on: tab === tb.key }">{{ tb.count }}</span>
         </button>
       </div>
 
@@ -33,8 +33,8 @@
                 <div class="cmp-label mono">{{ m.label }}</div>
                 <div class="cmp-vals">
                   <span class="cmp-now mono">{{ m.now }}</span>
-                  <span class="cmp-prev mono" :style="{ color: m.trend === 'up' || m.trend === 'better' ? 'var(--success-text)' : 'var(--ac)' }">
-                    {{ m.trend === 'up' || m.trend === 'better' ? '▲' : '▼' }} {{ t('cmp.from') }} {{ m.prev }}
+                  <span class="cmp-prev mono" :style="{ color: trendColor(m.trend) }">
+                    {{ trendArrow(m.trend) }} {{ t('cmp.from') }} {{ m.prev }}
                   </span>
                 </div>
               </div>
@@ -68,8 +68,7 @@
               <div class="ct">{{ t('ov.sevTitle') }}</div>
               <div class="col gap14">
                 <div v-for="b in sevBars" :key="b.label">
-                  <div class="sev-head"><span :style="{ color: b.color }" class="sev-name">{{ b.label }}
-                    <span class="sev-pl mono">/ {{ b.pl }}</span></span><span class="sev-count mono">{{ b.count }}</span></div>
+                  <div class="sev-head"><span :style="{ color: b.color }" class="sev-name">{{ b.label }}</span><span class="sev-count mono">{{ b.count }}</span></div>
                   <div class="sev-track"><div class="sev-fill" :style="{ background: b.color, width: b.pct + '%' }"></div></div>
                 </div>
                 <div class="ps-row">
@@ -269,11 +268,11 @@
                   <div class="heur-ev">{{ h.evidence }}</div>
                   <div class="heur-fix"><span class="fix-lead">{{ t('pd.fix') }}</span>{{ h.recommendation }}</div>
                   <div v-if="h.verified" class="ev-block">
-                    <a v-if="h.hasScreenshot" :href="shotUrl(detail.id, h.step)" target="_blank">
+                    <a v-if="h.hasScreenshot && h.step !== null" :href="shotUrl(detail.id, h.step)" target="_blank">
                       <img class="ev-thumb" :src="shotUrl(detail.id, h.step)" :alt="t('ev.step', { n: h.step })" />
                     </a>
                     <div class="ev-meta">
-                      <span class="step-chip mono">{{ t('ev.step', { n: h.step }) }}</span>
+                      <span v-if="h.step !== null" class="step-chip mono">{{ t('ev.step', { n: h.step }) }}</span>
                       <a class="ev-url" :href="h.url" target="_blank">{{ h.url }}</a>
                       <div v-if="h.observationQuote" class="ev-quote">„{{ h.observationQuote }}"</div>
                     </div>
@@ -323,11 +322,11 @@
               <div class="heur-ev">{{ h.evidence }}</div>
               <div class="heur-fix"><span class="fix-lead">{{ t('find.recommendation') }}</span>{{ h.recommendation }}</div>
               <div v-if="h.verified" class="ev-block">
-                <a v-if="h.hasScreenshot" :href="shotUrl(h.personaId, h.step)" target="_blank">
+                <a v-if="h.hasScreenshot && h.step !== null" :href="shotUrl(h.personaId, h.step)" target="_blank">
                   <img class="ev-thumb" :src="shotUrl(h.personaId, h.step)" :alt="t('ev.step', { n: h.step })" />
                 </a>
                 <div class="ev-meta">
-                  <span class="step-chip mono">{{ t('ev.step', { n: h.step }) }}</span>
+                  <span v-if="h.step !== null" class="step-chip mono">{{ t('ev.step', { n: h.step }) }}</span>
                   <a class="ev-url" :href="h.url" target="_blank">{{ h.url }}</a>
                   <div v-if="h.observationQuote" class="ev-quote">„{{ h.observationQuote }}"</div>
                 </div>
@@ -366,11 +365,11 @@
               <div v-for="(a, ai) in q.answers" :key="ai" class="open-quote">„{{ a }}"</div>
               <div v-if="!q.answers.length" class="muted sm">—</div>
             </div>
-            <div v-if="surveySummaries[qi]" class="ai-summary">
+            <div v-if="surveySummaries[q.id]" class="ai-summary">
               <div class="ai-badge mono">AI</div>
               <div class="ai-body">
                 <div class="ai-label mono">{{ t('survey.aiSummary') }}</div>
-                <div class="ai-text">{{ surveySummaries[qi] }}</div>
+                <div class="ai-text">{{ surveySummaries[q.id] }}</div>
               </div>
             </div>
           </div>
@@ -395,7 +394,19 @@ const { state: app } = useApp()
 const { data, loading, error, load } = useResults()
 const { t } = useI18n()
 
-const tab = ref<'overview' | 'personas' | 'findings' | 'survey' | 'report'>('overview')
+type TabKey = 'overview' | 'personas' | 'findings' | 'survey' | 'report'
+const tab = ref<TabKey>('overview')
+
+// The backend emits exactly better | worse | flat (results_api._trend). It used
+// to also emit up/down, and the template treated everything that was not
+// up/better as a regression — so an unchanged metric drew a red ▼, and for the
+// lower-is-better metrics ("Critical findings") a count that went UP drew ▼ too.
+function trendArrow(tr: string): string {
+  return tr === 'better' ? '▲' : tr === 'worse' ? '▼' : '·'
+}
+function trendColor(tr: string): string {
+  return tr === 'better' ? 'var(--success-text)' : tr === 'worse' ? 'var(--ac)' : 'var(--muted-2)'
+}
 const selPersona = ref(0)
 const sevFilter = ref<'all' | Severity>('all')
 
@@ -408,9 +419,13 @@ const personas = computed<PersonaResult[]>(() => data.value?.personas ?? [])
 const meta = computed(() => data.value?.meta)
 const n = computed(() => personas.value.length || 1)
 
-const succ = computed(() => personas.value.filter(p => p.outcome === 'success').length)
-const part = computed(() => personas.value.filter(p => p.outcome === 'partial').length)
-const fail = computed(() => personas.value.filter(p => p.outcome === 'failed').length)
+// outcomeOf, not the raw value: the display normalises anything unrecognised to
+// 'partial', so counting the raw field left such a persona shown as "Częściowo"
+// but counted in none of the three — and ov.verdictBody then printed numbers
+// that did not sum to the participant count.
+const succ = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'success').length)
+const part = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'partial').length)
+const fail = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'failed').length)
 
 function fiAvg(p: PersonaResult): number {
   const vals = Object.values(p.firstImpression).filter((v): v is number => typeof v === 'number')
@@ -459,7 +474,10 @@ const scoreCards = computed(() => [
 const sevBars = computed(() => {
   const maxSev = Math.max(counts.value.critical, counts.value.serious, counts.value.minor, 1)
   return (['critical', 'serious', 'minor'] as Severity[]).map(k => ({
-    label: sevLabel(k), pl: SEV[k].pl, color: SEV[k].color,
+    // `pl` used to be rendered next to the label; in the default Polish locale
+    // sevLabel(k) and SEV[k].pl are the same word, so it read "Krytyczny /
+    // krytyczny". theme.ts's locale-aware sevLabel is the only label source.
+    label: sevLabel(k), color: SEV[k].color,
     count: counts.value[k], pct: Math.round((counts.value[k] / maxSev) * 100),
   }))
 })
@@ -471,15 +489,28 @@ const flatFindings = computed(() => {
   return out
 })
 
-function shotUrl(personaId: string, step: number | null): string {
+// `step` is required, not nullable. It used to default to `?? 0`, which served
+// the homepage screenshot as evidence for a finding whose step is unknown —
+// a real image attached to a claim it does not support. Callers now guard on a
+// non-null step instead, so no evidence is shown rather than the wrong evidence.
+function shotUrl(personaId: string, step: number): string {
   return apiAssetUrl(
-    `/runs/${encodeURIComponent(app.viewRunId ?? '')}/screenshot/${encodeURIComponent(personaId)}/${step ?? 0}`
+    `/runs/${encodeURIComponent(app.viewRunId ?? '')}/screenshot/${encodeURIComponent(personaId)}/${step}`
   )
 }
 
 // Backend-supplied extras (present once the run detail includes them)
 const comparison = computed(() => (data.value as any)?.comparison ?? null)
-const surveySummaries = computed<string[]>(() => (data.value as any)?.report?.survey_summaries ?? [])
+// Keyed by question id, joined by id. It used to be a positional array joined
+// by loop index across two independently ordered backend lists — surveyRows is
+// questionnaire-ordered and omits unanswered questions, so a single gap
+// attached every later AI summary to the wrong question. Runs produced before
+// the backend switched to a keyed object carry a positional array here; those
+// cannot be joined reliably, so they render nothing rather than render wrong.
+const surveySummaries = computed<Record<string, string>>(() => {
+  const raw = (data.value as any)?.report?.survey_summaries
+  return raw && !Array.isArray(raw) ? raw as Record<string, string> : {}
+})
 
 // --- findings toolbox (design: copy finding + CSV export) ---------------
 const plistHidden = ref(false)
@@ -488,10 +519,16 @@ let copyTimer: number | undefined
 function copyFinding(h: HeuristicFinding & { persona: string }, i: number) {
   const txt = `[${h.severity.toUpperCase()}] H${h.id} — ${heuristicName(h.id)}\n` +
     `Persona: ${h.persona}\nEvidence (step ${h.step} · ${h.url}): ${h.evidence}\nRecommendation: ${h.recommendation}`
-  try { navigator.clipboard.writeText(txt) } catch {}
-  copiedIdx.value = i
-  clearTimeout(copyTimer)
-  copyTimer = window.setTimeout(() => { copiedIdx.value = -1 }, 1600)
+  // writeText returns a Promise, so the synchronous try/catch never caught a
+  // rejection (insecure context, permission denied): it became an unhandled
+  // rejection while the button still said "Skopiowano" over an empty clipboard.
+  navigator.clipboard.writeText(txt).then(() => {
+    copiedIdx.value = i
+    clearTimeout(copyTimer)
+    copyTimer = window.setTimeout(() => { copiedIdx.value = -1 }, 1600)
+  }).catch(() => {
+    copiedIdx.value = -1
+  })
 }
 
 function exportCSV() {
@@ -501,11 +538,14 @@ function exportCSV() {
     [h.severity, h.id, heuristicName(h.id), h.persona, h.step ?? '', h.url, h.evidence, h.recommendation, h.verified].map(esc).join(',')
   ))
   const blob = new Blob(['﻿' + rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
+  a.href = url
   a.download = `uxagent-findings-${app.viewRunId ?? 'run'}.csv`
   a.click()
-  URL.revokeObjectURL(a.href)
+  // Revoking immediately after click() can cancel the download before the
+  // browser has read the blob. One tick is enough for the navigation to start.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 const topFixes = computed(() => flatFindings.value.slice(0, 4).map(h => ({
   label: sevLabel(h.severity), chipBg: SEV[h.severity].chipBg, chipFg: SEV[h.severity].chipFg, text: h.recommendation,
@@ -542,6 +582,8 @@ const filteredFindings = computed(() => sevFilter.value === 'all'
   ? flatFindings.value : flatFindings.value.filter(h => h.severity === sevFilter.value))
 
 type SurveyRow = {
+  // Carried through so AI summaries can be joined by id rather than by position.
+  id: string
   prompt: string; isScale: boolean; min: number; max: number; n: number
   lowLabel: string; highLabel: string; avg: string; markerPct: number
   dist: { v: number; count: number; height: number }[]; answers: string[]
@@ -560,6 +602,7 @@ const surveyRows = computed<SurveyRow[]>(() => {
         const lo = q.min ?? 1, hi = q.max ?? 5
         const a = typeof q.avg === 'number' ? q.avg : null
         return {
+          id: String(q.id ?? ''),
           prompt: q.prompt, isScale: true, min: lo, max: hi, n: q.n ?? 0,
           lowLabel: q.low_label ?? '', highLabel: q.high_label ?? '',
           avg: a != null ? a.toFixed(2).replace('.', ',') : '—',
@@ -568,7 +611,7 @@ const surveyRows = computed<SurveyRow[]>(() => {
           answers: [],
         }
       }
-      return { prompt: q.prompt, isScale: false, min: 1, max: 5, n: 0,
+      return { id: String(q.id ?? ''), prompt: q.prompt, isScale: false, min: 1, max: 5, n: 0,
                lowLabel: '', highLabel: '', avg: '—', markerPct: 0, dist: [],
                answers: (q.answers || []) as string[] }
     })
@@ -589,13 +632,15 @@ const surveyRows = computed<SurveyRow[]>(() => {
       const m = answers.reduce((s, a) => s + +a, 0) / answers.length
       avg = m.toFixed(2).replace('.', ','); markerPct = Math.round(((m - 1) / 4) * 100)
     }
-    return { prompt, isScale: numeric, min: 1, max: 5, n: answers.length,
-             lowLabel: 'zdecydowanie nie', highLabel: 'zdecydowanie tak',
+    // Legacy rows have no id from the backend, so fall back to the positional
+    // qN convention these runs used; summaries for them are dropped anyway.
+    return { id: `q${qi + 1}`, prompt, isScale: numeric, min: 1, max: 5, n: answers.length,
+             lowLabel: t('survey.anchorLow'), highLabel: t('survey.anchorHigh'),
              avg, markerPct, dist, answers: numeric ? [] : answers }
   })
 })
 
-const tabs = computed(() => [
+const tabs = computed((): { key: TabKey; label: string; count: number | null }[] => [
   { key: 'overview', label: t('tab.overview'), count: null as number | null },
   { key: 'personas', label: t('tab.personas'), count: personas.value.length },
   { key: 'findings', label: t('tab.findings'), count: counts.value.total },

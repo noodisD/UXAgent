@@ -21,7 +21,7 @@
           <div v-if="r.status === 'complete'" class="dots">
             <span v-for="(d, i) in dots(r)" :key="i" class="dot" :style="{ background: d }"></span>
           </div>
-          <span v-else class="failed">{{ r.status === 'running' ? t('hist.running') : t('hist.failed') }}</span>
+          <span v-else class="failed" :class="{ neutral: r.status === 'cancelled' }">{{ statusLabel(r.status) }}</span>
         </div>
         <div><span v-if="r.status === 'complete'" class="crit mono" :style="{ color: r.critical > 0 ? '#d83a34' : '#1f9d57' }">{{ r.critical }}</span></div>
         <div><span v-if="r.status === 'complete'" class="score mono" :style="{ color: scoreColor(r.score) }">{{ r.score.toFixed(1) }}</span></div>
@@ -76,8 +76,20 @@ const failedRun = ref<FailedRunInfo | null>(null)
 
 onMounted(load)
 
+// A run the user cancelled is not a failure. The backend passes "cancelled"
+// through unchanged (results_api maps only done -> complete), but the template
+// treated everything that was not complete/running as failed — so cancelling
+// your own run reported "Analiza nieudana" and opened the failure modal with
+// "no details", because manifest.failure is only written on the error path.
+function statusLabel(status: string): string {
+  if (status === 'running') return t('hist.running')
+  if (status === 'cancelled') return t('hist.cancelled')
+  return t('hist.failed')
+}
+
 function open(id: string) {
   const r = rows.value.find(x => x.id === id) as any
+  if (r && r.status === 'cancelled') return   // nothing to show, and not an error
   if (r && r.status !== 'complete' && r.status !== 'running') {
     // Failed run: show diagnostics instead of empty results.
     failedRun.value = {
@@ -119,6 +131,8 @@ function dots(r: RunHistoryRow): string[] {
 .dots { display: flex; gap: 5px; align-items: center; }
 .dot { width: 8px; height: 8px; border-radius: 9px; display: inline-block; }
 .failed { font: 600 12px var(--sans); color: #b5564f; }
+/* A cancelled run is a user decision, not an error — do not colour it as one. */
+.failed.neutral { color: var(--muted-2); }
 .crit { font: 700 13px var(--mono); }
 .score { font: 700 15px var(--mono); }
 

@@ -72,6 +72,17 @@ export function pageSpeedColor(v: number): string {
   return v >= 90 ? '#1f9d57' : v >= 50 ? '#cf8420' : '#d83a34'
 }
 
-export function outcomeOf(o: string | undefined): Outcome {
+// Normalisers: the backend sends free-form strings (and nulls), the label and
+// colour maps are keyed by a union. Every caller must go through these, so the
+// coercion happens in exactly one place — counting the raw value while
+// displaying the normalised one is how ResultsScreen's totals stopped summing.
+export function outcomeOf(o: string | null | undefined): Outcome {
   return (o === 'success' || o === 'partial' || o === 'failed') ? o : 'partial'
+}
+
+/** Polish severity label (as the backend stores it) -> Severity key. */
+export function sevOf(pl: string | null | undefined): Severity {
+  if (pl === 'critical' || pl === 'serious' || pl === 'minor') return pl
+  return ({ krytyczny: 'critical', poważny: 'serious', drobny: 'minor' } as
+    Record<string, Severity>)[pl ?? ''] ?? 'minor'
 }

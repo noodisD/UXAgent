@@ -70,7 +70,7 @@
                 </td>
                 <td class="pt-task">{{ r.task || '—' }}</td>
                 <td>
-                  <span class="pt-outcome" :style="{ color: outcomeColor(r.outcome) }">{{ outcomeLabel(r.outcome) }}</span>
+                  <span class="pt-outcome" :style="{ color: outcomeColor(r.outcome) }">{{ outcomeLabel(outcomeOf(r.outcome)) }}</span>
                   <span
                     class="pt-src mono"
                     :class="{ measured: r.outcome_source === 'observed' }"
@@ -79,7 +79,7 @@
                   <span
                     v-if="r.disagreement"
                     class="pt-src mono disagree"
-                    :title="t('rep.pt.disagreeHint') + (r.declared_outcome ? ' → ' + outcomeLabel(r.declared_outcome) : '')"
+                    :title="t('rep.pt.disagreeHint') + (r.declared_outcome ? ' → ' + outcomeLabel(outcomeOf(r.declared_outcome)) : '')"
                   >{{ t('rep.pt.disagree') }}</span>
                 </td>
                 <td class="num mono">{{ r.steps ?? '—' }}</td>
@@ -207,7 +207,7 @@
               <tr v-for="r in priorityRows" :key="r.heuristic_id">
                 <td class="num mono">{{ r.priority }}</td>
                 <td><span class="issue-h mono">H{{ r.heuristic_id }}</span> {{ r.heuristic_name }}</td>
-                <td><span :style="{ color: sevColorOf(r.severity) }">{{ sevLabel(sevKey(r.severity)) }}</span></td>
+                <td><span :style="{ color: sevColorOf(r.severity) }">{{ sevLabel(sevOf(r.severity)) }}</span></td>
                 <td><span class="pill" :class="r.impact">{{ t('rep.level.' + r.impact) }}</span></td>
                 <td><span class="pill" :class="r.confidence">{{ t('rep.level.' + r.confidence) }}</span></td>
                 <!-- the numbers behind `impact`, so the rule can be checked -->
@@ -248,7 +248,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { apiAssetUrl } from '../api'
-import { SEV, scoreColor, pageSpeedColor, sevLabel, outcomeLabel, OUTCOME } from '../theme'
+import { SEV, scoreColor, pageSpeedColor, sevLabel, sevOf, outcomeLabel, outcomeOf, OUTCOME } from '../theme'
 import { useApp } from '../composables/useApp'
 import { useI18n } from '../i18n'
 import type { AggIssueExample, AggReport, PersonaTaskRow, PriorityRow, RunMeta } from '../types'
@@ -289,10 +289,8 @@ const priorityRows = computed<PriorityRow[]>(
   () => (props.report?.statistics?.prioritization as PriorityRow[]) ?? [],
 )
 
-const sevKey = (pl: string) =>
-  ({ krytyczny: 'critical', poważny: 'serious', drobny: 'minor' } as Record<string, string>)[pl] ?? 'minor'
-const sevColorOf = (pl: string) => (SEV as any)[sevKey(pl)]?.color ?? '#6b7280'
-const outcomeColor = (o: string | null) => (OUTCOME as any)[o ?? '']?.color ?? '#6b7280'
+const sevColorOf = (pl: string) => SEV[sevOf(pl)].color
+const outcomeColor = (o: string | null) => OUTCOME[outcomeOf(o)].color
 
 // §6.1 evidence-status legend. Each finding already carries these flags; the
 // legend is what lets a reader tell an observation from an inference.

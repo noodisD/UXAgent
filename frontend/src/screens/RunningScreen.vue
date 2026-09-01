@@ -203,8 +203,14 @@ watch(liveId, (id) => {
   startLive(id)
 }, { immediate: true })
 
+// Tracked so onUnmounted can clear it. Untracked, clicking "Anuluj" within 900ms
+// of completion yanked the user from the wizard back to Results.
+let doneTimer: number | null = null
 watch(status, (s) => {
-  if (s === 'done' && liveId.value) setTimeout(() => openResults(liveId.value as string), 900)
+  const id = liveId.value
+  if (s !== 'done' || !id) return
+  if (doneTimer !== null) clearTimeout(doneTimer)
+  doneTimer = window.setTimeout(() => openResults(id), 900)
 })
 
 // Re-anchor the timer on every progress snapshot that carries elapsed_seconds.
@@ -212,7 +218,7 @@ watch(snap, (s) => {
   if (s && typeof s.elapsed_seconds === 'number') {
     serverElapsed = s.elapsed_seconds
     serverElapsedAt = Date.now()
-    elapsed.value = Math.floor(serverElapsed)
+    elapsed.value = Math.floor(s.elapsed_seconds)
   }
 })
 
@@ -229,6 +235,7 @@ onMounted(() => {
 onUnmounted(() => {
   stop(); stopLive()
   if (timer !== null) clearInterval(timer)
+  if (doneTimer !== null) clearTimeout(doneTimer)
 })
 
 // --- live timers & anomaly hints ----------------------------------------
@@ -249,7 +256,11 @@ function durClass(s: number): string {
 async function goNewAudit() {
   stop(); stopLive()
   // Ask the backend to abort the run; navigate away regardless of outcome.
-  const id = runId.value || app.runId
+  // liveId, not runId.value || app.runId: those two are exactly what is lost on
+  // the reload/HMR recovery path that liveId exists for, so the `if (id)` guard
+  // below failed and NO cancel request was sent — the user navigated away
+  // believing they had stopped a run that kept burning LLM budget.
+  const id = liveId.value
   if (id) {
     try {
       const res = await apiFetch(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' })

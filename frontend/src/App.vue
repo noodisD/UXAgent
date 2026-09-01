@@ -16,7 +16,7 @@
         <template v-if="!collapsed">
           <div class="brand-text">
             <div class="brand-name">UXAgent</div>
-            <div class="brand-tag mono">synthetic ux research</div>
+            <div class="brand-tag mono">{{ t('brand.tag') }}</div>
           </div>
           <button class="side-toggle" :title="t('side.collapse')" @click="collapsed = true">«</button>
         </template>
@@ -55,7 +55,7 @@
         </div>
         <div class="h-actions">
           <template v-if="app.screen === 'results'">
-            <a class="btn" :href="reportUrl" target="_blank" rel="noopener">{{ t('btn.download') }}</a>
+            <a class="btn" :href="reportUrl" :download="`raport-ux-${app.viewRunId || 'audyt'}.html`">{{ t('btn.download') }}</a>
             <a class="btn btn-primary" :href="reportUrl" target="_blank" rel="noopener">{{ t('btn.openReport') }} ↗</a>
           </template>
           <button v-else-if="app.screen === 'history'" class="btn btn-primary" @click="newAudit">{{ t('btn.newAudit') }}</button>
@@ -75,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, provide, ref, watchEffect } from 'vue'
+import { computed, onMounted, provide, ref, watch, watchEffect } from 'vue'
 import { apiAssetUrl, apiOrigin, getKey, onUnauthorized, verifyKey } from './api'
 import AuthGate from './components/AuthGate.vue'
 import { FORM_KEY } from './types'
@@ -101,8 +101,8 @@ const collapsed = ref(localStorage.getItem('uxagent_sidebar') === 'collapsed')
 watchEffect(() => { try { localStorage.setItem('uxagent_sidebar', collapsed.value ? 'collapsed' : 'expanded') } catch {} })
 
 // Lightweight progress read for the sidebar/topbar (RunningScreen drives its own polling).
-const { data: progress, start } = useProgress(1500)
-start()
+// Started only once auth resolves — see the watch below the gate.
+const { data: progress, start, stop } = useProgress(1500)
 
 const snap = computed(() => progress.value as any)
 const runActive = computed(() => snap.value?.status === 'running' && app.screen !== 'running')
@@ -136,6 +136,14 @@ const authState = ref<'checking' | 'locked' | 'open'>('checking')
 onMounted(async () => {
   authState.value = (await verifyKey(getKey())) ? 'open' : 'locked'
 })
+
+// Poll only while unlocked. This used to start at setup, so on a key-protected
+// backend every poll 401'd while authState was still 'checking' or 'locked' —
+// and api.ts clears the stored key and fires the unauthorized listeners on each
+// 401, producing a key-wipe storm at 1.5s intervals that raced the verifyKey
+// probe above. It also kept polling forever, since onUnmounted in App's own
+// scope never fires.
+watch(authState, (s) => (s === 'open' ? start() : stop()), { immediate: true })
 
 // Any 401 mid-session (key revoked or rotated) drops straight back to the gate
 // rather than leaving a dead screen full of failed requests.

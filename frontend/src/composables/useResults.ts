@@ -7,7 +7,15 @@ const data = ref<RunDetail | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
+// Request generation. `data` is a module-level singleton shared by the App
+// header and ResultsScreen, and load() had no way to tell a stale response from
+// a current one — two quick clicks in the history list could land run A's
+// payload after run B's, rendering A's personas under B's header. Only the most
+// recent call is allowed to write.
+let generation = 0
+
 async function load(runId: string) {
+  const mine = ++generation
   loading.value = true
   error.value = null
   try {
@@ -15,12 +23,15 @@ async function load(runId: string) {
       headers: { 'Cache-Control': 'no-store' },
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    data.value = await res.json()
+    const payload = await res.json()
+    if (mine !== generation) return
+    data.value = payload
   } catch (e: any) {
+    if (mine !== generation) return
     error.value = e?.message ?? 'Failed to load results'
     data.value = null
   } finally {
-    loading.value = false
+    if (mine === generation) loading.value = false
   }
 }
 

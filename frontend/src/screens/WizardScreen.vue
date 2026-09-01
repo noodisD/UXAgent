@@ -205,8 +205,10 @@
               <input class="ux-input q-prompt" v-model="q.prompt" />
               <button class="icon-del" @click="removeQuestion(i)">×</button>
             </div>
-            <div v-if="q.type === 'multiple_choice'" class="q-options">
-              <div v-for="(o, j) in q.options" :key="j" class="q-opt">
+            <!-- `q.options` is optional on the Q type and independent of `q.type`,
+                 so the type check is on the field itself, not on the kind. -->
+            <div v-if="q.type === 'multiple_choice' && q.options" class="q-options">
+              <div v-for="(_o, j) in q.options" :key="j" class="q-opt">
                 <span class="radio"></span>
                 <input class="ux-input opt-input" v-model="q.options[j]" />
                 <button class="icon-x" @click="q.options.splice(j, 1)">×</button>

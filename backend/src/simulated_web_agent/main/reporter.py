@@ -1018,7 +1018,7 @@ async def generate_aggregated_report(
         survey_summaries = await _summarize_survey(reports)
     except Exception as e:
         log.exception("[reporter] survey summaries failed (non-fatal): %s", e)
-        survey_summaries = []
+        survey_summaries = {}
 
     aggregated = {
         "statistics": stats,
@@ -1046,11 +1046,14 @@ async def generate_aggregated_report(
     return aggregated
 
 
-async def _summarize_survey(reports: list[dict]) -> list[str]:
+async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
     """One Polish 'why agents answered this way' summary per survey question.
 
-    Returns a list aligned to the questionnaire's question order (taken from the
-    first persona's answers — all personas answer the same questionnaire).
+    Keyed by question id. It used to return a positional list ordered by
+    first-encountered qid, which the dashboard then joined to its own question
+    list by array index — but that list is questionnaire-ordered and omits
+    questions nobody answered, so any gap shifted every later summary onto the
+    wrong question. The LLM already replies keyed by id; keep it that way.
     """
     per_question: dict[str, list[str]] = {}
     order: list[str] = []
@@ -1088,7 +1091,7 @@ async def _summarize_survey(reports: list[dict]) -> list[str]:
         log=False,
     )
     summaries = (json.loads(raw).get("summaries")) or {}
-    return [str(summaries.get(qid, "")) for qid in order]
+    return {qid: str(summaries.get(qid, "")) for qid in order}
 
 
 def _attach_issue_evidence(narrative: dict, stats: dict) -> None:

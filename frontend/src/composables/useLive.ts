@@ -28,21 +28,35 @@ export function useLive(pollMs = 1500) {
   let runId: string | null = null
 
   async function fetchOnce() {
-    if (!runId) return
+    const forRun = runId
+    if (!forRun) return
     try {
-      const res = await apiFetch(`/runs/${encodeURIComponent(runId)}/live`, { headers: { 'Cache-Control': 'no-store' } })
+      const res = await apiFetch(`/runs/${encodeURIComponent(forRun)}/live`, { headers: { 'Cache-Control': 'no-store' } })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
+      // The run can change while this request is in flight; without this check
+      // the previous run's personas overwrite the new one's.
+      if (forRun !== runId) return
       personas.value = data.personas || []
       error.value = null
     } catch (e: any) {
+      if (forRun !== runId) return
       error.value = e?.message ?? 'Failed to fetch live state'
     }
   }
 
   function start(id: string) {
+    // Switching runs must clear the previous run's personas, otherwise the old
+    // ones stay on screen until the first response for the new run arrives.
+    if (runId !== id) {
+      personas.value = []
+      error.value = null
+    }
     runId = id
-    if (timer !== null) return
+    if (timer !== null) {
+      fetchOnce()
+      return
+    }
     fetchOnce()
     timer = window.setInterval(fetchOnce, pollMs)
   }

@@ -57,6 +57,11 @@ const messages: Record<Locale, Record<string, string>> = {
     'find.copy': 'Kopiuj',
     'find.copied': '✓ Skopiowano',
     'survey.aiSummary': 'Dlaczego agenci tak odpowiedzieli · podsumowanie',
+    // Scale anchors for legacy runs whose stored survey carries no per-question
+    // labels. Previously hardcoded Polish in ResultsScreen, so they stayed Polish
+    // with the UI switched to English.
+    'survey.anchorLow': 'zdecydowanie nie',
+    'survey.anchorHigh': 'zdecydowanie tak',
     'cmp.title': 'vs. poprzedni audyt',
     'cmp.from': 'z',
     'cmp.new': 'Nowe',
@@ -385,6 +390,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'hist.latest': '● najnowsza',
     'hist.failed': 'Analiza nieudana',
     'hist.running': 'W toku…',
+    'hist.cancelled': 'Anulowano',
   },
   en: {
     'brand.tag': 'synthetic ux research',
@@ -418,6 +424,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'find.copy': 'Copy',
     'find.copied': '✓ Copied',
     'survey.aiSummary': 'Why agents answered this way · summary',
+    'survey.anchorLow': 'strongly disagree',
+    'survey.anchorHigh': 'strongly agree',
     'cmp.title': 'vs. previous run',
     'cmp.from': 'from',
     'cmp.new': 'New',
@@ -734,6 +742,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'hist.latest': '● latest',
     'hist.failed': 'Run failed',
     'hist.running': 'Running…',
+    'hist.cancelled': 'Cancelled',
   },
 }
 
