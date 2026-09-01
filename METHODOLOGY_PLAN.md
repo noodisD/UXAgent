@@ -124,7 +124,7 @@ positive" — which is exactly where `harness_suspect` findings belong. Map:
 1=kosmetyczny(≈drobny), 0=false positive. Keep Polish labels; store numeric.
 Severity must justify frequency/impact/persistence (prompt requirement).
 
-Files: `heuristic_evaluate.txt`, `reporter*.py` (SEVERITY_ORDER maps),
+Files: `heuristic_evaluate.txt`, `main/severity.py` (the single severity scale),
 frontend `theme.ts` SEV map + i18n, migration shim for old runs (read old
 labels → numeric).
 
