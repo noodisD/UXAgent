@@ -94,9 +94,10 @@ POST `/run` starts the pipeline in a **background thread** and returns
 Pipeline (`main/run.py` `run_async`): generate personas → `experiment_async`
 (browser sessions, one per persona) → per-agent `run_all_analyses` → pagespeed →
 `generate_aggregated_report`. Outputs to `runs/<run_id>/<persona_dir>/...` plus a
-run-level `run_manifest.json` and `aggregated_report.{json,md,html}`.
+run-level `run_manifest.json` and `aggregated_report.{json,md,html}` (plus `.pdf`, rendered
+lazily on first download).
 
-### Endpoints (`main/app.py`) — all 13
+### Endpoints (`main/app.py`) — all 14
 - `GET /health` → unauthenticated liveness probe (the container platform's).
 - `POST /run` → starts run, returns `{run_id, site_slug}` (202).
 - `GET /progress[?run_id=]` → `{run_id, status, phase, current, total, label, message}`
@@ -113,16 +114,20 @@ run-level `run_manifest.json` and `aggregated_report.{json,md,html}`.
 - `GET /runs/<run_id>/screenshot/<persona_id>` → latest screenshot PNG (no-cache).
 - `GET /runs/<run_id>/screenshot/<persona_id>/<step>` → that step's screenshot.
 - `GET /runs/<run_id>/<persona_id>/screenshot/<filename>` → a named screenshot.
-- `GET /runs/<run_id>/report.html` → static aggregated report.
+- `GET /runs/<run_id>/report.html` → static aggregated report (to read in a tab).
+- `GET /runs/<run_id>/report.pdf` → the same report as a PDF, sent as an
+  attachment. Rendered from the HTML by Chromium (`main/report_pdf.py`) on
+  first request and cached beside it, re-rendered when the HTML is newer — so
+  the two containers cannot drift, and runs nobody downloads cost nothing.
 
 ### Auth model (`app.py`, `@before_request`)
 `UXAGENT_API_KEY` unset → open. Set → every route needs `X-API-Key`, compared
 with `hmac.compare_digest`. Two deliberate exemptions:
 - `OPTIONS` (a CORS preflight carries no custom header) and `/health`.
-- The four browser-loaded routes — the three `/runs/.../screenshot/...` variants
-  and `/runs/<id>/report.html` — also accept the key as `?key=`, because a
-  browser cannot attach a header to an `<img src>` or a `target="_blank"`
-  navigation. `frontend/src/api.ts` is the only place that knows this:
+- The browser-loaded routes — the three `/runs/.../screenshot/...` variants and
+  `/runs/<id>/report.{html,pdf}` — also accept the key as `?key=`, because a
+  browser cannot attach a header to an `<img src>`, a `target="_blank"`
+  navigation, or a download. `frontend/src/api.ts` is the only place that knows this:
   `apiFetch` sends the header, `apiAssetUrl` appends the query parameter.
 
 `main/results_api.py` owns reading the on-disk trace and mapping it to API

@@ -55,7 +55,7 @@
         </div>
         <div class="h-actions">
           <template v-if="app.screen === 'results'">
-            <a class="btn" :href="reportUrl" :download="`raport-ux-${app.viewRunId || 'audyt'}.html`">{{ t('btn.download') }}</a>
+            <a class="btn" :href="reportPdfUrl">{{ t('btn.download') }}</a>
             <a class="btn btn-primary" :href="reportUrl" target="_blank" rel="noopener">{{ t('btn.openReport') }} ↗</a>
           </template>
           <button v-else-if="app.screen === 'history'" class="btn btn-primary" @click="newAudit">{{ t('btn.newAudit') }}</button>
@@ -124,8 +124,13 @@ const topPct = computed(() => {
   return Math.min(99, Math.round(idx * per + within * per))
 })
 
+// Two containers for one report: the HTML is for reading in a tab, the PDF is
+// what people send on. Chromium renders the PDF from this same HTML server-side
+// (backend main/report_pdf.py), so they cannot drift apart.
 const reportUrl = computed(() =>
   app.viewRunId ? apiAssetUrl(`/runs/${encodeURIComponent(app.viewRunId)}/report.html`) : '#')
+const reportPdfUrl = computed(() =>
+  app.viewRunId ? apiAssetUrl(`/runs/${encodeURIComponent(app.viewRunId)}/report.pdf`) : '#')
 
 // --- auth gate ----------------------------------------------------------
 // The backend decides whether a key is required: probing /progress returns 401

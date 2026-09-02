@@ -260,13 +260,25 @@ body {
 /* ── Footer ── */
 .footer { font-size: 12px; color: #6c757d; text-align: center; margin-top: 40px; }
 
-/* ── Print ── */
+/* ── Print ──
+   Also the PDF path: main/report_pdf.py renders this file through Chromium with
+   emulate_media("print"), so these rules are what the downloadable report looks
+   like — not a separate stylesheet that could drift from the screen one. */
 @media print {
   body { background: #fff; }
   .page { padding: 0; max-width: 100%; }
   .report-header { border-radius: 0; }
   .section { box-shadow: none; border: 1px solid #dee2e6; break-inside: avoid; }
   .issue-card { break-inside: avoid; }
+  /* Keep a unit of meaning on one page: a recommendation with its number, and a
+     screenshot with the finding it is evidence for. */
+  .rec-item, .evidence, .score-row, .quote-list li { break-inside: avoid; }
+  /* A heading stranded at the foot of a page is worse than a shorter page. */
+  h1, h2, h3 { break-after: avoid; }
+  /* Evidence thumbs are sized for screen; A4 minus margins is narrower. */
+  .ev-thumb { max-width: 100%; height: auto; }
+  /* Long finding URLs must wrap rather than run off the page edge. */
+  .ev-url, .section a { word-break: break-word; }
 }
 """
 

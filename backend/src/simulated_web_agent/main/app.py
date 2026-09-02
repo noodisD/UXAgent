@@ -16,7 +16,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest
 
-from . import cancellation, results_api
+from . import cancellation, report_pdf, results_api
 from .persona import generate_audit_settings, generate_example_persona
 from .run import mark_run_status, new_run_id, read_manifest, run, site_slug
 
@@ -59,11 +59,12 @@ if configure_cors(app, _CORS_ORIGINS):
 
 _API_KEY = os.getenv("UXAGENT_API_KEY", "").strip()
 
-# Browsers cannot attach a custom header to an <img src> or a target="_blank"
-# navigation, so these four accept the key as a ?key= query parameter instead.
-# They are exactly the routes the UI loads that way (screenshots + the report).
+# Browsers cannot attach a custom header to an <img src>, a target="_blank"
+# navigation or a download, so these accept the key as a ?key= query parameter
+# instead. Exactly the routes the UI loads that way: the report in both
+# containers (.html to view, .pdf to download) and the three screenshot forms.
 _QUERY_KEY_PREFIXES = ("/runs/",)
-_QUERY_KEY_SUFFIXES = ("/report.html",)
+_QUERY_KEY_SUFFIXES = ("/report.html", "/report.pdf")
 
 # Unauthenticated: preflight carries no custom header, and a health probe must
 # work without a secret.
@@ -71,8 +72,8 @@ _PUBLIC_PATHS = {"/health"}
 
 
 def _asset_route_allows_query_key(path: str) -> bool:
-    """True for the browser-loaded routes: /runs/<id>/report.html and the three
-    /runs/... screenshot variants."""
+    """True for the browser-loaded routes: /runs/<id>/report.{html,pdf} and the
+    three /runs/... screenshot variants."""
     if not path.startswith(_QUERY_KEY_PREFIXES):
         return False
     return path.endswith(_QUERY_KEY_SUFFIXES) or "/screenshot/" in path
@@ -423,6 +424,33 @@ def run_evidence_file_endpoint(run_id: str, persona_id: str, filename: str):
     if target.parent != base or not target.exists() or target.suffix != ".png":
         return jsonify({"status": "error", "error": "not found"}), 404
     return send_file(target, mimetype="image/png")
+
+
+@app.get("/runs/<run_id>/report.pdf")
+def run_report_pdf_endpoint(run_id: str):
+    """The report as a PDF, rendered from the HTML on first request.
+
+    Chromium does the rendering (see main/report_pdf.py), so the PDF and the
+    HTML cannot drift apart — there is one report, in two containers.
+    """
+    run_dir = Path("runs") / run_id
+    try:
+        pdf = report_pdf.ensure_report_pdf(run_dir)
+    except Exception as e:
+        log.exception("PDF render failed for %s: %s", run_id, e)
+        return jsonify({"status": "error", "error": "pdf render failed"}), 500
+    if pdf is None:
+        return jsonify({"status": "error", "error": "report not found"}), 404
+
+    site = re.sub(r"[^A-Za-z0-9._-]+", "-", str(run_id))
+    resp = send_file(
+        pdf.resolve(),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"raport-ux-{site}.pdf",
+    )
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
 
 
 @app.get("/runs/<run_id>/report.html")
