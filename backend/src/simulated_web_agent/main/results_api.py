@@ -20,7 +20,7 @@ from typing import Any
 
 from .persona_matrix import build_persona_task_matrix
 from .run import read_manifest
-from .severity import SEVERITY_EN, severity_score
+from .severity import SEVERITY_EN, excluded_from_report, severity_score
 from .trace_store import TraceStore, parse_action as _parse_action
 
 RUNS_ROOT = Path("runs")
@@ -626,7 +626,13 @@ def list_runs(runs_root: Path = RUNS_ROOT) -> list[dict]:
             if oc in outcomes:
                 outcomes[oc] += 1
             for h in store.read_heuristic_findings() or []:
-                if h.get("severity") == "krytyczny":
+                # Gated, like every other headline count. Counting raw findings
+                # here meant the history list painted a red "4 critical" for a
+                # run whose report correctly reported 0 — the four had been
+                # rejected as harness-suspect, off-site or claim-unsupported.
+                # severity.excluded_from_report is the shared predicate exactly
+                # so these two views cannot drift apart.
+                if h.get("severity") == "krytyczny" and not excluded_from_report(h):
                     critical += 1
 
         status = manifest.get("status", "done")

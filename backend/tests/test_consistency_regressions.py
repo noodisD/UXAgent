@@ -208,3 +208,26 @@ def test_cancellation_is_per_run():
 def test_cancellation_falsy_run_id_is_never_cancelled(run_id):
     """run_id is None for a CLI run; treating that as cancelled would stop it."""
     assert cancellation.is_cancelled(run_id) is False
+
+
+# ---------------------------------------------------------------------------
+# results_api.list_runs — the history row counted findings the gates rejected
+# ---------------------------------------------------------------------------
+
+def test_history_critical_count_excludes_gated_findings():
+    """The history list counted raw `severity == "krytyczny"` while the report
+    counted only confirmed ones, so a run whose report correctly said 0 critical
+    was painted red with "4" in the history. Same predicate, same answer."""
+    from simulated_web_agent.main.severity import excluded_from_report
+
+    findings = [
+        {"severity": "krytyczny"},                                # real
+        {"severity": "krytyczny", "claim_verdict": "unsupported"},  # rejected
+        {"severity": "krytyczny", "harness_suspect": True},         # our fault
+        {"severity": "poważny"},                                  # not critical
+    ]
+    counted = sum(
+        1 for f in findings
+        if f.get("severity") == "krytyczny" and not excluded_from_report(f)
+    )
+    assert counted == 1
