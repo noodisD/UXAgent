@@ -231,3 +231,30 @@ def test_history_critical_count_excludes_gated_findings():
         if f.get("severity") == "krytyczny" and not excluded_from_report(f)
     )
     assert counted == 1
+
+
+# ---------------------------------------------------------------------------
+# reporter_html._esc — a count of 0 rendered as a blank cell
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("value,expected", [
+    (0, "0"),        # the bug: `str(s or "")` made every falsy value empty
+    (0.0, "0.0"),
+    (1, "1"),
+    (2.5, "2.5"),
+    (None, ""),      # genuinely absent stays empty
+    ("", ""),
+])
+def test_esc_renders_zero_rather_than_blank(value, expected):
+    """An empty "Problemy krytyczne" cell reads as "not measured" when what the
+    pipeline found was zero critical problems — the opposite claim, and the more
+    reassuring one."""
+    from simulated_web_agent.main.reporter_html import _esc
+
+    assert _esc(value) == expected
+
+
+def test_esc_still_escapes_markup():
+    from simulated_web_agent.main.reporter_html import _esc
+
+    assert _esc("<b>&") == "&lt;b&gt;&amp;"

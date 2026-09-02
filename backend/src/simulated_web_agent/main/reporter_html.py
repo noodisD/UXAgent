@@ -31,7 +31,20 @@ SEVERITY_LABELS = {
 }
 
 def _esc(s: object) -> str:
-    return html.escape(str(s or ""))
+    """HTML-escape a value, rendering only None/missing as empty.
+
+    `str(s or "")` treated every falsy value as absent, so a count of **0**
+    rendered as a blank cell. In a UX report that is not a cosmetic slip: an
+    empty "Problemy krytyczne" cell reads as "not measured", when what the
+    pipeline actually found was zero critical problems — the opposite claim,
+    and the more reassuring one. Caught when the critical row was added and
+    printed nothing.
+
+    Empty string stays empty; 0 and 0.0 render as themselves.
+    """
+    if s is None or s == "":
+        return ""
+    return html.escape(str(s))
 
 
 def _score_color(score: float | None) -> str:
