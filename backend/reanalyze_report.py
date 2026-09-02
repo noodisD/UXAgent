@@ -18,12 +18,12 @@ from pathlib import Path
 
 import yaml
 
-from src.simulated_web_agent.agent import gpt
-from src.simulated_web_agent.config import load_cfg
-from src.simulated_web_agent.main.form_analysis import run_form_analysis
-from src.simulated_web_agent.main.link_checker import run_link_check
-from src.simulated_web_agent.main.reporter import generate_aggregated_report
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.agent import gpt
+from simulated_web_agent.config import load_cfg
+from simulated_web_agent.main.form_analysis import run_form_analysis
+from simulated_web_agent.main.link_checker import run_link_check
+from simulated_web_agent.main.reporter import generate_aggregated_report
+from simulated_web_agent.main.trace_store import TraceStore
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)

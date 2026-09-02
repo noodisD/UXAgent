@@ -21,19 +21,19 @@ import logging
 import sys
 from pathlib import Path
 
-from src.simulated_web_agent.agent import gpt
-from src.simulated_web_agent.config import load_cfg
-from src.simulated_web_agent.main.auditor import run_audit_analysis
-from src.simulated_web_agent.main.bias_audit import run_bias_audit
-from src.simulated_web_agent.main.cognitive_walkthrough import run_cognitive_walkthrough
-from src.simulated_web_agent.main.iso_metrics import run_iso_metrics
-from src.simulated_web_agent.main.reporter import (
+from simulated_web_agent.agent import gpt
+from simulated_web_agent.config import load_cfg
+from simulated_web_agent.main.auditor import run_audit_analysis
+from simulated_web_agent.main.bias_audit import run_bias_audit
+from simulated_web_agent.main.cognitive_walkthrough import run_cognitive_walkthrough
+from simulated_web_agent.main.iso_metrics import run_iso_metrics
+from simulated_web_agent.main.reporter import (
     generate_aggregated_report,
     generate_objective_reflection,
     generate_per_agent_report,
 )
-from src.simulated_web_agent.main.run import read_manifest
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.main.run import read_manifest
+from simulated_web_agent.main.trace_store import TraceStore
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)

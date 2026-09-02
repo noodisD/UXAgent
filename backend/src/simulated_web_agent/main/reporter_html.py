@@ -113,10 +113,16 @@ body {
   text-transform: uppercase; margin-bottom: 8px; position: relative; z-index: 1; }
 .report-header .subtitle { font-size: 13.5px; color: rgba(255,255,255,.72);
   margin-bottom: 20px; position: relative; z-index: 1; }
-.header-meta { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 26px;
-  position: relative; z-index: 1; }
+/* A deliberate 3x2 grid rather than a wrapping row. There are six tiles, and
+   at A4 width (which is what the PDF renders at) six columns cannot hold a
+   label like "PROB. KRYTYCZNYCH" without wrapping mid-word — a flex row fit
+   five and dropped the sixth onto a line by itself. Three columns give every
+   label room and pair the severities on one row. */
+.header-meta { display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 20px 32px; margin-top: 26px; position: relative; z-index: 1; }
+@media (min-width: 900px) { .header-meta { grid-template-columns: repeat(6, 1fr); gap: 20px; } }
 .meta-item { text-align: left; }
-.meta-item .val { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; display: block; }
+.meta-item .val { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; display: block; }
 .meta-item .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em;
   color: rgba(255,255,255,.6); margin-top: 3px; }
 

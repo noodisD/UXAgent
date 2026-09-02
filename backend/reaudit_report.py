@@ -11,11 +11,11 @@ from pathlib import Path
 
 import yaml
 
-from src.simulated_web_agent.agent import gpt
-from src.simulated_web_agent.config import load_cfg
-from src.simulated_web_agent.main.auditor import run_audit_analysis
-from src.simulated_web_agent.main.reporter import generate_aggregated_report, generate_per_agent_report
-from src.simulated_web_agent.main.trace_store import TraceStore
+from simulated_web_agent.agent import gpt
+from simulated_web_agent.config import load_cfg
+from simulated_web_agent.main.auditor import run_audit_analysis
+from simulated_web_agent.main.reporter import generate_aggregated_report, generate_per_agent_report
+from simulated_web_agent.main.trace_store import TraceStore
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
