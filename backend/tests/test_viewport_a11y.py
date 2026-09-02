@@ -212,37 +212,6 @@ async def test_page_without_drag_reports_nothing(store: TraceStore):
 
 # --- degradation ---------------------------------------------------------
 
-def test_dashboard_rows_separate_wcag_failures_from_advice():
-    from simulated_web_agent.main.results_api import _viewport_rows
-
-    rows = _viewport_rows([{
-        "viewport": "mobile",
-        "tap_targets": {"below_24px": 2, "below_48px_advisory": 5,
-                        "examples": [{"el": "button", "w": 10, "h": 10}]},
-        "contrast": {"below_threshold": 3, "undetermined": 1,
-                     "examples": [{"ratio": 2.85, "required": 4.5}]},
-        "drag_interactions": {"count": 1, "requires_human_check": True},
-    }])
-    by_sev = {r["severity"] for r in rows}
-    assert "serious" in by_sev  # the 24px failures and the contrast failures
-    advisory = [r for r in rows if "recommended 48" in r["issue"]]
-    assert advisory and advisory[0]["severity"] == "minor"
-    assert any("2.85:1" in r["issue"] for r in rows)
-    assert any("human check" in r["issue"] for r in rows)
-
-
-def test_dashboard_says_nothing_when_the_page_never_loaded():
-    """None means unmeasured. Emitting no row is right; emitting a clean row
-    would claim we checked."""
-    from simulated_web_agent.main.results_api import _viewport_rows
-
-    rows = _viewport_rows([{
-        "viewport": "mobile", "error": "timeout", "horizontal_overflow": None,
-        "tap_targets": None, "contrast": None, "drag_interactions": None,
-    }])
-    assert rows == []
-
-
 @pytest.mark.asyncio
 async def test_failed_page_load_leaves_checks_absent_not_zero(store: TraceStore):
     """A page that never loaded has no measurements. Emitting zeros would read

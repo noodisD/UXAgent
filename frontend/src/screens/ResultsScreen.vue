@@ -762,9 +762,6 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .fi-score { font: 700 12.5px var(--mono); width: 30px; text-align: right; }
 .a11y-score { font: 700 17px var(--mono); }
 .of5 { font-size: 12px; color: var(--faint); }
-.vp-row { display: flex; gap: 9px; align-items: baseline; }
-.vp-tag { font: 600 9.5px/1 var(--mono); padding: 4px 6px; border-radius: 4px; flex: none; }
-.vp-issue { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
 .heur, .finding { border: 1px solid var(--border-soft); border-left: 3px solid; border-radius: 9px; padding: 14px 16px; }
 .finding { background: #fff; border-color: var(--border); border-left-width: 3px; padding: 16px 18px; }
 .heur-head, .finding-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
@@ -830,9 +827,6 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .scale-anchors { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted-2); margin-top: 8px; }
 .scale-n { font: 11px var(--mono); color: var(--faint); margin-top: 8px; }
 .open-quote { font-size: 13.5px; color: var(--text-2); background: var(--surface-3); border-left: 3px solid var(--border); padding: 9px 13px; border-radius: 0 6px 6px 0; line-height: 1.5; }
-.response { background: #fcfcfd; border: 1px solid var(--border-soft); border-radius: 9px; padding: 13px 15px; }
-.resp-answer { font-size: 13.5px; color: var(--ink); line-height: 1.5; margin-bottom: 6px; }
-.resp-persona { font: 500 11.5px var(--mono); color: #9aa0a8; }
 
 /* finding evidence */
 .unverified-badge { font: 700 10.5px var(--mono); color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 1px 7px; white-space: nowrap; }

@@ -148,7 +148,6 @@ export type PersonaResult = {
   reflection: ObjectiveReflection
   firstImpression: { purpose: number | null; navigation: number | null; cta: number | null; hierarchy: number | null; trust: number | null }
   accessibility: { score: number | null; findings: AccessibilityFinding[] }
-  viewport: { findings: { device: string; issue: string; severity: Severity }[] }
   heuristics: HeuristicFinding[]
   survey: { q: string; answer: string; reasoning: string }[]
   iso?: IsoMetrics | null

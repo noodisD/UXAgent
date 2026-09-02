@@ -80,60 +80,6 @@ def _persona_duration(trace_dir: Path) -> str | None:
     return _fmt_duration(mtimes[-1] - mtimes[0])
 
 
-def _viewport_rows(viewport: list[dict]) -> list[dict]:
-    rows: list[dict] = []
-    for v in viewport or []:
-        device = v.get("viewport", "")
-        if v.get("horizontal_overflow"):
-            rows.append({"device": device, "issue": "Horizontal overflow detected", "severity": "serious"})
-        for sf in v.get("small_fonts") or []:
-            txt = (sf.get("text") or "").strip()
-            label = f'Small font {sf.get("size")}px' + (f': "{txt[:40]}"' if txt else "")
-            rows.append({"device": device, "issue": label, "severity": "minor"})
-
-        # §3.4 live-DOM checks. `None` means the page never loaded — say nothing
-        # rather than imply a clean result.
-        tt = v.get("tap_targets")
-        if tt and tt.get("below_24px"):
-            ex = ", ".join(f'{e["el"]} ({e["w"]}×{e["h"]}px)'
-                           for e in (tt.get("examples") or [])[:2])
-            rows.append({
-                "device": device,
-                "issue": f'{tt["below_24px"]} tap target(s) below the 24×24px '
-                         f'WCAG 2.2 minimum' + (f": {ex}" if ex else ""),
-                "severity": "serious",
-            })
-        if tt and tt.get("below_48px_advisory"):
-            rows.append({
-                "device": device,
-                "issue": f'{tt["below_48px_advisory"]} tap target(s) meet WCAG '
-                         f'but are below the recommended 48×48px',
-                "severity": "minor",
-            })
-
-        c = v.get("contrast")
-        if c and c.get("below_threshold"):
-            worst = (c.get("examples") or [{}])[0]
-            detail = (f' (worst {worst["ratio"]}:1, needs {worst["required"]}:1)'
-                      if worst.get("ratio") else "")
-            rows.append({
-                "device": device,
-                "issue": f'{c["below_threshold"]} text element(s) below the WCAG '
-                         f'AA contrast threshold{detail}',
-                "severity": "serious",
-            })
-
-        d = v.get("drag_interactions")
-        if d and d.get("count"):
-            rows.append({
-                "device": device,
-                "issue": f'{d["count"]} drag-only interaction(s) — needs human '
-                         f'check for a single-pointer alternative (SC 2.5.7)',
-                "severity": "minor",
-            })
-    return rows
-
-
 def _survey_rows(survey: dict, q_prompts: dict[str, str]) -> list[dict]:
     rows: list[dict] = []
     for a in (survey or {}).get("answers", []) or []:
@@ -176,7 +122,6 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
     reflection = _as_dict(store.read_objective_reflection())
     fi = _as_dict(store.read_first_impression())
     acc = _as_dict(store.read_accessibility_findings())
-    viewport = _as_list(store.read_viewport_findings())
     heuristics = [h for h in _as_list(store.read_heuristic_findings()) if isinstance(h, dict)]
     survey = _as_dict(store.read_survey_result())
     steps = len(_as_list(store.read_action_trace()))
@@ -241,7 +186,6 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
                 if isinstance(f, dict)
             ],
         },
-        "viewport": {"findings": _viewport_rows(viewport)},
         "heuristics": [
             {
                 "severity": SEVERITY_EN.get(h.get("severity"), "minor"),

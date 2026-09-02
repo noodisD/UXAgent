@@ -28,6 +28,23 @@ audit**:
     "checked, nothing wrong".
 
 Saves:  trace_dir/viewport_findings.json
+
+Who consumes it
+---------------
+  - `reporter.py` — the per-agent report, the Markdown "Responsywność" section,
+    the aggregate overflow statistics, and the aggregate LLM prompt.
+
+The **dashboard deliberately does not.** `results_api` used to map these
+findings into `personas[].viewport.findings`, and no template ever rendered it —
+the mapping, its type, its CSS and its i18n keys were all built and then
+orphaned. That path was removed on purpose in the 2026-09 consistency pass, not
+overlooked: viewport was also removed from the client-facing report earlier, and
+the measured numbers already reach the client through reporter.py above.
+
+If you are about to rebuild a dashboard view for this, that is a UI decision to
+take deliberately, not a gap to patch. Note it would need the normative/advisory
+split back (24×24 is a WCAG failure, 48×48 is advice) — collapsing them is what
+turned 4 real tap-target failures into 27 reported ones on an early run.
 """
 
 import asyncio
