@@ -136,9 +136,28 @@ CMD exec .venv/bin/gunicorn \
 # VERTEXAI_PROJECT / VERTEXAI_LOCATION / GOOGLE_PAGESPEED_API_KEY as env vars
 # or Secret Manager references.
 #
-# Storage: runs/ inside the container is ephemeral and is lost on every
-# restart or redeploy. Mount a GCS bucket (gcsfuse) at /app/runs, or move
-# TraceStore to a GCS-backed path, before treating any report as durable.
+# Storage: runs/ inside the container is ephemeral and is lost on every restart
+# or redeploy. Set UXAGENT_RUNS_BUCKET and run history becomes durable —
+# main/run_storage.py uploads each finished run and fetches it back on demand,
+# so any instance can serve a run it did not execute:
+#
+#   gcloud storage buckets create gs://<bucket> --location europe-central2 \
+#     --uniform-bucket-level-access          # keep it PRIVATE
+#   gcloud storage buckets add-iam-policy-binding gs://<bucket> \
+#     --member serviceAccount:<run-sa> --role roles/storage.objectAdmin
+#   gcloud run services update uxagent-backend --region europe-central2 \
+#     --set-env-vars UXAGENT_RUNS_BUCKET=<bucket>
+#
+#   Deliberately NOT a gcsfuse mount at /app/runs, even though that needs no
+#   code: observation_trace.jsonl is opened in append mode once per step (on
+#   GCS an append rewrites the whole object), Playwright writes ~2.7 MB
+#   screenshots straight to the path on the agent's hot path, and a 20-persona
+#   run writes ~12,900 files. Writing locally and uploading once at the end
+#   keeps all of that on local disk where it is fast and atomic.
+#
+#   The archive skips api_trace/, raw_html/, simp_html/ and full-page
+#   screenshots — ~90% of the bytes, none of it read by the dashboard.
+#   UXAGENT_RUNS_ARCHIVE_ALL=true keeps everything.
 #
 # If chromium still fails to launch on Cloud Run's gVisor sandbox, add
 # "--no-sandbox" to environment.browser.launch_options.args in conf/base.yaml.

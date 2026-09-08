@@ -14,7 +14,7 @@ from ..agent import gpt
 from ..config import load_cfg
 from ..executor.env import WebAgentEnv
 from .analysis_runner import run_all_analyses
-from . import cancellation
+from . import cancellation, run_storage
 from .experiment import experiment_async
 from .pagespeed import run_pagespeed_check
 from .persona import generate_personas
@@ -55,6 +55,26 @@ def _write_manifest(run_dir: Path, data: dict) -> None:
     (run_dir / "run_manifest.json").write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+def _archive(run_dir: Path) -> None:
+    """Copy a finished run into durable storage, if a bucket is configured.
+
+    Called once the manifest reaches its terminal state, so what lands in the
+    bucket is a complete run. results_api is imported here, not at module
+    scope, because it imports read_manifest from this module.
+
+    Never raises: the run itself has already succeeded or failed on its own
+    merits, and a storage problem must not change that verdict.
+    """
+    if not run_storage.is_enabled():
+        return
+    try:
+        from .results_api import build_history_row
+
+        run_storage.upload_run(run_dir, history_row=build_history_row(run_dir))
+    except Exception:
+        log.exception("[storage] archiving run %s failed", run_dir.name)
 
 
 def _run_scope() -> dict:
@@ -175,6 +195,7 @@ async def run_async(
             # modal reads both paths identically.
             manifest["failure"] = failure
         _write_manifest(run_dir, manifest)
+        _archive(run_dir)
 
     # ── 1) Personas ──────────────────────────────────────────────────────────
     # persona_slots (optional) lets the wizard mix manual and auto personas:
@@ -340,6 +361,9 @@ def mark_run_status(run_id: str, status: str, failure: Optional[dict] = None) ->
     if manifest.get("ended_at") is None:
         manifest["ended_at"] = datetime.now(timezone.utc).isoformat()
     _write_manifest(run_dir, manifest)
+    # A crashed or cancelled run belongs in the durable history too — that is
+    # where the failed-run modal gets its diagnostics from after a restart.
+    _archive(run_dir)
 
 
 def run(*args, **kwargs):

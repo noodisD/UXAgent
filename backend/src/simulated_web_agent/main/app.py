@@ -16,7 +16,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest
 
-from . import cancellation, report_pdf, results_api
+from . import cancellation, report_pdf, results_api, run_storage
 from .persona import generate_audit_settings, generate_example_persona
 from .run import mark_run_status, new_run_id, read_manifest, run, site_slug
 
@@ -97,6 +97,34 @@ def _require_api_key():
     return jsonify({"status": "error", "error": "unauthorized"}), 401
 
 
+_RUN_PATH_RE = re.compile(r"^/runs/([^/]+)(?:/|$)")
+
+
+@app.before_request
+def _hydrate_run_from_storage():
+    """Fetch a run from durable storage before any route reads it off disk.
+
+    On Cloud Run the local disk only holds runs this container executed, so
+    every older run — results, screenshots, report, PDF — would 404 after a
+    restart. Doing it here rather than in each of the six run-scoped handlers
+    keeps the rule in one place and covers routes added later.
+
+    Cheap when the run is already local (one stat) and a no-op with no bucket
+    configured. Never blocks the request: if the fetch fails the handler runs
+    as before and returns its own 404.
+    """
+    if not run_storage.is_enabled():
+        return None
+    m = _RUN_PATH_RE.match(request.path)
+    if not m:
+        return None
+    try:
+        run_storage.ensure_local(m.group(1), Path("runs"))
+    except Exception:
+        log.exception("[storage] hydration failed for %s", request.path)
+    return None
+
+
 @app.get("/health")
 def health_endpoint():
     """Unauthenticated liveness probe for the container platform."""
@@ -109,6 +137,8 @@ if not _API_KEY:
         "locally, but a public deployment without it lets anyone start runs "
         "against your LLM budget."
     )
+
+run_storage.startup_log()
 
 PHASE_LABELS = {
     "personas": "Generating personas",

@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from . import run_storage
 from .persona_matrix import build_persona_task_matrix
 from .run import read_manifest
 from .severity import SEVERITY_EN, excluded_from_report, severity_score
@@ -243,6 +244,10 @@ def _first_persona_site_context(run_dir: Path) -> str:
 
 
 def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
+    # Opening a run this instance did not execute (or executed before a
+    # restart) fetches it from the bucket first; a no-op when local or when no
+    # bucket is configured.
+    run_storage.ensure_local(run_id, runs_root)
     run_dir = runs_root / run_id
     manifest = read_manifest(run_dir)
     if manifest is None:
@@ -607,50 +612,74 @@ def _run_overall_score(run_dir: Path) -> float:
         return 0.0
 
 
+def build_history_row(run_dir: Path) -> dict | None:
+    """One history row for a run directory, or None if it isn't a run.
+
+    Extracted from list_runs so the same row can be computed once at upload
+    time and stored in the bucket's shared index — the history screen then
+    costs one small read instead of hydrating every run from storage.
+    """
+    manifest = read_manifest(run_dir)
+    if manifest is None:
+        return None
+
+    personas = [TraceStore(d) for d in _persona_dirs(run_dir)]
+    outcomes = {"success": 0, "partial": 0, "failed": 0}
+    critical = 0
+    for store in personas:
+        oc = _effective_outcome(store)
+        if oc in outcomes:
+            outcomes[oc] += 1
+        for h in store.read_heuristic_findings() or []:
+            # Gated, like every other headline count. Counting raw findings
+            # here meant the history list painted a red "4 critical" for a
+            # run whose report correctly reported 0 — the four had been
+            # rejected as harness-suspect, off-site or claim-unsupported.
+            # severity.excluded_from_report is the shared predicate exactly
+            # so these two views cannot drift apart.
+            if h.get("severity") == "krytyczny" and not excluded_from_report(h):
+                critical += 1
+
+    status = manifest.get("status", "done")
+    complete = status == "done"
+    return {
+        "id": manifest.get("run_id", run_dir.name),
+        "site": manifest.get("site", ""),
+        "date": _fmt_date(manifest.get("started_at")),
+        "started_at": manifest.get("started_at", ""),
+        "personas": len(personas),
+        "status": "complete" if complete else status,
+        "success": outcomes["success"],
+        "partial": outcomes["partial"],
+        "failed": outcomes["failed"],
+        "critical": critical,
+        "score": _run_overall_score(run_dir) if complete else 0.0,
+        "failure": manifest.get("failure"),
+    }
+
+
 def list_runs(runs_root: Path = RUNS_ROOT) -> list[dict]:
-    """Return run-history rows, newest first."""
-    if not runs_root.is_dir():
-        return []
+    """Run-history rows, newest first — this instance's disk plus the bucket.
 
+    On Cloud Run the local disk holds only the runs this container happened to
+    execute; everything older lives in the bucket. Merging both is what makes
+    history survive a restart. A locally present run wins, since it may still
+    be in progress and therefore newer than its uploaded row.
+    """
     rows: list[dict] = []
-    for run_dir in runs_root.iterdir():
-        manifest = read_manifest(run_dir)
-        if manifest is None:
-            continue
+    seen: set[str] = set()
 
-        personas = [TraceStore(d) for d in _persona_dirs(run_dir)]
-        outcomes = {"success": 0, "partial": 0, "failed": 0}
-        critical = 0
-        for store in personas:
-            oc = _effective_outcome(store)
-            if oc in outcomes:
-                outcomes[oc] += 1
-            for h in store.read_heuristic_findings() or []:
-                # Gated, like every other headline count. Counting raw findings
-                # here meant the history list painted a red "4 critical" for a
-                # run whose report correctly reported 0 — the four had been
-                # rejected as harness-suspect, off-site or claim-unsupported.
-                # severity.excluded_from_report is the shared predicate exactly
-                # so these two views cannot drift apart.
-                if h.get("severity") == "krytyczny" and not excluded_from_report(h):
-                    critical += 1
+    if runs_root.is_dir():
+        for run_dir in runs_root.iterdir():
+            row = build_history_row(run_dir)
+            if row:
+                rows.append(row)
+                seen.add(row["id"])
 
-        status = manifest.get("status", "done")
-        complete = status == "done"
-        rows.append({
-            "id": manifest.get("run_id", run_dir.name),
-            "site": manifest.get("site", ""),
-            "date": _fmt_date(manifest.get("started_at")),
-            "started_at": manifest.get("started_at", ""),
-            "personas": len(personas),
-            "status": "complete" if complete else status,
-            "success": outcomes["success"],
-            "partial": outcomes["partial"],
-            "failed": outcomes["failed"],
-            "critical": critical,
-            "score": _run_overall_score(run_dir) if complete else 0.0,
-            "failure": manifest.get("failure"),
-        })
+    for row in run_storage.read_index():
+        if row.get("id") and row["id"] not in seen:
+            rows.append(row)
+            seen.add(row["id"])
 
     rows.sort(key=lambda r: r.get("started_at", ""), reverse=True)
     if rows:
