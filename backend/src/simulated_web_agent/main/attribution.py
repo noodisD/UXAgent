@@ -45,21 +45,56 @@ _REPEAT_THRESHOLD = 3
 _ARTIFACT_OBS_MAX_CHARS = 80
 _ARTIFACT_RAW_MIN_BYTES = 20_000
 
+# Errors the executor writes when it could not carry out an action at all
+# (executor/env.py). Their presence is direct proof the failure was ours: a
+# genuine site error — a 404, a validation message, a dead button — arrives as
+# page *content*, never through this channel.
+#
+# Deliberately NOT included: the repeat- and revisit-advisories that
+# experiment.py injects into the same field. Those say the agent retried
+# something, which is just as likely to mean the *site* did not respond — the
+# exact real defect this module must not swallow. Consecutive repeats are
+# already covered, more conservatively, by _REPEAT_THRESHOLD below.
+_EXECUTOR_ERROR_MARKERS = (
+    "error executing action:",
+    "invalid json action format:",
+    "missing required parameter in action:",
+)
+
 
 def harness_suspect_steps(store: TraceStore) -> set[int]:
     """Step indices whose action is a harness interaction failure.
 
-    Three signatures, all deterministic:
+    Four signatures, all deterministic:
       1. a fallback action ("...nie działał mimo kilku prób...") — and the step
          it retreated from, which is where the finding is usually anchored;
       2. an (action, target) pair repeated >= _REPEAT_THRESHOLD times — a stuck
          loop where the agent retried because the interaction had no effect;
       3. a near-empty observation over a large raw page — a perception-capture
          artifact ("The page is empty" while raw_html is tens of KB), i.e. the
-         perceiver failed, not the site.
+         perceiver failed, not the site;
+      4. the executor reported it could not perform the action at all.
     """
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
     suspect: set[int] = set()
+
+    # (4) Executor failures. observations[i] is the state recorded *before*
+    # action i (experiment.py appends at the top of the loop), so the error it
+    # carries was produced by action i-1 — that is the step to blame. Step i is
+    # added too: the agent perceives the un-changed page there, and that is
+    # usually where the resulting finding anchors.
+    #
+    # This is the strongest harness-vs-site signal in the run and it was written
+    # to disk every session while nothing read it. It is what turned pepco.pl's
+    # consent overlay into "critical site defects".
+    for i, obs in enumerate(store.read_observations() or []):
+        if not isinstance(obs, dict):
+            continue
+        err = str(obs.get("error") or "").lower()
+        if any(m in err for m in _EXECUTOR_ERROR_MARKERS):
+            if i - 1 >= 0:
+                suspect.add(i - 1)
+            suspect.add(i)
 
     for i in range(len(actions)):
         obs = store.read_observation_step_text(i).strip()

@@ -1,0 +1,138 @@
+"""The executor writes `observation["error"]` whenever it cannot carry out an
+action. That is the strongest harness-vs-site signal a run produces, and until
+now nothing read it: a consent overlay that blocked a click became a first-person
+UX complaint (feedback.txt tells the persona to narrate the failure), which
+became a Reflection, which auditor.py feeds verbatim to the heuristic LLM. The
+first external review came back dominated by a cookie "defect" the reviewer said
+she had never once hit as a real user.
+
+These tests pin both directions, because over-suppression is as damaging as
+under-suppression: a rule that swallows real defects would quietly gut the
+report instead of visibly breaking it.
+"""
+import json
+
+import pytest
+
+from simulated_web_agent.main import attribution
+from simulated_web_agent.main.trace_store import TraceStore
+
+
+def _trace(tmp_path, actions, observations, obs_texts=None):
+    store = TraceStore(tmp_path / "persona")
+    store.write_action_trace([json.dumps(a) for a in actions])
+    for obs in observations:
+        store.append_observation(obs)
+    for i, text in enumerate(obs_texts or []):
+        store.write_observation_step_text(i, text)
+    return store
+
+
+def _ok(url="https://x.pl/"):
+    return {"tabs": [{"url": url, "is_active": True}], "error": None}
+
+
+def _failed(err, url="https://x.pl/"):
+    return {"tabs": [{"url": url, "is_active": True}], "error": err}
+
+
+# --- the fix: executor failures are harness-caused -------------------------
+
+@pytest.mark.parametrize("err", [
+    "Error executing action: Locator.click: Timeout 10000ms exceeded",
+    "Error executing action: Element 'zaakceptuj' not found on page",
+    "Invalid JSON action format: Expecting value",
+    "Missing required parameter in action: 'target'",
+])
+def test_executor_failure_marks_the_failing_step(tmp_path, err):
+    """observations[i] is the state *before* action i, so its error belongs to
+    action i-1 — the one that actually failed."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "a"}, {"action": "click", "target": "b"}],
+        observations=[_ok(), _failed(err)],
+    )
+    suspect = attribution.harness_suspect_steps(store)
+    assert 0 in suspect, "the action that failed must be blamed"
+    assert 1 in suspect, "the step that perceives the unchanged page anchors the finding"
+
+
+def test_a_finding_on_a_failed_step_is_excluded_from_the_report(tmp_path):
+    """End to end: the flag must reach severity.excluded_from_report, which is
+    what every counter, the prioritization matrix and the dashboard consult."""
+    from simulated_web_agent.main.severity import excluded_from_report, severity_score
+
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "consent_ok"}, {"action": "click", "target": "menu"}],
+        observations=[_ok(), _failed("Error executing action: Locator.click: Timeout 10000ms exceeded")],
+    )
+    findings = [{
+        "heuristic_id": 1, "severity": "krytyczny", "step": 0,
+        "evidence": "Kliknięcie nie wywołało żadnej reakcji strony.",
+        "recommendation": "Naprawić przycisk.",
+    }]
+    attribution.flag_harness_suspects(store, findings)
+
+    assert findings[0]["harness_suspect"] is True
+    assert findings[0]["requires_human_check"] is True
+    assert excluded_from_report(findings[0]) is True
+    assert severity_score(findings[0]) == 0, "must not carry weight in headline counts"
+
+
+# --- the guard: real defects must survive ----------------------------------
+
+def test_a_clean_session_flags_nothing(tmp_path):
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "a"}, {"action": "type", "target": "b"}],
+        observations=[_ok(), _ok(), _ok()],
+    )
+    assert attribution.harness_suspect_steps(store) == set()
+
+
+@pytest.mark.parametrize("advisory", [
+    "Repeated identical action 3 times with no page change: {\"action\":\"click\"}. "
+    "Choose a different element or strategy.",
+    "You have clicked 'dodaj_do_koszyka' 4 times this session.",
+])
+def test_harness_advisories_do_not_condemn_a_finding(tmp_path, advisory):
+    """experiment.py injects these into the same field, but they mean "the agent
+    retried" — which is equally consistent with the *site* being unresponsive.
+    Treating them as proof of a harness fault would suppress exactly the real
+    defect the tool exists to find. Consecutive repeats are still caught, more
+    conservatively, by _REPEAT_THRESHOLD."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "buy"}, {"action": "click", "target": "other"}],
+        observations=[_ok(), _failed(advisory)],
+    )
+    assert attribution.harness_suspect_steps(store) == set()
+
+
+def test_site_errors_shown_as_page_content_are_untouched(tmp_path):
+    """A 404 or a validation message is page content, never observation["error"],
+    so a genuine site failure keeps its full severity."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "submit"}],
+        observations=[_ok(), _ok()],
+        obs_texts=["I see a page reading 'Błąd 404 — strona nie istnieje'."],
+    )
+    findings = [{"heuristic_id": 9, "severity": "krytyczny", "step": 0,
+                 "evidence": "Strona zwróciła błąd 404.", "recommendation": "Naprawić link."}]
+    attribution.flag_harness_suspects(store, findings)
+    assert findings[0]["harness_suspect"] is False
+
+
+def test_flags_are_rewritten_not_latched(tmp_path):
+    """Re-running after a rule change must clear stale flags."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "a"}],
+        observations=[_ok(), _ok()],
+    )
+    findings = [{"heuristic_id": 1, "severity": "drobny", "step": 0,
+                 "harness_suspect": True, "requires_human_check": True}]
+    attribution.flag_harness_suspects(store, findings)
+    assert findings[0]["harness_suspect"] is False
