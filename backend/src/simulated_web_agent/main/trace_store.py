@@ -193,6 +193,40 @@ class TraceStore:
         (self.trace_dir / f"{self.run_name}.txt").write_text(text, encoding="utf-8")
 
     # ------------------------------------------------------------------
+    # Consent state — which steps ran under an unresolved cookie notice.
+    # Written by experiment.py, read by attribution.py: an interaction blocked
+    # by a consent overlay is our failure, not the site's, and must not be
+    # reported as a defect.
+    # ------------------------------------------------------------------
+
+    def write_consent_states(self, states: dict[int, dict]) -> None:
+        (self.trace_dir / "consent_states.json").write_text(
+            json.dumps({str(k): v for k, v in states.items()}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def read_consent_states(self) -> dict[int, dict]:
+        raw = self._read_json(self.trace_dir / "consent_states.json", fallback={}) or {}
+        out: dict[int, dict] = {}
+        for k, v in raw.items():
+            try:
+                out[int(k)] = v
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def unresolved_consent_steps(self) -> set[int]:
+        """Steps where a notice was found and could NOT be dismissed.
+
+        `attempted and not dismissed` is the only bad state. Finding no banner
+        is the normal case, not a failure.
+        """
+        return {
+            step for step, s in self.read_consent_states().items()
+            if isinstance(s, dict) and s.get("attempted") and not s.get("dismissed")
+        }
+
+    # ------------------------------------------------------------------
     # Basic info
     # ------------------------------------------------------------------
 

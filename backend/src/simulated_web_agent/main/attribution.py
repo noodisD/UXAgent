@@ -96,6 +96,19 @@ def harness_suspect_steps(store: TraceStore) -> set[int]:
                 suspect.add(i - 1)
             suspect.add(i)
 
+    # (5) A consent notice was on screen and would not go away, so every
+    # interaction from that point may have been intercepted by the overlay.
+    # Nothing downstream could see this before: dismiss_cookie_banners returned
+    # a bare bool and recorded nothing.
+    try:
+        unresolved = store.unresolved_consent_steps()
+    except Exception:
+        unresolved = set()
+    if unresolved:
+        n_steps = len(actions)
+        for start in sorted(unresolved):
+            suspect.update(range(start, n_steps))
+
     for i in range(len(actions)):
         obs = store.read_observation_step_text(i).strip()
         if obs and len(obs) <= _ARTIFACT_OBS_MAX_CHARS:

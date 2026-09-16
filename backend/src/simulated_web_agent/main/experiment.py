@@ -197,45 +197,171 @@ def build_persona_card(persona_info: dict) -> dict:
     }
 
 
-_COOKIE_SELECTORS = [
-    # Generic "accept all" patterns (text-based, case-insensitive)
-    "button:has-text('Accept all')",
-    "button:has-text('Zaakceptuj wszystkie')",
-    "button:has-text('Zaakceptuj')",
-    "button:has-text('Akceptuj')",
-    "button:has-text('Accept cookies')",
-    "button:has-text('Accept')",
-    "button:has-text('Agree')",
-    "button:has-text('OK')",
-    "button:has-text('Zgoda')",
-    "button:has-text('Rozumiem')",
-    "button:has-text('Zezwól na wszystkie')",
-    "button:has-text('Zezwól')",
-    # Common id/class patterns
-    "#onetrust-accept-btn-handler",
+# Consent platforms, by their own stable accept-button ids. Tried first and
+# alone where they match: a CMP that is present is authoritative, so there is no
+# reason to fall through to guesswork on the same page.
+_CMP_SELECTORS = [
+    "#onetrust-accept-btn-handler",                       # OneTrust
+    "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",  # Cookiebot
+    "#CybotCookiebotDialogBodyButtonAccept",              # Cookiebot (older)
+    "button#didomi-notice-agree-button",                  # Didomi
+    ".cky-btn-accept",                                    # CookieYes
+    "#cookiescript_accept",                               # CookieScript
+    "button[mode='primary'][aria-label*='Zgadzam']",      # IAB TCF (PL)
+    "[data-testid='uc-accept-all-button']",               # Usercentrics
     "#accept-all-cookies",
-    "[id*='accept'][id*='cookie']",
-    "[class*='accept-all']",
-    "[class*='cookie-accept']",
     "[data-cookiebanner='accept_button']",
-    "[aria-label*='Accept']",
-    "[aria-label*='Zaakceptuj']",
+]
+
+# Fallback button labels, matched EXACTLY (anchored, case-insensitive).
+#
+# These used to be `button:has-text('OK')` and friends. Playwright's has-text is
+# a case-insensitive *substring* match, so 'OK' also matched "Pokaż",
+# "Zablokuj" and "Sklepy w okolicy", and 'Accept' matched anything containing
+# it. Because this ran before every single step, the harness was clicking
+# unrelated content buttons throughout the session and the agent then perceived
+# a page it had never navigated to — reported, of course, as a site defect.
+_CONSENT_LABELS = [
+    "Zaakceptuj wszystkie", "Zaakceptuj wszystko", "Akceptuj wszystkie",
+    "Zezwól na wszystkie", "Zaakceptuj", "Akceptuj", "Zgadzam się", "Zgoda",
+    "Rozumiem", "Accept all", "Accept all cookies", "Accept cookies",
+    "Allow all", "I agree", "Agree", "Got it",
+]
+
+# Containers a consent notice actually lives in. The label search is scoped to
+# these, never the whole page, so an exact-matching "Zgoda" button elsewhere in
+# the document cannot be mistaken for consent.
+_CONSENT_CONTAINERS = [
+    "[id*='onetrust']", "[id*='cookie' i]", "[class*='cookie' i]",
+    "[id*='consent' i]", "[class*='consent' i]", "[id*='gdpr' i]",
+    "[class*='gdpr' i]", "[id*='rodo' i]", "[aria-label*='cookie' i]",
+    "dialog[open]", "[role='dialog']", "[role='alertdialog']",
 ]
 
 
-async def dismiss_cookie_banners(page) -> bool:
-    """Try each known cookie-accept selector; click the first one found. Returns True if clicked."""
-    for sel in _COOKIE_SELECTORS:
+# A notice counts as present only if an *acceptance control* is actually on
+# screen — not merely that some element mentions cookies.
+#
+# Matching a container alone (`[id*='cookie']`) was wrong in both directions:
+# on pepco.pl a footer cookie-policy link made it report a banner that was not
+# there, which recorded a false "consent stuck" and would have suppressed every
+# finding from that step onward. One JS pass is also far cheaper than ~190
+# locator round-trips, which matters because this runs before every step.
+_CONSENT_PRESENT_JS = """
+(labels) => {
+  const CMP = [
+    '#onetrust-accept-btn-handler',
+    '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+    '#CybotCookiebotDialogBodyButtonAccept',
+    'button#didomi-notice-agree-button',
+    '.cky-btn-accept', '#cookiescript_accept',
+    "[data-testid='uc-accept-all-button']",
+    '#accept-all-cookies', "[data-cookiebanner='accept_button']",
+  ];
+  const visible = el => !!(el && el.offsetParent);
+  for (const s of CMP) {
+    try { if (visible(document.querySelector(s))) return true; } catch (_) {}
+  }
+  const CONSENTISH = /cookie|consent|gdpr|rodo|onetrust|didomi|usercentrics|cookiebot/i;
+  const norm = t => (t || '').trim().toLowerCase().replace(/\\s+/g, ' ');
+  const wanted = new Set(labels.map(norm));
+  for (const el of document.querySelectorAll('button,[role=button],a[role=button]')) {
+    if (!visible(el) || !wanted.has(norm(el.innerText))) continue;
+    let p = el, depth = 0;
+    while (p && depth < 8) {
+      const sig = (p.id || '') + ' ' +
+                  (typeof p.className === 'string' ? p.className : '');
+      const role = p.getAttribute ? p.getAttribute('role') : null;
+      if (CONSENTISH.test(sig) || role === 'dialog' || role === 'alertdialog') return true;
+      p = p.parentElement; depth++;
+    }
+  }
+  return false;
+}
+"""
+
+
+async def consent_present(page) -> bool:
+    """Is an acceptance control for a consent notice currently on screen?
+
+    Gate for re-running dismissal mid-session. Without it the harness clicked
+    its way around every page on every step; with it, nothing happens unless a
+    notice actually reappeared — which does happen after some navigations.
+    """
+    try:
+        return bool(await page.evaluate(_CONSENT_PRESENT_JS, list(_CONSENT_LABELS)))
+    except Exception:
+        return False
+
+
+async def dismiss_cookie_banners(page) -> dict:
+    """Accept a consent notice if one is present.
+
+    Returns a record of what happened — {attempted, dismissed, selector} —
+    rather than a bare bool. The outcome has to be written to the trace: when
+    consent is *not* resolved every later interaction may be blocked by the
+    overlay, and attribution.py needs to know that to keep the resulting
+    "defects" out of the report. Previously this returned False and told
+    nobody.
+    """
+    result = {"attempted": False, "dismissed": False, "selector": None}
+
+    # CMPs are injected by a late script, so give the common ones a moment to
+    # appear before concluding there is no banner. Cheap when there is none:
+    # this waits only for the first match, not for each selector in turn.
+    try:
+        await page.wait_for_selector(", ".join(_CMP_SELECTORS), timeout=3000, state="attached")
+    except Exception:
+        pass
+
+    # 1. A known CMP is authoritative.
+    #
+    # Presence in the DOM is enough to commit to clicking: Playwright's click
+    # already auto-waits for actionability. The previous `and is_visible()`
+    # gate was an *instant* check that raced the CMP's own fade-in — on
+    # hyundai.pl it returned False for a perfectly dismissable OneTrust banner,
+    # so the overlay stayed up and intercepted every later click in the
+    # session. That is the origin of the "cookie defect" in the review.
+    for sel in _CMP_SELECTORS:
         try:
-            locator = page.locator(sel).first
-            if await locator.count() > 0 and await locator.is_visible():
-                await locator.click(timeout=2000)
-                log.info("Cookie banner dismissed via: %s", sel)
-                await asyncio.sleep(0.5)
-                return True
+            loc = page.locator(sel).first
+            if await loc.count() == 0:
+                continue
+            result["attempted"] = True
+            await loc.click(timeout=5000)
+            result["dismissed"] = True
+            result["selector"] = sel
+            log.info("Consent dismissed via CMP selector: %s", sel)
+            await asyncio.sleep(0.5)
+            return result
         except Exception:
             continue
-    return False
+
+    # 2. Otherwise an exact-labelled button, but only inside a consent container.
+    for container in _CONSENT_CONTAINERS:
+        for label in _CONSENT_LABELS:
+            sel = f"{container} >> button:text-is('{label}')"
+            try:
+                loc = page.locator(sel).first
+                if await loc.count() > 0 and await loc.is_visible():
+                    result["attempted"] = True
+                    await loc.click(timeout=2000)
+                    result["dismissed"] = True
+                    result["selector"] = sel
+                    log.info("Consent dismissed via: %s", sel)
+                    await asyncio.sleep(0.5)
+                    return result
+            except Exception:
+                continue
+
+    # Nothing found is the normal case (no banner, or already accepted) and is
+    # not a failure. attempted=True with dismissed=False is the bad one: a
+    # notice was there and would not go away.
+    if await consent_present(page):
+        result["attempted"] = True
+        log.warning("Consent notice present but not dismissed — later "
+                    "interactions may be blocked by the overlay")
+    return result
 
 
 _FONT_SIZE_JS = """
@@ -291,11 +417,20 @@ async def _run_for_persona_and_intent(
     steps_taken = 0
     # runs_dir is runs/<run_id> — used for cooperative cancellation checks.
     run_id = runs_dir.name
+    # step -> {attempted, dismissed, selector}. Persisted at the end of the
+    # session so attribution.py can tell which steps ran under an unresolved
+    # consent overlay, and keep the resulting "defects" out of the report.
+    consent_states: dict[int, dict] = {}
 
     async def before_action_hook():
         if cfg.environment.recording.enabled:
             return
-        await dismiss_cookie_banners(env.page)
+        # Only act when a notice is actually on screen. This used to run
+        # unconditionally on every step, so on banner-free pages the label
+        # matchers clicked whatever unrelated button they happened to hit.
+        if await consent_present(env.page):
+            state = await dismiss_cookie_banners(env.page)
+            consent_states[steps_taken] = state
         await env.page.screenshot(path=store.screenshot_path(steps_taken, full_page=True), full_page=True)
         await env.page.screenshot(path=store.screenshot_path(steps_taken))
         scroll_data = await env.page.evaluate(
@@ -341,7 +476,10 @@ async def _run_for_persona_and_intent(
         print("setting up env with headless = " + str(use_headless))
         await env.setup(task_to_use, headless=use_headless)
 
-        await dismiss_cookie_banners(env.page)
+        # Landing consent, before the first observation. Recorded under step 0:
+        # if it could not be dismissed, everything the session goes on to do
+        # happens under an overlay.
+        consent_states[0] = await dismiss_cookie_banners(env.page)
 
         obs = await env.observation()
 
@@ -550,6 +688,7 @@ async def _run_for_persona_and_intent(
             ),
         })
 
+        store.write_consent_states(consent_states)
         store.write_memory_trace_text(policy.get_formatted_memories())
         log.info(f"Saved memory trace to {store.trace_dir}")
 

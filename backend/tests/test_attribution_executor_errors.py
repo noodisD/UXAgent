@@ -136,3 +136,54 @@ def test_flags_are_rewritten_not_latched(tmp_path):
                  "harness_suspect": True, "requires_human_check": True}]
     attribution.flag_harness_suspects(store, findings)
     assert findings[0]["harness_suspect"] is False
+
+
+# --- consent overlays ------------------------------------------------------
+#
+# The review's headline complaint. A notice that will not dismiss intercepts
+# every later click, and the resulting "the button does nothing" findings are
+# ours, not the site's.
+
+def test_unresolved_consent_condemns_every_later_step(tmp_path):
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": f"t{i}"} for i in range(4)],
+        observations=[_ok()] * 5,
+    )
+    store.write_consent_states({0: {"attempted": True, "dismissed": False, "selector": None}})
+    assert attribution.harness_suspect_steps(store) == {0, 1, 2, 3}
+
+
+def test_consent_dismissed_cleanly_condemns_nothing(tmp_path):
+    """The overwhelmingly common case: a banner appeared and was accepted."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "a"}, {"action": "click", "target": "b"}],
+        observations=[_ok(), _ok(), _ok()],
+    )
+    store.write_consent_states(
+        {0: {"attempted": True, "dismissed": True, "selector": "#onetrust-accept-btn-handler"}}
+    )
+    assert attribution.harness_suspect_steps(store) == set()
+
+
+def test_no_banner_at_all_condemns_nothing(tmp_path):
+    """attempted=False is not a failure — most pages simply have no notice."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "a"}],
+        observations=[_ok(), _ok()],
+    )
+    store.write_consent_states({0: {"attempted": False, "dismissed": False, "selector": None}})
+    assert attribution.harness_suspect_steps(store) == set()
+
+
+def test_missing_consent_file_is_not_an_error(tmp_path):
+    """Runs recorded before consent tracking existed must still audit."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "a"}],
+        observations=[_ok(), _ok()],
+    )
+    assert store.read_consent_states() == {}
+    assert attribution.harness_suspect_steps(store) == set()
