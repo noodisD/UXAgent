@@ -35,6 +35,16 @@ def resolve_url(url: str, base_url: str) -> str:
     return urljoin(base_url or "", candidate)
 
 
+# Prefix for the refusal written into observation["error"] when the agent tries
+# to leave the site under test.
+#
+# Deliberately NOT "Error executing action:" — attribution.py treats that prefix
+# as proof of a harness interaction failure and suppresses every finding
+# anchored on the step. A scope refusal is a policy decision that worked exactly
+# as intended, so it must not discredit that step's findings.
+SCOPE_REFUSAL_PREFIX = "Navigation blocked:"
+
+
 async def select_places_suggestion(page, timeout: int = 2500) -> bool:
     """Select the first Google Places Autocomplete suggestion, if the dropdown
     is visible. Returns True if a suggestion was selected.
@@ -663,6 +673,13 @@ class WebAgentEnv:
     ):
         """Initialize the browser environment with configuration"""
         self.task_config = task_config
+        # Registrable domain of the site under test. Everything off it is
+        # refused: a session that wanders onto a competitor spends the step
+        # budget there and produces findings about a site nobody asked about
+        # (a lidl.pl run ended up auditing reserved.pl).
+        from ..main.site_scope import registrable_domain
+
+        self._allowed_domain = registrable_domain((task_config or {}).get("start_url", ""))
         self.context_manager = await self._ensure_playwright()
 
         # Get launch options from config and convert to dict
@@ -836,6 +853,66 @@ class WebAgentEnv:
             self.logger.warning("No start_url specified in task config")
         return await self.observation()
 
+    # ===================================================================
+    # SITE SCOPE
+    # ===================================================================
+
+    def _off_site_refusal(self, url) -> str | None:
+        """Refusal message if `url` would leave the site under test, else None.
+
+        Checked before navigating so the competitor's page is never loaded at
+        all — no wasted page load, no step spent, nothing for the perceiver to
+        describe.
+        """
+        if not getattr(self, "_allowed_domain", "") or not url:
+            return None
+        from ..main.site_scope import registrable_domain
+
+        target = resolve_url(str(url), self.page.url if self.page else "")
+        found = registrable_domain(target)
+        if not found or found == self._allowed_domain:
+            return None
+        return (
+            f"{SCOPE_REFUSAL_PREFIX} {found} is outside the site under test "
+            f"({self._allowed_domain}). The navigation was not performed. "
+            f"Continue the task on {self._allowed_domain}."
+        )
+
+    async def _return_to_site_if_left(self) -> str | None:
+        """Undo a navigation that left the site, and say so. None if on-site.
+
+        Covers what the pre-check cannot see: a click, a form submit, or a
+        redirect chain that ends on another domain.
+        """
+        if not getattr(self, "_allowed_domain", "") or not self.page:
+            return None
+        from ..main.site_scope import registrable_domain
+
+        current = self.page.url or ""
+        if not current.startswith("http"):
+            return None  # about:blank and friends are not a scope breach
+        found = registrable_domain(current)
+        if not found or found == self._allowed_domain:
+            return None
+
+        # Back first (preserves history); fall back to the start URL if that
+        # still leaves us off-site — e.g. the hop opened in a fresh tab, where
+        # there is nothing to go back to.
+        with contextlib.suppress(Exception):
+            await self.page.go_back(wait_until="domcontentloaded")
+        if registrable_domain(self.page.url or "") != self._allowed_domain:
+            start = (self.task_config or {}).get("start_url")
+            if start:
+                with contextlib.suppress(Exception):
+                    await self.page.goto(start, wait_until="domcontentloaded")
+
+        self.logger.info("[scope] left %s for %s — returned", self._allowed_domain, found)
+        return (
+            f"{SCOPE_REFUSAL_PREFIX} that led to {found}, outside the site under "
+            f"test ({self._allowed_domain}). You have been returned to the site. "
+            f"Do not follow links that leave {self._allowed_domain}."
+        )
+
     async def step(
         self,
         action: str,
@@ -901,6 +978,11 @@ class WebAgentEnv:
                 await self.key_press(key, target)
 
             elif action_name == "goto_url":
+                refusal = self._off_site_refusal(action_data["url"])
+                if refusal:
+                    observation = await self.observation()
+                    observation["error"] = refusal
+                    return observation
                 await self.goto_url(action_data["url"])
 
             elif action_name == "back":
@@ -914,6 +996,11 @@ class WebAgentEnv:
 
             elif action_name == "new_tab":
                 url = action_data.get("url")
+                refusal = self._off_site_refusal(url) if url else None
+                if refusal:
+                    observation = await self.observation()
+                    observation["error"] = refusal
+                    return observation
                 await self.new_tab(url)
 
             elif action_name == "switch_tab":
@@ -936,9 +1023,13 @@ class WebAgentEnv:
             if self.config.browser.sleep_after_action > 0:
                 await asyncio.sleep(self.config.browser.sleep_after_action)
 
+            # A click or redirect can leave the site without any explicit URL
+            # for the pre-check above to inspect, so enforce again afterwards.
+            scope_error = await self._return_to_site_if_left()
+
             # Return the next observation after executing the action
             observation = await self.observation()
-            observation["error"] = None
+            observation["error"] = scope_error
             return observation
 
         except json.JSONDecodeError as e:
