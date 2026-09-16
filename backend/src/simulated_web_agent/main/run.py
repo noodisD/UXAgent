@@ -324,6 +324,33 @@ async def run_async(
             report_error = e
         ping({"phase": "report", "status": "progress", "current": 1, "total": 1})
 
+    # The report is the deliverable, so verify the artifact exists rather than
+    # trusting that nothing raised. Two silent paths reach here with no report
+    # and no exception: every persona failed (so `stores` is empty and the block
+    # above was skipped entirely), or generate_aggregated_report returned {}
+    # because no per-agent report survived — analysis_runner deliberately
+    # swallows per-persona failures, so that is reachable without anything
+    # raising. Both used to finalise "done", which the history then rendered as
+    # a completed audit scoring 0.0: indistinguishable from "we audited the site
+    # and found nothing".
+    if report_error is None and not (run_dir / "aggregated_report.json").is_file():
+        _finalize("error", failure={
+            "phase": "report",
+            "failedAt": "",
+            "error": (
+                f"No report was produced: {len(stores)} of {total_personas} "
+                f"personas finished with usable analysis."
+            ),
+            "suggestion": (
+                "The sessions themselves may still be on disk — inspect the run "
+                "folder before repeating the audit. The usual causes are every "
+                "persona failing to start (check the site is reachable and is "
+                "not blocking automation) and LLM calls failing run-wide (check "
+                "provider credentials and quota)."
+            ),
+        })
+        return run_id
+
     if report_error is not None:
         # The report is the deliverable. Finalising "done" after it failed
         # showed the run as complete with score 0.0 in the history, which reads

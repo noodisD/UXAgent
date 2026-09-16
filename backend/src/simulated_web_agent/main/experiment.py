@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import os
 import pathlib
+import time
 import traceback
 import uuid
 from collections import Counter
@@ -364,6 +366,24 @@ async def dismiss_cookie_banners(page) -> dict:
     return result
 
 
+_DEFAULT_PERSONA_BUDGET_MIN = 45
+
+
+def persona_budget_seconds() -> int:
+    """Wall-clock ceiling for one persona's browsing session, in seconds.
+
+    Read per call rather than cached at import so a deployment can change it
+    without a rebuild, and so tests can shorten it. Values <= 0 disable the
+    budget entirely, which is the escape hatch for a deliberately long run.
+    """
+    raw = os.getenv("UXAGENT_PERSONA_BUDGET_MIN", "").strip()
+    try:
+        minutes = int(raw) if raw else _DEFAULT_PERSONA_BUDGET_MIN
+    except ValueError:
+        minutes = _DEFAULT_PERSONA_BUDGET_MIN
+    return minutes * 60 if minutes > 0 else 10**9
+
+
 _FONT_SIZE_JS = """
 () => {
   const results = [];
@@ -506,7 +526,22 @@ async def _run_for_persona_and_intent(
         fail_counts: Counter = Counter()
         abandon_at = abandon_threshold(store.read_persona_card())
         abandoned = False
+        deadline = time.monotonic() + persona_budget_seconds()
         while steps_taken < max_steps:
+            # Wall-clock budget. max_steps bounds how many steps a session
+            # takes but not how long they take: on a heavy page a single
+            # perceive can run for minutes, and the first external review had a
+            # run that produced nothing at all after 70 minutes. Checked
+            # between steps so the session ends cleanly — everything written so
+            # far stays usable and still yields a partial report, which beats
+            # returning nothing.
+            if time.monotonic() > deadline:
+                log.warning(
+                    "[%s] persona out of time after %d steps (budget %d min) — "
+                    "ending the session, keeping the partial trace",
+                    run_uid, steps_taken, persona_budget_seconds() // 60,
+                )
+                break
             if cancellation.is_cancelled(run_id):
                 log.info("[%s] run cancelled — stopping session at step %d", run_id, steps_taken)
                 break
