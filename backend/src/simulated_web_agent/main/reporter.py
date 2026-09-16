@@ -46,6 +46,26 @@ HEURISTIC_NAMES = {
 }
 
 
+def _gate_reason(finding: dict) -> str:
+    """Why this finding was demoted, in Polish — "" if it stands confirmed.
+
+    severity.excluded_from_report answers *whether*; a reader of the per-persona
+    file also needs *why*, otherwise a demoted finding is indistinguishable from
+    one nobody got round to checking.
+    """
+    if not isinstance(finding, dict):
+        return ""
+    if finding.get("harness_suspect"):
+        return "prawdopodobna awaria narzędzia, nie strony"
+    if finding.get("off_site"):
+        return "dotyczy innej domeny niż badana"
+    if finding.get("claim_verdict") == "unsupported":
+        return "zapis sesji nie potwierdza tego stwierdzenia"
+    if finding.get("requires_human_check"):
+        return "wymaga weryfikacji przez człowieka"
+    return ""
+
+
 def _severity_sort_key(finding: dict) -> int:
     """Ascending sort key (worst first) over severity.severity_rank."""
     return -severity_rank(finding)
@@ -64,6 +84,7 @@ def _build_per_agent_json(store: TraceStore) -> dict:
     survey = store.read_survey_result() or {}
 
     sorted_findings = sorted(heuristic_findings, key=_severity_sort_key)
+
 
     # Headline severity counts exclude findings the gates demoted — harness
     # failures, off-site pages, and claims the verifier could not support
@@ -171,8 +192,20 @@ def _render_md(report: dict) -> str:
     p(summary)
     if findings:
         for f in findings:
+            # A demoted finding must not read like a confirmed one. The counts
+            # above already exclude these, but the list rendered them
+            # identically — so a harness failure still appeared as
+            # "[KRYTYCZNY] H3: …" to anyone reading the per-persona file, which
+            # is precisely the false defect the gates exist to stop shipping.
+            # Marked rather than dropped: they are the audit trail explaining
+            # why the headline count is lower than the raw tally.
+            reason = _gate_reason(f)
             severity_badge = f.get("severity", "drobny").upper()
-            h(3, f"[{severity_badge}] H{f.get('heuristic_id', '?')}: {f.get('heuristic_name', '')}")
+            prefix = "⚠ DO WERYFIKACJI — " if reason else ""
+            h(3, f"{prefix}[{severity_badge}] H{f.get('heuristic_id', '?')}: "
+                 f"{f.get('heuristic_name', '')}")
+            if reason:
+                p(f"*Nie wliczono do wyników — {reason}.*")
             p(f"**URL:** {f.get('url', '—')}  |  **Krok:** {f.get('step', '—')}")
             p(f"**Dowód:** {f.get('evidence', '')}")
             p(f"**Rekomendacja:** {f.get('recommendation', '')}")

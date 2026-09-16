@@ -66,6 +66,19 @@ usability problems is a false positive (real site teams reject them):
   checkout), not redundant or broken buttons. Only report a defect if a
   SPECIFIC chosen path, once clicked, fails to advance.
 
+- A cookie / consent / privacy notice. Every EU site shows one; it is a legal
+  requirement, not a usability defect, and the reviewer of this tool had never
+  once hit it as a problem. Only report it if the observation shows the notice
+  itself is genuinely unusable to a person — e.g. it cannot be dismissed at all,
+  or it permanently covers the content after a choice was made. "A banner
+  appeared" is never a finding.
+- Anything describing the AUTOMATION failing rather than the site: a click that
+  "did not register", an element that "could not be found", a step that "timed
+  out", a repeated attempt that "had no effect". These are this tool's own
+  interaction failures. A real user with a mouse would not have hit them, so
+  they say nothing about the site and must never become a finding — whatever the
+  session reflections say about them.
+
 Still fully reportable (do NOT suppress): an action the site ALLOWS and then
 fails on (e.g. add-to-cart succeeds then errors), genuinely broken links, real
 data loss, content that is objectively unreadable.

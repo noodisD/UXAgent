@@ -53,6 +53,15 @@ WAŻNE: jeśli pomiar PageSpeed jest niedostępny/błędny (np. „pomiar niedos
 usterka POMIARU, a nie wada strony — NIE obniżaj z tego powodu overall_ux_score ani nie opisuj
 tego jako problemu strony; możesz jedynie zalecić ponowny pomiar.
 
+WAŻNE (zasada ogólna — dotyczy CAŁEGO raportu, nie tylko PageSpeed): odróżniaj wadę
+STRONY od usterki POMIARU. Usterką pomiaru jest wszystko, co opisuje niepowodzenie
+narzędzia, a nie doświadczenie użytkownika: nieudane kliknięcie agenta, nieznaleziony
+element, przekroczony limit czasu, powtórzona próba bez efektu, przerwana sesja,
+a także samo pojawienie się baneru zgody na cookies (wymóg prawny, nie usterka).
+Takich rzeczy NIE opisuj jako problemów strony, NIE umieszczaj wśród critical/serious/
+minor_issues i NIE obniżaj z ich powodu overall_ux_score. Jeśli ograniczyły zakres
+badania, napisz o tym wyłącznie w methodology_note.
+
 TOP FINDINGS BY SEVERITY:
 Critical: {critical_count}
 Serious: {serious_count}

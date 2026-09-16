@@ -154,6 +154,57 @@ CURRENT_RUN_ID: str | None = None
 _runs_lock = threading.Lock()
 
 
+def reap_orphaned_runs(runs_root: Path | None = None) -> list[str]:
+    """Mark runs left "running" by a previous process as interrupted.
+
+    The pipeline executes in a daemon thread and the registry above is in
+    memory, so a restart — a redeploy, an OOM kill, a crash — takes the worker
+    with it and leaves the manifest saying "running" for ever. The dashboard
+    then shows a run that can never finish and offers no way to clear it: the
+    cancel endpoint only knows about runs in this process's registry.
+
+    Called once at import, before any new run can start, so anything still
+    marked running at that moment provably belongs to a process that is gone.
+    Returns the run ids reaped.
+    """
+    root = Path("runs") if runs_root is None else Path(runs_root)
+    if not root.is_dir():
+        return []
+    reaped: list[str] = []
+    for run_dir in root.iterdir():
+        if not run_dir.is_dir():
+            continue
+        manifest = read_manifest(run_dir)
+        if not manifest or manifest.get("status") != "running":
+            continue
+        try:
+            mark_run_status(run_dir.name, "error", failure={
+                "phase": manifest.get("phase") or "",
+                "failedAt": "",
+                "error": (
+                    "The server restarted while this audit was running, so it "
+                    "was interrupted. Sessions completed before the restart are "
+                    "still on disk."
+                ),
+                "suggestion": (
+                    "Start the audit again. If this keeps happening mid-run, "
+                    "the container is probably being killed for memory — lower "
+                    "the number of concurrent personas or raise the memory "
+                    "limit."
+                ),
+            })
+            reaped.append(run_dir.name)
+        except Exception:
+            log.exception("[reaper] could not finalise orphaned run %s", run_dir.name)
+    if reaped:
+        log.warning("[reaper] marked %d interrupted run(s) from a previous "
+                    "process: %s", len(reaped), ", ".join(reaped))
+    return reaped
+
+
+reap_orphaned_runs()
+
+
 def _empty_progress() -> dict:
     return {
         "phase": None,
