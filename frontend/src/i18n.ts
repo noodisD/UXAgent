@@ -134,6 +134,7 @@ const messages: Record<Locale, Record<string, string>> = {
     // wizard step 2
     'w2.title': 'Ankieta po sesji',
     'w2.sub': 'Każdy agent odpowiada na te pytania po wykonaniu zadania.',
+    'w2.count': 'pytania: {n}',
     'w2.addOpen': '+ Otwarte',
     'w2.addMC': '+ Wielokrotny wybór',
     'w2.insertSUS': '⚡ Wstaw SUS (10)',
@@ -482,6 +483,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'w1.example.ph': 'Persona: …\nAge: …\nBackground: …',
     'w2.title': 'Post-session survey',
     'w2.sub': 'Each agent answers these after completing the task.',
+    'w2.count': '{n} questions',
     'w2.addOpen': '+ Open-ended',
     'w2.addMC': '+ Multiple choice',
     'w2.insertSUS': '⚡ Insert SUS (10)',

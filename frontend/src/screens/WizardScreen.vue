@@ -177,6 +177,7 @@
             <div class="card-sub nomb">{{ t('w2.sub') }}</div>
           </div>
           <div class="q-actions">
+            <span class="q-count mono">{{ t('w2.count', { n: questions.length }) }}</span>
             <button class="btn small" @click="addOpen">{{ t('w2.addOpen') }}</button>
             <button class="btn small" @click="addMC">{{ t('w2.addMC') }}</button>
             <button class="btn small sus" @click="insertSUS">{{ t('w2.insertSUS') }}</button>
@@ -196,7 +197,8 @@
         <div v-if="questions.length === 0" class="empty">{{ t('w2.empty') }}</div>
 
         <div class="col gap12">
-          <div v-for="(q, i) in questions" :key="i" class="q-card">
+          <div v-for="(q, i) in questions" :key="i" class="q-card"
+            :ref="el => setQuestionRef(el, i)" :class="{ 'just-added': addedFrom !== null && i >= addedFrom }">
             <div class="q-head">
               <span class="q-num mono">{{ String(i + 1).padStart(2, '0') }}</span>
               <span class="badge mono" :class="q.type === 'multiple_choice' ? 'mc' : 'tx'">
@@ -304,7 +306,7 @@ import { useRun } from '../composables/useRun'
 import { resetWizardForm } from '../composables/useForm'
 import { useI18n } from '../i18n'
 import { PRESET_KEYS, PRESET_SITE_CONTEXT, presetQuestions, type PresetKey } from '../surveyPresets'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 
 const form = inject<WizardForm>(FORM_KEY)!
 const { state: app, nextStep, prevStep, goStep, goScreen } = useApp()
@@ -505,8 +507,39 @@ const questions = computed<Q[]>({
 })
 
 function writeQuestions(list: Q[]) { questions.value = list }
-function addOpen() { writeQuestions([...questions.value, { id: 'q' + (questions.value.length + 1), type: 'short_text', prompt: 'New open-ended question' }]) }
-function addMC() { writeQuestions([...questions.value, { id: 'q' + (questions.value.length + 1), type: 'multiple_choice', prompt: 'New multiple-choice question', options: ['Option 1', 'Option 2', 'Option 3'] }]) }
+
+// Adding a question used to change nothing visible: the new card is appended
+// below the fold, the page does not move, and nothing confirms the click. The
+// first external reviewer reported exactly that — she only discovered the
+// questions had been added by scrolling down. Scroll the first new card into
+// view and flash it, so the click has a visible consequence.
+const questionEls = new Map<number, HTMLElement>()
+const addedFrom = ref<number | null>(null)
+let flashTimer: number | undefined
+
+function setQuestionRef(el: unknown, i: number) {
+  if (el instanceof HTMLElement) questionEls.set(i, el)
+  else questionEls.delete(i)
+}
+
+async function revealAddedFrom(firstNew: number) {
+  addedFrom.value = firstNew
+  await nextTick()
+  questionEls.get(firstNew)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  clearTimeout(flashTimer)
+  flashTimer = window.setTimeout(() => { addedFrom.value = null }, 1600)
+}
+
+function addOpen() {
+  const at = questions.value.length
+  writeQuestions([...questions.value, { id: 'q' + (at + 1), type: 'short_text', prompt: 'New open-ended question' }])
+  revealAddedFrom(at)
+}
+function addMC() {
+  const at = questions.value.length
+  writeQuestions([...questions.value, { id: 'q' + (at + 1), type: 'multiple_choice', prompt: 'New multiple-choice question', options: ['Option 1', 'Option 2', 'Option 3'] }])
+  revealAddedFrom(at)
+}
 function removeQuestion(i: number) { const l = questions.value.slice(); l.splice(i, 1); writeQuestions(l) }
 function onReset() {
   resetWizardForm(form)
@@ -551,8 +584,10 @@ function insertSUS() {
     'I needed to learn a lot before I could get going.',
   ]
   const base = questions.value.slice()
+  const at = base.length
   sus.forEach((p, i) => base.push({ id: 'sus' + (i + 1), type: 'multiple_choice', prompt: p, options: ['1', '2', '3', '4', '5'] }))
   writeQuestions(base)
+  revealAddedFrom(at)
 }
 
 async function confirmRun() {
@@ -641,7 +676,19 @@ async function confirmRun() {
 .add-dim { margin-top: 14px; width: 100%; padding: 11px; border: 1.5px dashed #cfd4db; background: #fafbfc; border-radius: 9px; color: var(--muted); font: 600 13px var(--sans); cursor: pointer; }
 .add-dim:hover { border-color: var(--ac); color: var(--ac); }
 
-.q-actions { display: flex; gap: 8px; flex: none; }
+.q-actions { display: flex; gap: 8px; flex: none; align-items: center; }
+.q-count { font: 600 11.5px var(--mono); color: var(--text-muted); margin-right: 4px; white-space: nowrap; }
+
+/* A newly added question flashes so the click has a visible consequence —
+   without it the card lands below the fold and nothing appears to happen. */
+@keyframes q-flash {
+  0%   { border-color: var(--ac); box-shadow: 0 0 0 3px var(--ac-shadow); }
+  100% { border-color: var(--border-soft); box-shadow: 0 0 0 0 transparent; }
+}
+.q-card.just-added { animation: q-flash 1.6s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .q-card.just-added { animation: none; border-color: var(--ac); }
+}
 .btn.small { padding: 9px 13px; font-size: 12.5px; }
 .btn.small.sus { border: none; background: #eef3fc; color: var(--ac); }
 .preset-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 14px; background: #f5f7fb; border: 1px solid #e7ebf3; border-radius: 9px; }
