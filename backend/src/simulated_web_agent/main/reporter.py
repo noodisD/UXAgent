@@ -782,9 +782,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     tablet_overflow = 0
     # …and the per-device detail the scan already measures and nothing read:
     # tap targets under the WCAG 2.5.8 minimum, text below AA contrast, fonts
-    # under 12px, elements wider than the viewport. This is the only part of
-    # the pipeline that can honestly answer "how does it do on mobile?", since
-    # the agent session itself always runs at one desktop-sized viewport.
+    # under 12px, elements wider than the viewport. The scan visits every width
+    # regardless of the run's device choice, so it stays comparable between
+    # runs; which width the *walkthrough* used is session_devices below.
     device_detail: dict[str, dict] = {}
     for r in reports:
         vp = r.get("viewport_findings") or []
@@ -814,6 +814,22 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             for we in (v.get("wide_elements") or [])[:2]:
                 if len(d["wide_element_examples"]) < 5:
                     d["wide_element_examples"].append(we)
+
+    # Which viewport the journeys themselves ran at. The heuristic findings
+    # come from these sessions, not from the scan above, and the report used to
+    # state flatly that the walkthrough was desktop — true until the run could
+    # choose. Reading it back per persona keeps the caveat honest for mixed
+    # runs, and leaves it empty rather than guessing for runs recorded before
+    # the field existed.
+    session_devices: dict[str, int] = {}
+    for _s in (stores or []):
+        try:
+            card = _s.read_persona_card() or {}
+        except Exception:
+            continue
+        dev = str(card.get("device") or "").strip().lower()
+        if dev:
+            session_devices[dev] = session_devices.get(dev, 0) + 1
 
     # Survey — average numeric answers; collect open-text answers.
     # Sessions that ended after only a few steps carry no real experience:
@@ -903,6 +919,8 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # the WCAG minimum, contrast failures, tiny text, overflowing
             # elements. Nothing read these before.
             "devices": [device_detail[k] for k in sorted(device_detail)],
+            # What the walkthrough itself ran on, as {device: session count}.
+            "session_devices": session_devices,
         },
         "survey": {
             "avg_scores": {k: _avg(v) for k, v in survey_scores.items()},

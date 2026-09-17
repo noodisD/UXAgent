@@ -308,9 +308,13 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             cells[2].text = str(d.get("pages_with_overflow", 0))
             cells[3].text = str(d.get("tap_targets_below_min", 0))
             cells[4].text = str(d.get("contrast_failures", 0))
+        # Same wording as the HTML: the Word file is the version a client
+        # edits and forwards, so it must not carry a claim the HTML retracted.
+        from .reporter_html import _session_device_phrase
         _add_caption(doc,
                      "Pomiar techniczny dla każdej szerokości ekranu osobno. "
-                     "Przejście przez serwis odbyło się w oknie desktopowym.")
+                     "Przejście przez serwis odbyło się "
+                     f"{_session_device_phrase(stats)}.")
 
     # ── Methodology ──────────────────────────────────────────────────────
     if narr.get("methodology_note"):

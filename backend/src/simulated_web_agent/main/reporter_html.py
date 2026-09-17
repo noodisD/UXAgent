@@ -1096,12 +1096,34 @@ def _render_accessibility_detail(stats: dict) -> str:
     return _section("Bariery dostępności", rows)
 
 
+_DEVICE_LABELS_PL = {"desktop": "na desktopie", "mobile": "na telefonie"}
+
+
+def _session_device_phrase(stats: dict) -> str:
+    """How to describe the width the walkthrough actually used.
+
+    The section used to assert "w oknie desktopowym" unconditionally. That was
+    true while every run was desktop; once the run can pick, an unchecked
+    sentence in a client-facing report becomes a false statement about method.
+    Runs recorded before the field existed say nothing rather than guess.
+    """
+    counts = (stats.get("viewport") or {}).get("session_devices") or {}
+    known = {k: v for k, v in counts.items() if k in _DEVICE_LABELS_PL and v}
+    if not known:
+        return "w oknie przeglądarki o stałej szerokości"
+    if len(known) == 1:
+        return _DEVICE_LABELS_PL[next(iter(known))]
+    parts = [f"{_DEVICE_LABELS_PL[k]} ({v})" for k, v in sorted(known.items())]
+    return "częściowo " + ", częściowo ".join(parts)
+
+
 def _render_device_detail(stats: dict) -> str:
     """Per-device measurements the scan already takes and nothing read.
 
     Answers "how does it behave on mobile?" with numbers rather than prose.
     The caveat matters and is stated: this is a technical scan at each
-    viewport, while the walkthrough itself ran at one desktop-sized window.
+    viewport, not a journey — the journeys ran at whatever width the run
+    selected, which _session_device_phrase reads back from the sessions.
     """
     devices = (stats.get("viewport") or {}).get("devices") or []
     if not devices:
@@ -1125,9 +1147,9 @@ def _render_device_detail(stats: dict) -> str:
         </div>"""
     caveat = (
         "Pomiar techniczny wykonany osobno dla każdej szerokości ekranu. "
-        "Przejście przez serwis (i wynikające z niego problemy heurystyczne) "
-        "odbyło się w oknie desktopowym — te wyniki opisują układ strony, nie "
-        "przebieg ścieżki na telefonie."
+        "Te wyniki opisują układ strony, a nie przebieg ścieżki użytkownika — "
+        "problemy heurystyczne pochodzą z sesji agentów, które odbyły się "
+        f"{_session_device_phrase(stats)}."
     )
     return _section("Zachowanie na urządzeniach",
                      f'<div class="dev-grid">{cards}</div>'

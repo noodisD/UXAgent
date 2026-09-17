@@ -10,7 +10,7 @@ Analysis passes
 Async (I/O-bound, run concurrently):
   • survey                — LLM-powered questionnaire
   • audit                 — heuristic evaluation
-  • viewport_scan         — Playwright mobile/tablet check
+  • viewport_scan         — Playwright mobile/tablet/desktop check
   • link_checker          — Playwright broken-link check
   • cognitive_walkthrough — reads the already-written observation/action trace
 

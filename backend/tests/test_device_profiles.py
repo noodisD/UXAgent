@@ -92,3 +92,75 @@ def test_two_profiles_do_not_leak_into_each_other():
 def test_an_unknown_profile_is_treated_as_desktop():
     cfg = apply_device_profile(load_cfg(), "smartwatch")
     assert cfg.environment.browser.context_options.viewport.width >= 1024
+
+
+# --- the scan must cover the width the journey used ------------------------
+
+def test_the_scan_measures_the_desktop_width_too():
+    """The heuristic findings come from the session viewport. Measuring only
+    mobile and tablet meant the one width the findings came from was the one
+    width never measured, and the two sections silently described different
+    screens."""
+    from simulated_web_agent.main.viewport_scan import VIEWPORTS
+
+    labels = {v["label"] for v in VIEWPORTS}
+    assert labels == {"mobile", "tablet", "desktop"}
+
+
+def test_the_scanned_desktop_width_matches_the_session_profile():
+    """If these drift apart the scan stops describing the screen the agent saw,
+    which is the whole reason desktop was added."""
+    from simulated_web_agent.config import load_cfg
+    from simulated_web_agent.main.experiment import apply_device_profile
+    from simulated_web_agent.main.viewport_scan import VIEWPORTS
+
+    scanned = next(v for v in VIEWPORTS if v["label"] == "desktop")
+    session = apply_device_profile(load_cfg(), "desktop").environment.browser.context_options
+    assert scanned["width"] == session.viewport.width
+
+
+# --- the report must not claim a device the run did not use ----------------
+
+def test_the_caveat_names_the_device_the_sessions_actually_used():
+    from simulated_web_agent.main.reporter_html import _session_device_phrase
+
+    assert "telefon" in _session_device_phrase(
+        {"viewport": {"session_devices": {"mobile": 3}}})
+    assert "desktop" in _session_device_phrase(
+        {"viewport": {"session_devices": {"desktop": 3}}})
+
+
+def test_a_mixed_run_is_described_as_mixed():
+    """"both" is the case an unchecked sentence gets wrong: half the findings
+    come from a phone."""
+    from simulated_web_agent.main.reporter_html import _session_device_phrase
+
+    phrase = _session_device_phrase(
+        {"viewport": {"session_devices": {"desktop": 2, "mobile": 2}}})
+    assert "desktop" in phrase and "telefon" in phrase
+
+
+def test_an_older_run_says_nothing_rather_than_guessing():
+    """Runs made before the device was recorded cannot be reconstructed, and a
+    confident wrong sentence about method is worse than a vague true one."""
+    from simulated_web_agent.main.reporter_html import _session_device_phrase
+
+    for stats in ({}, {"viewport": {}}, {"viewport": {"session_devices": {}}}):
+        phrase = _session_device_phrase(stats)
+        assert "desktop" not in phrase and "telefon" not in phrase
+        assert phrase.strip()
+
+
+def test_session_devices_is_counted_from_the_personas(tmp_path):
+    from simulated_web_agent.main.reporter import aggregate_statistics
+    from simulated_web_agent.main.trace_store import TraceStore
+
+    stores = []
+    for i, device in enumerate(["desktop", "mobile", "desktop"]):
+        store = TraceStore(tmp_path / f"persona_{i}")
+        store.write_persona_card({"name": f"P{i}", "device": device})
+        stores.append(store)
+    reports = [{"trace_dir": str(s.trace_dir)} for s in stores]
+
+    stats = aggregate_statistics(reports, stores=stores)
+    assert stats["viewport"]["session_devices"] == {"desktop": 2, "mobile": 1}

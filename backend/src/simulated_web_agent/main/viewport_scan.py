@@ -2,7 +2,7 @@
 Viewport + live-DOM accessibility scan (METHODOLOGY_PLAN §3.4).
 
 For each unique URL visited during an agent session, opens a browser at 375×812
-(mobile) and 768×1024 (tablet) and measures:
+(mobile), 768×1024 (tablet) and 1440×900 (desktop) and measures:
   - Horizontal scrollbar (content overflows viewport)
   - Fixed-width elements wider than the viewport
   - Very small font sizes (< 12px)
@@ -57,9 +57,15 @@ from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
 
+# Desktop is 1440×900 to match _DEVICE_PROFILES["desktop"] in experiment.py.
+# Until the device toggle landed, every session ran desktop-sized while the scan
+# measured only mobile and tablet — so the one width the walkthrough findings
+# actually came from was the one width never measured. A reader comparing the
+# two sections was comparing different screens without being told.
 VIEWPORTS = [
     {"label": "mobile", "width": 375, "height": 812},
     {"label": "tablet", "width": 768, "height": 1024},
+    {"label": "desktop", "width": 1440, "height": 900},
 ]
 
 # JS to detect horizontal overflow and collect oversized fixed-width elements
@@ -311,7 +317,7 @@ async def _scan_url(page, url: str, viewport: dict) -> dict[str, Any]:
 
 async def run_viewport_scan(store: TraceStore, headless: bool = True) -> list[dict]:
     """
-    Scan each visited URL at mobile and tablet viewports.
+    Scan each visited URL at every viewport in VIEWPORTS.
 
     Reads URLs from store; saves findings via store.write_viewport_findings().
     Returns the findings list.

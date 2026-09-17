@@ -162,7 +162,12 @@ def test_accessibility_and_device_detail_are_rendered():
     assert "Kontrast tekstu" in html and "Podnieść kontrast" in html
     assert "Zachowanie na urządzeniach" in html
     assert "WCAG 2.5.8" in html
-    assert "desktop" in html.lower(), "the desktop-session caveat must be stated"
+    # The caveat must separate what was measured from what was walked. It no
+    # longer names desktop unconditionally — the run chooses the device now, so
+    # this fixture (which records none) must not claim one.
+    assert "Pomiar techniczny" in html
+    assert "nie przebieg ścieżki użytkownika" in html
+    assert "desktop" not in html.lower(),         "a run with no recorded device must not be described as a desktop run"
 
 
 def test_executive_summary_is_not_called_wykonawcze():
