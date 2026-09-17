@@ -48,20 +48,30 @@ def test_malformed_findings_do_not_crash_the_report(bad):
 
 # --- orphaned runs are reaped ---------------------------------------------
 
-def _run(root, name, status):
+def _run(root, name, status, silent_seconds=0.0):
     d = root / name
     d.mkdir(parents=True)
     (d / "run_manifest.json").write_text(
         '{"run_id": "%s", "site": "x.pl", "status": "%s"}' % (name, status),
         encoding="utf-8",
     )
+    if silent_seconds:
+        import os, time
+        old = time.time() - silent_seconds
+        for path in list(d.rglob("*")) + [d]:
+            os.utime(path, (old, old))
     return d
 
 
 def test_a_run_left_running_by_a_dead_process_is_marked_interrupted(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runs = tmp_path / "runs"
-    _run(runs, "ORPHAN", "running")
+    # Silence is what now proves the process is gone. Being marked "running"
+    # no longer does on its own: any process importing app.py reaps at import,
+    # and a live audit in another process was being killed that way. See
+    # test_orphan_reaper_liveness.py.
+    _run(runs, "ORPHAN", "running",
+         silent_seconds=app_module._ORPHAN_SILENCE_SECONDS + 60)
 
     assert app_module.reap_orphaned_runs(runs) == ["ORPHAN"]
 

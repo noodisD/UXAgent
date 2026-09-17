@@ -223,6 +223,13 @@ async def run_async(
                 "status": status,
             }
         )
+        # A run that finished has no failure. Something else may have written
+        # one onto this manifest while the run was still going — the orphan
+        # reaper does exactly that when another process imports app.py — and
+        # leaving it behind produces a manifest that says "done" and carries
+        # "the server restarted while this audit was running", which the
+        # dashboard renders as a failed-run modal over a successful audit.
+        manifest.pop("failure", None)
         if failure:
             # Same shape mark_run_status writes, so the dashboard's failed-run
             # modal reads both paths identically.

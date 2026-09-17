@@ -154,6 +154,28 @@ CURRENT_RUN_ID: str | None = None
 _runs_lock = threading.Lock()
 
 
+# How long a "running" run may be silent before it is treated as abandoned.
+# Comfortably longer than the quietest legitimate stretch of a live run, which
+# is the final aggregation call to the large model (minutes, no file writes).
+_ORPHAN_SILENCE_SECONDS = 15 * 60
+
+
+def _seconds_since_last_write(run_dir: Path) -> float:
+    """Age of the most recently modified file anywhere under a run directory."""
+    newest = 0.0
+    try:
+        for path in run_dir.rglob("*"):
+            try:
+                newest = max(newest, path.stat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    if newest <= 0:
+        return float("inf")
+    return max(0.0, time.time() - newest)
+
+
 def reap_orphaned_runs(runs_root: Path | None = None) -> list[str]:
     """Mark runs left "running" by a previous process as interrupted.
 
@@ -163,8 +185,20 @@ def reap_orphaned_runs(runs_root: Path | None = None) -> list[str]:
     then shows a run that can never finish and offers no way to clear it: the
     cancel endpoint only knows about runs in this process's registry.
 
-    Called once at import, before any new run can start, so anything still
-    marked running at that moment provably belongs to a process that is gone.
+    Called once at import. That used to be treated as proof on its own — "any
+    run still marked running belongs to a process that is gone" — which is true
+    when the server restarts and false for every other importer. Running the
+    test suite while an audit was in progress imported this module and reaped
+    the live run, stamping "the server restarted while this audit was running"
+    onto a manifest that then finished successfully.
+
+    So aliveness is checked rather than assumed, by the one signal that works
+    across processes and container restarts alike: a running audit writes to its
+    directory constantly — screenshots, traces, per-step text. A directory that
+    has been silent for _ORPHAN_SILENCE_SECONDS is genuinely abandoned. A
+    process id would not do: in a container the server is often pid 1, so a
+    fresh container would look like the dead run's own process.
+
     Returns the run ids reaped.
     """
     root = Path("runs") if runs_root is None else Path(runs_root)
@@ -176,6 +210,9 @@ def reap_orphaned_runs(runs_root: Path | None = None) -> list[str]:
             continue
         manifest = read_manifest(run_dir)
         if not manifest or manifest.get("status") != "running":
+            continue
+        if _seconds_since_last_write(run_dir) < _ORPHAN_SILENCE_SECONDS:
+            # Still being written to: another process is running this audit.
             continue
         try:
             mark_run_status(run_dir.name, "error", failure={
