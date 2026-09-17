@@ -528,6 +528,14 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         and r["first_impression"].get("overall_score") is not None
     ]
 
+    # Caller's TraceStores, keyed by persona dir. Needed by several blocks
+    # below: report["trace_dir"] is recorded relative to the directory the run
+    # executed in, so resolving it from anywhere else silently yields nothing.
+    _stores_by_dir = {
+        str(s.trace_dir).replace("\\", "/").rstrip("/").split("/")[-1]: s
+        for s in (stores or [])
+    }
+
     fi_dimension_scores: dict[str, list[float]] = defaultdict(list)
     # Why each dimension scored what it did. first_impression.txt asks for a
     # per-dimension rationale ("the biggest barrier for this person, and why
@@ -538,9 +546,23 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     fi_dimension_reasons: dict[str, list[dict]] = defaultdict(list)
     fi_weaknesses: list[dict] = []
     fi_strengths: list[dict] = []
+    # The very screen these scores were formed on. The five-second scores come
+    # from the step-0 screenshot (auditor.py), and the section showed only
+    # numbers — the reviewer specifically wanted screenshots so a reader knows
+    # what is being talked about. Path is run-relative, matching the evidence
+    # thumbnails on issues, so it resolves in the HTML and in the PDF alike.
+    fi_screens: list[dict] = []
     for r in reports:
         fi = r.get("first_impression") or {}
         who = _persona_label(r)
+        p_dir = str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1]
+        shot = _stores_by_dir.get(p_dir)
+        if p_dir and shot is not None and shot.screenshot_path(0).exists():
+            fi_screens.append({
+                "persona": who,
+                "screenshot": f"{p_dir}/screenshot/screenshot_0.png",
+                "score": fi.get("overall_score"),
+            })
         scores = fi.get("scores") or {}
         for k, v in scores.items():
             if v is not None:
@@ -562,10 +584,6 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # the report read identically whatever the objective was, which is what the
     # reviewer meant by "it gave me the same report when I asked for something
     # else". blockers/wins are also the only per-persona account of what worked.
-    _stores_by_dir = {
-        str(s.trace_dir).replace("\\", "/").rstrip("/").split("/")[-1]: s
-        for s in (stores or [])
-    }
     objective_reflections: list[dict] = []
     for r in reports:
         # Read from the store, not from the report dict: the reflection is
@@ -850,6 +868,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "dimension_reasons": dict(fi_dimension_reasons),
             "weaknesses": fi_weaknesses,
             "strengths": fi_strengths,
+            "screenshots": fi_screens,
         },
         # What each persona set out to do and how it went. The report's spine:
         # without it every audit reads the same regardless of the objective.

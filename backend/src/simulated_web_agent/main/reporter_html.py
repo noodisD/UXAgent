@@ -221,6 +221,18 @@ body {
 }
 .strength-item::before { content: "✓"; color: #008573; font-weight: 700; flex-shrink: 0; }
 
+/* ── First-impression screenshots ── */
+.fi-shots { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.fi-shot { margin: 0; width: 200px; }
+.fi-shot img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; display: block; }
+.fi-shot figcaption { font-size: 11.5px; color: var(--muted); margin-top: 5px; text-align: center; }
+
+/* ── Survey "why" synthesis ── */
+.sv-why { display: flex; gap: 11px; align-items: flex-start; margin: 10px 0 20px; padding: 12px 14px; background: #fafbfc; border: 1px solid var(--line); border-radius: 9px; }
+.sv-why-badge { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; background: #ffdcdc; color: var(--havas-red); font-size: 10.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.sv-why-l { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 4px; }
+.sv-why-t { font-size: 13px; line-height: 1.6; color: #3a3f47; }
+
 /* ── Task outcomes ── */
 .obj-tally { font-size: 13px; margin-bottom: 14px; }
 .obj-card { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 12px; background: #fff; }
@@ -517,6 +529,19 @@ def _render_first_impression(stats: dict, narr: dict) -> str:
     dim = fi.get("dimension_avgs") or {}
     assessment = _esc(narr.get("first_impression_assessment", ""))
 
+    # The screen the five-second scores were actually formed on. Without it the
+    # section is numbers about a page the reader has never seen.
+    shots = ""
+    for s in (fi.get("screenshots") or [])[:4]:
+        path = s.get("screenshot")
+        if not path:
+            continue
+        score = f" · {s['score']}/5" if s.get("score") is not None else ""
+        shots += (f'<figure class="fi-shot"><a href="{_esc(path)}" target="_blank">'
+                  f'<img src="{_esc(path)}" alt="pierwszy ekran — {_esc(s.get("persona") or "")}"/></a>'
+                  f'<figcaption>{_esc(s.get("persona") or "")}{score}</figcaption></figure>')
+    shots = f'<div class="fi-shots">{shots}</div>' if shots else ""
+
     if dist:
         # Same distribution + anchored-scale technique as the survey: each
         # dimension shows how the participants split 1-5, the average, and what
@@ -543,7 +568,7 @@ def _render_first_impression(stats: dict, narr: dict) -> str:
 
     if assessment:
         body += f'<p style="margin-top:16px;font-size:13px;color:var(--muted);">{assessment}</p>'
-    return _section("Pierwsze wrażenie (test 5 sekund)", body)
+    return _section("Pierwsze wrażenie (test 5 sekund)", shots + body)
 
 
 def _scale_color(avg: float | None, lo: int, hi: int) -> str:
@@ -601,7 +626,7 @@ def _render_open_question(q: dict) -> str:
     </div>"""
 
 
-def _render_survey(stats: dict) -> str:
+def _render_survey(stats: dict, summaries: dict | None = None) -> str:
     survey = stats.get("survey") or {}
     questions = survey.get("questions") or []
 
@@ -624,6 +649,19 @@ def _render_survey(stats: dict) -> str:
     for q in questions:
         body.append(_render_open_question(q) if q.get("kind") == "open"
                     else _render_scale_question(q))
+        # Why the participants answered that way — one synthesis per question,
+        # generated at report time and, until now, never rendered. A bar chart
+        # says three people scored navigation 3/5; this says what made them.
+        # Joined by question id, not position: the question list is
+        # questionnaire-ordered and omits questions nobody answered, so an
+        # index join silently shifts every later summary onto the wrong one.
+        why = (summaries or {}).get(q.get("id"))
+        if str(why or "").strip():
+            body.append(
+                '<div class="sv-why"><span class="sv-why-badge">AI</span>'
+                '<div><div class="sv-why-l">Dlaczego tak odpowiadali</div>'
+                f'<div class="sv-why-t">{_esc(why)}</div></div></div>'
+            )
     return _section("Wyniki ankiety", "".join(body))
 
 
@@ -1133,7 +1171,7 @@ def generate_html_report(agg: dict) -> str:
         # Immediately after the scores, so a low number and its explanation are
         # read together rather than pages apart.
         _render_score_reasons(stats) +
-        _render_survey(stats) +
+        _render_survey(stats, agg.get("survey_summaries")) +
         _render_accessibility(stats, narr) +
         _render_accessibility_detail(stats) +
         _render_responsiveness(stats, narr) +
