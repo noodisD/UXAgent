@@ -70,6 +70,17 @@
             <input class="ux-input mono" type="number" min="1" v-model.number="form.experiment.concurrency" />
           </div>
         </div>
+        <div class="mt16">
+          <label class="ux-label">{{ t('w1.device') }}</label>
+          <div class="device-pick">
+            <button v-for="d in deviceChoices" :key="d.value" type="button"
+                    class="device-btn" :class="{ on: form.experiment.device === d.value }"
+                    @click="form.experiment.device = d.value">
+              <span class="device-ico">{{ d.icon }}</span>{{ d.label }}
+            </button>
+          </div>
+          <div class="device-note">{{ t('w1.device.note') }}</div>
+        </div>
       </div>
 
       <!-- demographics -->
@@ -312,6 +323,15 @@ const form = inject<WizardForm>(FORM_KEY)!
 const { state: app, nextStep, prevStep, goStep, goScreen } = useApp()
 const { start } = useRun()
 const { t } = useI18n()
+
+// "both" alternates personas between desktop and mobile rather than running
+// each one twice, so choosing it costs no extra time — it splits the panel.
+// The labels say so, because the obvious assumption is that it doubles the run.
+const deviceChoices = computed(() => ([
+  { value: 'desktop' as const, icon: '🖥', label: t('w1.device.desktop') },
+  { value: 'mobile' as const, icon: '📱', label: t('w1.device.mobile') },
+  { value: 'both' as const, icon: '🖥📱', label: t('w1.device.both') },
+]))
 
 // One rule for what counts as a usable start URL, mirroring the backend's
 // check in app.py. There used to be three: this gate required a scheme, the
@@ -742,4 +762,13 @@ async function confirmRun() {
 .reset-btn:hover { color: #b5564f; border-color: #e0d6d6; }
 .step-count { font-size: 12px; color: var(--faint); }
 .nav-spacer { width: 120px; }
+
+.device-pick { display: flex; gap: 8px; }
+.device-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px 12px; border: 1px solid var(--border-input); background: var(--surface);
+  border-radius: 8px; font: 600 13px var(--sans); color: var(--text-2); cursor: pointer; }
+.device-btn:hover { border-color: var(--ac); color: var(--ac); }
+.device-btn.on { border-color: var(--ac); background: var(--accent-tint); color: var(--ac); }
+.device-ico { font-size: 14px; }
+.device-note { font-size: 12px; color: var(--text-muted); margin-top: 7px; line-height: 1.45; }
 </style>

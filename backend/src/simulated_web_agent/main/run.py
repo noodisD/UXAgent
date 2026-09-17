@@ -131,6 +131,9 @@ async def run_async(
     concurrency: int = 4,
     example_persona: str = None,
     persona_slots: Optional[list[dict]] = None,
+    # desktop | mobile | both. "both" alternates personas between the two
+    # rather than doubling the session count (see experiment.devices_for_run).
+    device: str = "desktop",
     on_progress: Optional[Callable[[dict], None]] = None,
     site_context: str = "",
     analytics_context: str = "",
@@ -165,6 +168,10 @@ async def run_async(
             # section, which site_context produced the findings, and reading the
             # manifest wrongly suggested calibration was off. Record it.
             "site_context": site_context or "",
+            # Which device(s) the journeys ran on. Recorded because the
+            # findings mean different things on a phone than on a desktop,
+            # and a finished run could otherwise not say which it was.
+            "device": device,
             "max_steps": max_steps,
             "persona_count": total_personas,
             "questionnaire": questionnaire,
@@ -261,6 +268,7 @@ async def run_async(
         concurrency=concurrency,
         headless=headless,
         runs_dir=run_dir,
+        device=device,
         on_progress=lambda k, n: ping(
             {"phase": "agents", "status": "progress", "current": k, "total": n}
         ),

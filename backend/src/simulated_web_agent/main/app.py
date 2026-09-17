@@ -253,6 +253,7 @@ def _run_thread(run_id: str, payload: dict):
             concurrency=int(payload.get("concurrency", 4)),
             example_persona=payload.get("example_persona", None),
             persona_slots=payload.get("persona_slots", None),
+            device=payload.get("device", "desktop"),
             questionnaire=payload["questionnaire"],
             headless=bool(payload.get("headless", True)),
             site_context=payload.get("site_context", ""),

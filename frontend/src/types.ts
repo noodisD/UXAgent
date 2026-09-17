@@ -28,6 +28,8 @@ export type ExperimentConfig = {
   startUrl: string;
   headless: boolean;
   maxSteps: number; // [1..5000]
+  /** Which device the journeys run on. 'both' alternates personas between them. */
+  device: 'desktop' | 'mobile' | 'both';
   concurrency: number;
   // What the site actually is (e.g. "product catalog, no online checkout, has
   // a store locator"). Without it, every judgement pass — first impression,

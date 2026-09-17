@@ -366,6 +366,125 @@ async def dismiss_cookie_banners(page) -> dict:
     return result
 
 
+# The screen a persona browses on. The walkthrough has always run at one fixed
+# desktop-sized window, so every heuristic finding the tool has ever produced
+# was implicitly a desktop finding — while the only thing measured on mobile was
+# a separate technical scan. The reviewer asked whether the analysis could be
+# split by device; this is what makes that answerable.
+DEVICE_PROFILES = {
+    "desktop": {"width": 1024, "height": 768, "is_mobile": False, "user_agent": None},
+    "mobile": {
+        "width": 390, "height": 844, "is_mobile": True,
+        # A mobile viewport alone is not a phone: sites branch on the UA for
+        # layout, redirects to m. hosts and app interstitials. Emulating the
+        # size without the UA produces a desktop page squeezed into 390px,
+        # which is not what any user sees and would be a dishonest finding.
+        "user_agent": (
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+        ),
+    },
+}
+DEFAULT_DEVICE = "desktop"
+
+
+def devices_for(device: str | None) -> list[str]:
+    """Which device each persona browses on, cycled across the cohort.
+
+    "both" alternates rather than running every persona twice: with N personas
+    you get N/2 sessions per device for the same wall-clock cost, and the
+    comparison is between different people on different devices — which is what
+    a real mixed-device study looks like anyway. Doubling every persona would
+    double an already 15-70 minute run to answer the same question.
+    """
+    choice = (device or DEFAULT_DEVICE).strip().lower()
+    if choice == "both":
+        return ["desktop", "mobile"]
+    if choice in DEVICE_PROFILES:
+        return [choice]
+    return [DEFAULT_DEVICE]
+
+
+def apply_device_profile(cfg: DictConfig, device: str) -> None:
+    """Point the browser config at one device profile, in place."""
+    profile = DEVICE_PROFILES.get(device) or DEVICE_PROFILES[DEFAULT_DEVICE]
+    opts = cfg.environment.browser.context_options
+    opts.viewport.width = profile["width"]
+    opts.viewport.height = profile["height"]
+    if profile.get("user_agent"):
+        opts.user_agent = profile["user_agent"]
+    if "is_mobile" in opts:
+        opts.is_mobile = profile["is_mobile"]
+
+
+# Device profiles a session can browse under.
+#
+# Until now every session ran at one desktop-sized window, which made the whole
+# heuristic layer implicitly a desktop report while the only mobile evidence was
+# a technical scan of page layout. The reviewer asked whether the analysis could
+# be split by device; this is what makes a real mobile *journey* possible.
+_DEVICE_PROFILES = {
+    "desktop": {"width": 1440, "height": 900, "is_mobile": False, "user_agent": None},
+    "mobile": {
+        "width": 390, "height": 844, "is_mobile": True,
+        # A real phone UA matters beyond layout: sites serve different markup,
+        # different consent flows, sometimes an app interstitial, to mobile.
+        "user_agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        ),
+    },
+}
+DEVICE_CHOICES = ("desktop", "mobile", "both")
+
+
+def devices_for_run(device, persona_count: int) -> list:
+    """Which device each persona browses under, in persona order.
+
+    "both" alternates rather than running every persona twice. Doubling the
+    sessions would double an already long run for the same number of
+    participants; alternating splits the panel instead, so a 4-persona audit
+    gives two desktop journeys and two mobile ones in the usual time. With an
+    odd count desktop takes the extra one, since that is what the rest of the
+    pipeline is otherwise anchored to.
+    """
+    choice = (device or "desktop").strip().lower()
+    if choice not in DEVICE_CHOICES:
+        choice = "desktop"
+    if choice != "both":
+        return [choice] * max(0, persona_count)
+    return ["desktop" if i % 2 == 0 else "mobile" for i in range(max(0, persona_count))]
+
+
+def apply_device_profile(cfg: DictConfig, device: str) -> DictConfig:
+    """A copy of `cfg` with the browser set up for `device`.
+
+    A copy, not a mutation: personas run concurrently off one loaded config, so
+    editing it in place would have them racing to set each other's viewport.
+    """
+    import copy
+
+    from omegaconf import OmegaConf
+
+    profile = _DEVICE_PROFILES.get(device) or _DEVICE_PROFILES["desktop"]
+    out = copy.deepcopy(cfg)
+    ctx = out.environment.browser.context_options
+    ctx.viewport.width = profile["width"]
+    ctx.viewport.height = profile["height"]
+    if profile.get("user_agent"):
+        ctx.user_agent = profile["user_agent"]
+    # is_mobile/has_touch are not in the shipped schema, and the config is
+    # loaded in struct mode, so assigning them raises rather than adding them.
+    # Opened just for this block and closed again, so a typo anywhere else in
+    # the pipeline still fails loudly instead of silently creating a key.
+    if profile["is_mobile"]:
+        OmegaConf.set_struct(ctx, False)
+        ctx.is_mobile = True
+        ctx.has_touch = True
+        OmegaConf.set_struct(ctx, True)
+    return out
+
+
 _DEFAULT_PERSONA_BUDGET_MIN = 45
 
 
@@ -406,8 +525,12 @@ async def _run_for_persona_and_intent(
     max_steps: int,
     runs_dir: Optional[pathlib.Path] = None,
     headless: Optional[bool] = None,
+    device: str = "desktop",
 ) -> pathlib.Path:
     persona_card = build_persona_card(persona_info)
+    # Recorded on the card so the report can say which journeys were phone
+    # journeys. Without it a mixed run is indistinguishable from a desktop one.
+    persona_card["device"] = device
     # The agent reads only the persona text — state the home location explicitly
     # so "nearby" lookups are anchored instead of guessed.
     persona = persona_with_location(persona_info["persona"], persona_card.get("home_location"))
@@ -778,6 +901,7 @@ async def experiment_async(
     concurrency: int = 4,
     runs_dir: Optional[pathlib.Path] = None,
     on_progress: Optional[Callable[[int, int], None]] = None,
+    device: str = "desktop",
 ) -> list:
     cfg = load_cfg(config_name=config_name)
     if concurrency:
@@ -792,7 +916,7 @@ async def experiment_async(
 
     run_id = runs_dir.name if runs_dir is not None else None
 
-    async def run_one(entry: Dict[str, str]):
+    async def run_one(entry: Dict[str, str], persona_device: str):
         nonlocal done
         async with sem:
             # Queued personas must not start once the run is cancelled — with
@@ -800,12 +924,13 @@ async def experiment_async(
             if cancellation.is_cancelled(run_id):
                 return None
             trace_dir = await _run_for_persona_and_intent(
-                cfg=cfg,
+                cfg=apply_device_profile(cfg, persona_device),
                 persona_info=entry,
                 start_url=start_url,
                 max_steps=max_steps,
                 runs_dir=runs_dir,
                 headless=headless,
+                device=persona_device,
             )
         async with lock:
             done += 1
@@ -816,7 +941,12 @@ async def experiment_async(
                     pass
         return trace_dir
 
-    tasks = [asyncio.create_task(run_one(e)) for e in agents]
+    assigned = devices_for_run(device, len(agents))
+    if len(set(assigned)) > 1:
+        log.info("[devices] %s", ", ".join(
+            f"{i + 1}:{d}" for i, d in enumerate(assigned)))
+    tasks = [asyncio.create_task(run_one(e, assigned[i]))
+             for i, e in enumerate(agents)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for r in results:
         if isinstance(r, Exception):

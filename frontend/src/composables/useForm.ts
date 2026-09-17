@@ -80,6 +80,7 @@ Clara prefers comfortable, functional clothing, often choosing items that are ea
       startUrl: '',
       headless: true,
       maxSteps: 25,
+      device: 'desktop' as 'desktop' | 'mobile' | 'both',
       concurrency: 1,
       siteContext: '',
     },
@@ -144,6 +145,7 @@ export type RunPayload = {
   start_url: string
   max_steps: number
   concurrency: number
+  device: string
   questionnaire: Record<string, any>
   headless: boolean
   site_context?: string
@@ -183,6 +185,7 @@ export function buildRunPayload(form: WizardForm): RunPayload {
     start_url:      String(form?.experiment?.startUrl ?? ''),
     max_steps:      Number(form?.experiment?.maxSteps ?? 0),
     concurrency:    Number(form?.experiment?.concurrency ?? 1),
+    device:         String(form?.experiment?.device ?? 'desktop'),
     questionnaire:  questionnaireObj,
     headless:       Boolean(form?.experiment?.headless ?? true),
     site_context:   String(form?.experiment?.siteContext ?? '').trim(),
