@@ -40,6 +40,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'header.results.fallback': 'Wyniki',
     'header.personas.suffix': 'person',
     'btn.download': 'Pobierz',
+    'btn.downloadPdf': 'Pobierz PDF',
+    'btn.downloadDocx': 'Pobierz Word',
     'btn.openReport': 'Otwórz pełny raport ↗',
     'btn.newAudit': '+ Nowy audyt',
     // wizard steps
@@ -395,6 +397,8 @@ const messages: Record<Locale, Record<string, string>> = {
     'header.results.fallback': 'Results',
     'header.personas.suffix': 'personas',
     'btn.download': 'Download',
+    'btn.downloadPdf': 'Download PDF',
+    'btn.downloadDocx': 'Download Word',
     'btn.openReport': 'Open full report ↗',
     'btn.newAudit': '+ New audit',
     'pd.personasList': 'Personas',

@@ -55,7 +55,8 @@
         </div>
         <div class="h-actions">
           <template v-if="app.screen === 'results'">
-            <a class="btn" :href="reportPdfUrl">{{ t('btn.download') }}</a>
+            <a class="btn" :href="reportPdfUrl">{{ t('btn.downloadPdf') }}</a>
+            <a class="btn" :href="reportDocxUrl">{{ t('btn.downloadDocx') }}</a>
             <a class="btn btn-primary" :href="reportUrl" target="_blank" rel="noopener">{{ t('btn.openReport') }} ↗</a>
           </template>
           <button v-else-if="app.screen === 'history'" class="btn btn-primary" @click="newAudit">{{ t('btn.newAudit') }}</button>
@@ -131,6 +132,11 @@ const reportUrl = computed(() =>
   app.viewRunId ? apiAssetUrl(`/runs/${encodeURIComponent(app.viewRunId)}/report.html`) : '#')
 const reportPdfUrl = computed(() =>
   app.viewRunId ? apiAssetUrl(`/runs/${encodeURIComponent(app.viewRunId)}/report.pdf`) : '#')
+// A third container, for people who need to adapt the report rather than just
+// read it: Word, built from the report data so headings and tables stay
+// editable (backend main/report_docx.py).
+const reportDocxUrl = computed(() =>
+  app.viewRunId ? apiAssetUrl(`/runs/${encodeURIComponent(app.viewRunId)}/report.docx`) : '#')
 
 // --- auth gate ----------------------------------------------------------
 // The backend decides whether a key is required: probing /progress returns 401

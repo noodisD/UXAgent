@@ -16,7 +16,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest
 
-from . import cancellation, report_pdf, results_api, run_storage
+from . import cancellation, report_docx, report_pdf, results_api, run_storage
 from .persona import generate_audit_settings, generate_example_persona
 from .run import mark_run_status, new_run_id, read_manifest, run, site_slug
 
@@ -64,7 +64,7 @@ _API_KEY = os.getenv("UXAGENT_API_KEY", "").strip()
 # instead. Exactly the routes the UI loads that way: the report in both
 # containers (.html to view, .pdf to download) and the three screenshot forms.
 _QUERY_KEY_PREFIXES = ("/runs/",)
-_QUERY_KEY_SUFFIXES = ("/report.html", "/report.pdf")
+_QUERY_KEY_SUFFIXES = ("/report.html", "/report.pdf", "/report.docx")
 
 # Unauthenticated: preflight carries no custom header, and a health probe must
 # work without a secret.
@@ -529,6 +529,35 @@ def run_report_pdf_endpoint(run_id: str):
         mimetype="application/pdf",
         as_attachment=True,
         download_name=f"raport-ux-{site}.pdf",
+    )
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
+
+
+@app.get("/runs/<run_id>/report.docx")
+def run_report_docx_endpoint(run_id: str):
+    """The report as an editable Word document.
+
+    Built from aggregated_report.json rather than converted from the HTML, so
+    headings are real headings and tables are real tables — a converted file
+    arrives as one blob nobody can practically edit, which defeats the point of
+    offering the format at all.
+    """
+    run_dir = Path("runs") / run_id
+    try:
+        docx_path = report_docx.ensure_report_docx(run_dir)
+    except Exception as e:
+        log.exception("DOCX build failed for %s: %s", run_id, e)
+        return jsonify({"status": "error", "error": "docx build failed"}), 500
+    if docx_path is None:
+        return jsonify({"status": "error", "error": "report not found"}), 404
+
+    site = re.sub(r"[^A-Za-z0-9._-]+", "-", str(run_id))
+    resp = send_file(
+        docx_path.resolve(),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        as_attachment=True,
+        download_name=f"raport-ux-{site}.docx",
     )
     resp.headers["Cache-Control"] = "no-store, must-revalidate"
     return resp

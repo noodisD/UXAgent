@@ -32,6 +32,7 @@ dependencies = [
     "regex>=2024.0.0",
     "tiktoken>=0.7.0",
     "werkzeug>=3.0.6",
+    "python-docx>=1.2.0",
 ]
 description = "UXAgent backend — LLM-driven Playwright agents that audit a website as synthetic UX-research participants."
 dynamic = ["version"]
