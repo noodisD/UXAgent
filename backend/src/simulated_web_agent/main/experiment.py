@@ -150,6 +150,19 @@ def persona_with_location(persona_text: str, home_location: str | None) -> str:
     )
 
 
+def _exception_summary(exc: BaseException) -> str:
+    """Type + first line of the message — the part that identifies the fault.
+
+    format_exception_only returns the whole message as one string, newlines and
+    all, so it has to be split again: Playwright appends a multi-line call log
+    that would otherwise fill the 500-character field with the least useful part
+    of it. The full traceback is kept in error.txt regardless.
+    """
+    rendered = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+    first = rendered.splitlines()[0].strip() if rendered else ""
+    return first or repr(exc)
+
+
 def build_persona_card(persona_info: dict) -> dict:
     """Build a structured persona card from the raw persona_info dict.
 
@@ -850,7 +863,7 @@ async def _run_for_persona_and_intent(
         store.write_memory_trace_text(policy.get_formatted_memories())
         log.info(f"Saved memory trace to {store.trace_dir}")
 
-    except Exception:
+    except Exception as exc:
         err = traceback.format_exc()
         print(err)
         try:
@@ -863,11 +876,18 @@ async def _run_for_persona_and_intent(
                 "max_steps": max_steps,
                 "terminated": False,
                 "ended_reason": "error",
-                # The exception's last line (type + message). Without this,
-                # session_result recorded a bare "error" and the run's own record
-                # gave no clue why a session died — the "błąd sesji" badge with no
-                # cause. Full traceback stays in error.txt.
-                "error": (err.strip().splitlines() or [""])[-1][:500],
+                # The exception type and the FIRST line of its message.
+                # Without this, session_result recorded a bare "error" and the
+                # run's own record gave no clue why a session died — the "błąd
+                # sesji" badge with no cause. Full traceback stays in error.txt.
+                #
+                # Not the traceback's last line: a Playwright error's message is
+                # itself multi-line, and its diagnostic part comes first —
+                # "net::ERR_CERT_AUTHORITY_INVALID" on line one, then a call log.
+                # Taking the last line reported 'navigating to "…", waiting until
+                # "domcontentloaded"', which says only that a page load was
+                # attempted, hiding the one word that explained why it failed.
+                "error": _exception_summary(exc)[:500],
             })
         except Exception:
             pass

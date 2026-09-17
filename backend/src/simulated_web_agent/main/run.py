@@ -316,6 +316,42 @@ async def run_async(
             log.exception("Page speed check failed (non-fatal): %s", e)
 
     # ── 5) Aggregated report ──────────────────────────────────────────────────
+    #
+    # A session that never took a step observed nothing: the page did not load,
+    # so there is no screenshot, no action, no page text — nothing any judgement
+    # could rest on. If that is true of every persona, the run has no evidence
+    # at all and must not produce a score.
+    #
+    # Found by re-running the review cases: t-mobile.pl was unreachable (the
+    # certificate was intercepted on the way out), both sessions ended at step
+    # zero, and the run still finished "done" with a report reading "a critical
+    # barrier ON THE SITE" and 1.0/5 — a confident verdict about a page nobody
+    # ever saw, recommending the site fix a fault that was never theirs. The
+    # older guard below could not catch it: stores existed and a report was
+    # written, so nothing looked missing.
+    observed = [s for s in stores
+                if int(((s.read_session_result() or {}).get("steps_taken") or 0)) > 0]
+    if stores and not observed:
+        reasons = sorted({
+            str((s.read_session_result() or {}).get("error") or "unknown")[:200]
+            for s in stores
+        })
+        _finalize("error", failure={
+            "phase": "sessions",
+            "failedAt": start_url,
+            "error": (
+                f"No session reached the site: all {len(stores)} personas ended at "
+                f"step 0. Reported reason(s): " + "; ".join(reasons)
+            ),
+            "suggestion": (
+                "Nothing was observed, so no usability verdict is possible. Check "
+                "that the site is reachable from this machine (DNS, proxy, TLS "
+                "interception, geo-blocking or bot protection) and re-run. This is "
+                "not a finding about the site."
+            ),
+        })
+        return run_id
+
     report_error: Exception | None = None
     if stores:
         ping({"phase": "report", "status": "start", "total": 1})

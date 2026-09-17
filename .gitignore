@@ -148,3 +148,6 @@ old_data
 
 *.mp4
 backend/conf/gcp-service-account.json
+
+# Transcripts of the review re-runs; the runs themselves live under backend/runs
+.reviewlogs/
