@@ -28,6 +28,7 @@ from .severity import (
     heuristic_id as _heuristic_id,
     severity_rank,
 )
+from .redaction import clean as _redact, mentions_harness_fault
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -607,7 +608,14 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             refl = {}
         if not isinstance(refl, dict) or not refl:
             continue
-        objective_reflections.append({
+        # Free text, so it bypasses every gate attribution.py applies to
+        # findings — and it is written by the same persona whose frustration
+        # may have come from our failed clicks. Redact this tool's internal
+        # vocabulary (a survey answer once quoted "last_action_error" verbatim)
+        # and flag, rather than delete, a complaint that describes the
+        # automation failing: the aggregate pass is told not to build a
+        # headline defect on it alone.
+        entry = _redact({
             "persona": _persona_label(r),
             "objective": r.get("intent", ""),
             "outcome": refl.get("outcome", ""),
@@ -616,6 +624,13 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "wins": [w for w in (refl.get("wins") or []) if str(w).strip()],
             "priority_fix": refl.get("priorityFix", ""),
         })
+        entry["self_reported_only"] = any(
+            mentions_harness_fault(t) for t in (
+                [refl.get("summary", ""), refl.get("priorityFix", "")]
+                + [str(b) for b in (refl.get("blockers") or [])]
+            )
+        )
+        objective_reflections.append(entry)
 
     # Heuristic findings aggregation — annotate each finding with its persona
     # so aggregated issues can point back to concrete evidence.
@@ -854,7 +869,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             try:
                 survey_scores[qid].append(float(val))
             except (ValueError, TypeError):
-                survey_open[qid].append(str(val))
+                # Same reasoning as the reflections above: free text straight
+                # from the persona, never gated, and read by the aggregate pass.
+                survey_open[qid].append(_redact(str(val)))
 
     def _avg(lst: list) -> float | None:
         clean = [x for x in lst if x is not None]

@@ -57,7 +57,23 @@ WAŻNE (zasada ogólna — dotyczy CAŁEGO raportu, nie tylko PageSpeed): odró�
 STRONY od usterki POMIARU. Usterką pomiaru jest wszystko, co opisuje niepowodzenie
 narzędzia, a nie doświadczenie użytkownika: nieudane kliknięcie agenta, nieznaleziony
 element, przekroczony limit czasu, powtórzona próba bez efektu, przerwana sesja,
-a także samo pojawienie się baneru zgody na cookies (wymóg prawny, nie usterka).
+a także samo pojawienie się baneru zgody na cookies (wymóg prawny, nie usterka),
+a także ekran weryfikacji antybotowej (Cloudflare, CAPTCHA, „Performing verification") —
+pojawia się WYŁĄCZNIE dlatego, że odwiedzający jest zautomatyzowany; nigdy nie opisuj go
+jako wady strony ani nie zalecaj zmian w zabezpieczeniach serwisu.
+
+WAŻNE (źródła o różnej sile dowodu): `heuristic_summary` i `top_issues` zawierają WYŁĄCZNIE
+wnioski, które przeszły automatyczną weryfikację względem zapisu sesji. Natomiast
+`survey_summary` oraz refleksje person to SAMOOCENA agenta — swobodny tekst, którego nikt nie
+zweryfikował i który bardzo często opisuje nieudane interakcje samego narzędzia jako problem
+strony. Dlatego:
+- NIE twórz problemu o randze `critical_issues` ani `serious_issues` wyłącznie na podstawie
+  ankiety lub refleksji. Każdy problem w tych dwóch kategoriach musi mieć pokrycie w
+  `heuristic_summary` / `top_issues`.
+- Refleksja oznaczona `self_reported_only: true` opisuje awarię narzędzia, nie serwisu —
+  możesz ją najwyżej wspomnieć jako hipotezę do weryfikacji z prawdziwymi użytkownikami.
+- Jeśli mimo to opisujesz problem bez pokrycia w zweryfikowanych wnioskach, ustaw w nim
+  `"verified": false` i umieść go w `minor_issues`.
 Takich rzeczy NIE opisuj jako problemów strony, NIE umieszczaj wśród critical/serious/
 minor_issues i NIE obniżaj z ich powodu overall_ux_score. Jeśli ograniczyły zakres
 badania, napisz o tym wyłącznie w methodology_note.
