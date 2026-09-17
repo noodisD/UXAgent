@@ -81,15 +81,22 @@ def _persona_duration(trace_dir: Path) -> str | None:
     return _fmt_duration(mtimes[-1] - mtimes[0])
 
 
+from .redaction import clean as _redact
+
+
 def _survey_rows(survey: dict, q_prompts: dict[str, str]) -> list[dict]:
     rows: list[dict] = []
     for a in (survey or {}).get("answers", []) or []:
         qid = a.get("question_id", "")
-        rows.append({
+        # The dashboard is a client-facing surface too. Survey answers are free
+        # text from the persona and have quoted this tool's internal field names
+        # verbatim ("last_action_error"); aggregate_statistics redacts its own
+        # copy, and this is the other route to a reader.
+        rows.append(_redact({
             "q": q_prompts.get(qid, a.get("prompt") or qid),
             "answer": str(a.get("value", a.get("answer", ""))),
             "reasoning": a.get("reason", a.get("reasoning", "")),
-        })
+        }))
     return rows
 
 
@@ -159,12 +166,12 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
         "outcomeDisagreement": bool(eff.get("disagreement")),
         "steps": steps,
         "duration": _persona_duration(trace_dir),
-        "reflection": {
+        "reflection": _redact({
             "summary": reflection.get("summary", ""),
             "blockers": reflection.get("blockers", []),
             "wins": reflection.get("wins", []),
             "priorityFix": reflection.get("priorityFix", ""),
-        },
+        }),
         "firstImpression": {k: fi_scores.get(src) for k, src in _FI_MAP.items()},
         # Why each score, through this persona's eyes. Older runs lack both.
         "firstImpressionRationale": {

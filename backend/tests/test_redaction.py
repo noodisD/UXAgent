@@ -98,3 +98,22 @@ def test_a_real_usability_complaint_is_not_flagged():
         "Cena dostawy pojawia się dopiero na ostatnim kroku, co zaskakuje.") is False
     assert mentions_harness_fault("") is False
     assert mentions_harness_fault(None) is False
+
+
+# --- every route to a reader, not just the report ---------------------------
+
+def test_the_dashboard_redacts_survey_answers_and_reflections():
+    """aggregate_statistics cleans the copy that goes into the HTML and Word
+    report. The dashboard builds its own from the same files, so it needed the
+    same treatment — otherwise the identifier is merely moved, not removed."""
+    from simulated_web_agent.main.results_api import _survey_rows
+
+    rows = _survey_rows(
+        {"answers": [{"question_id": "q3",
+                      "value": "błędy 'last_action_error' przy klikaniu",
+                      "reason": "Locator.click: Timeout 10000ms exceeded"}]},
+        {"q3": "Co było największą trudnością?"},
+    )
+    assert "last_action_error" not in rows[0]["answer"]
+    assert "Locator" not in rows[0]["reasoning"]
+    assert rows[0]["q"] == "Co było największą trudnością?"
