@@ -46,6 +46,23 @@ HEURISTIC_NAMES = {
 }
 
 
+def _persona_label(report: dict) -> str:
+    """Display name for a per-agent report ("Marta"), falling back to its dir.
+
+    Aggregated detail is only useful if the reader can tell whose experience it
+    was — "navigation confused one of three people" means something different
+    from "navigation confused everyone".
+    """
+    if not isinstance(report, dict):
+        return ""
+    m = re.search(r"^Persona:\s*(\S+)", report.get("persona", "") or "",
+                  re.MULTILINE | re.IGNORECASE)
+    if m:
+        return m.group(1).rstrip(".,;:")
+    trace_dir = str(report.get("trace_dir", ""))
+    return trace_dir.replace("\\", "/").rstrip("/").split("/")[-1] if trace_dir else ""
+
+
 def _gate_reason(finding: dict) -> str:
     """Why this finding was demoted, in Polish — "" if it stands confirmed.
 
@@ -491,7 +508,7 @@ def _build_survey_questions(survey_scores: dict, survey_open: dict,
 
 
 def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = None,
-                         q_meta: list | None = None) -> dict:
+                         q_meta: list | None = None, stores: list | None = None) -> dict:
     """Compute statistics across all per-agent reports.
 
     `outcomes` maps persona_dir -> outcome/ended_reason and is what turns the
@@ -512,12 +529,75 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     ]
 
     fi_dimension_scores: dict[str, list[float]] = defaultdict(list)
+    # Why each dimension scored what it did. first_impression.txt asks for a
+    # per-dimension rationale ("the biggest barrier for this person, and why
+    # that score") and for strengths/weaknesses, all grounded in the step-0
+    # screenshot — and aggregation kept only the numbers. The first external
+    # review's sharpest complaint was that the report shows scores without ever
+    # saying what lowered them; the answer was being generated and discarded.
+    fi_dimension_reasons: dict[str, list[dict]] = defaultdict(list)
+    fi_weaknesses: list[dict] = []
+    fi_strengths: list[dict] = []
     for r in reports:
         fi = r.get("first_impression") or {}
+        who = _persona_label(r)
         scores = fi.get("scores") or {}
         for k, v in scores.items():
             if v is not None:
                 fi_dimension_scores[k].append(float(v))
+        for k, why in (fi.get("score_rationale") or {}).items():
+            if str(why or "").strip():
+                fi_dimension_reasons[k].append(
+                    {"persona": who, "score": scores.get(k), "why": str(why).strip()}
+                )
+        for w in fi.get("weaknesses") or []:
+            if str(w or "").strip():
+                fi_weaknesses.append({"persona": who, "text": str(w).strip()})
+        for s_ in fi.get("strengths") or []:
+            if str(s_ or "").strip():
+                fi_strengths.append({"persona": who, "text": str(s_).strip()})
+
+    # What each persona was actually trying to do, and how it went. Produced by
+    # generate_objective_reflection for every persona and rendered nowhere — so
+    # the report read identically whatever the objective was, which is what the
+    # reviewer meant by "it gave me the same report when I asked for something
+    # else". blockers/wins are also the only per-persona account of what worked.
+    _stores_by_dir = {
+        str(s.trace_dir).replace("\\", "/").rstrip("/").split("/")[-1]: s
+        for s in (stores or [])
+    }
+    objective_reflections: list[dict] = []
+    for r in reports:
+        # Read from the store, not from the report dict: the reflection is
+        # generated *after* generate_per_agent_report (analysis_runner runs the
+        # two in that order), so ux_report.json never contains it. Aggregation
+        # runs last, by which point it is on disk.
+        # Prefer the caller's TraceStore: report["trace_dir"] is recorded
+        # relative to the working directory the run executed in, so resolving
+        # it anywhere else silently yields nothing. Fall back to the path only
+        # when no stores were passed (older callers, and the tests).
+        refl = {}
+        trace_dir = str(r.get("trace_dir", ""))
+        key = trace_dir.replace("\\", "/").rstrip("/").split("/")[-1]
+        store = _stores_by_dir.get(key)
+        try:
+            if store is not None:
+                refl = store.read_objective_reflection() or {}
+            elif trace_dir:
+                refl = TraceStore(Path(trace_dir)).read_objective_reflection() or {}
+        except Exception:
+            refl = {}
+        if not isinstance(refl, dict) or not refl:
+            continue
+        objective_reflections.append({
+            "persona": _persona_label(r),
+            "objective": r.get("intent", ""),
+            "outcome": refl.get("outcome", ""),
+            "summary": refl.get("summary", ""),
+            "blockers": [b for b in (refl.get("blockers") or []) if str(b).strip()],
+            "wins": [w for w in (refl.get("wins") or []) if str(w).strip()],
+            "priority_fix": refl.get("priorityFix", ""),
+        })
 
     # Heuristic findings aggregation — annotate each finding with its persona
     # so aggregated issues can point back to concrete evidence.
@@ -645,15 +725,77 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         and r["accessibility"].get("overall_score") is not None
     ]
 
+    # The a11y pass produces findings with a category, a severity, the page and
+    # step they were seen on and a recommendation — and aggregation kept only
+    # the average score, so the whole section rendered as a single bare number.
+    # Deduplicated by category: the same barrier on five pages is one problem to
+    # fix, and listing it five times buries everything else.
+    a11y_by_category: dict[str, dict] = {}
+    for r in reports:
+        acc = r.get("accessibility") or {}
+        if not isinstance(acc, dict):
+            continue
+        who = _persona_label(r)
+        for f in (acc.get("findings") or []):
+            if not isinstance(f, dict):
+                continue
+            category = str(f.get("category") or "").strip() or "Inne"
+            entry = a11y_by_category.setdefault(category, {
+                "category": category, "severity": f.get("severity", "drobny"),
+                "detail": str(f.get("detail") or "").strip(),
+                "recommendation": str(f.get("recommendation") or "").strip(),
+                "urls": [], "personas": set(),
+            })
+            if severity_rank(f.get("severity")) > severity_rank(entry["severity"]):
+                entry["severity"] = f.get("severity", "drobny")
+            url = str(f.get("url") or "").strip()
+            if url and url not in entry["urls"]:
+                entry["urls"].append(url)
+            if who:
+                entry["personas"].add(who)
+    a11y_findings = sorted(
+        ({**e, "personas": sorted(e["personas"]), "urls": e["urls"][:5]}
+         for e in a11y_by_category.values()),
+        key=lambda e: (-severity_rank(e["severity"]), e["category"]),
+    )
+
     # Viewport — count sessions (not pages) with at least one overflow
     mobile_overflow = 0
     tablet_overflow = 0
+    # …and the per-device detail the scan already measures and nothing read:
+    # tap targets under the WCAG 2.5.8 minimum, text below AA contrast, fonts
+    # under 12px, elements wider than the viewport. This is the only part of
+    # the pipeline that can honestly answer "how does it do on mobile?", since
+    # the agent session itself always runs at one desktop-sized viewport.
+    device_detail: dict[str, dict] = {}
     for r in reports:
         vp = r.get("viewport_findings") or []
         if any(v.get("viewport") == "mobile" and v.get("horizontal_overflow") for v in vp):
             mobile_overflow += 1
         if any(v.get("viewport") == "tablet" and v.get("horizontal_overflow") for v in vp):
             tablet_overflow += 1
+        for v in vp:
+            if not isinstance(v, dict) or v.get("error"):
+                continue
+            label = str(v.get("viewport") or "").strip()
+            if not label:
+                continue
+            d = device_detail.setdefault(label, {
+                "viewport": label, "pages_scanned": 0, "pages_with_overflow": 0,
+                "tap_targets_below_min": 0, "contrast_failures": 0,
+                "small_font_examples": [], "wide_element_examples": [],
+            })
+            d["pages_scanned"] += 1
+            if v.get("horizontal_overflow"):
+                d["pages_with_overflow"] += 1
+            d["tap_targets_below_min"] += int((v.get("tap_targets") or {}).get("below_24px") or 0)
+            d["contrast_failures"] += int((v.get("contrast") or {}).get("below_threshold") or 0)
+            for sf in (v.get("small_fonts") or [])[:2]:
+                if len(d["small_font_examples"]) < 5 and isinstance(sf, dict):
+                    d["small_font_examples"].append(sf)
+            for we in (v.get("wide_elements") or [])[:2]:
+                if len(d["wide_element_examples"]) < 5:
+                    d["wide_element_examples"].append(we)
 
     # Survey — average numeric answers; collect open-text answers.
     # Sessions that ended after only a few steps carry no real experience:
@@ -703,7 +845,15 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 }
                 for k, v in fi_dimension_scores.items()
             },
+            # Why the scores are what they are — the answer to "what exactly
+            # lowered this?", generated per persona and until now discarded.
+            "dimension_reasons": dict(fi_dimension_reasons),
+            "weaknesses": fi_weaknesses,
+            "strengths": fi_strengths,
         },
+        # What each persona set out to do and how it went. The report's spine:
+        # without it every audit reads the same regardless of the objective.
+        "objective_reflections": objective_reflections,
         "heuristic": {
             "total_findings": len(confirmed_findings),
             "severity_counts": {
@@ -723,10 +873,17 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         "prioritization": prioritize(all_findings, outcomes) if outcomes else [],
         "accessibility": {
             "avg_score": _avg(a11y_scores),
+            # The actual barriers, deduplicated by category — the section used
+            # to be a bare number with nothing a developer could act on.
+            "findings": a11y_findings,
         },
         "viewport": {
             "mobile_overflow_sessions": mobile_overflow,
             "tablet_overflow_sessions": tablet_overflow,
+            # Per-device measurements the scan already takes: tap targets below
+            # the WCAG minimum, contrast failures, tiny text, overflowing
+            # elements. Nothing read these before.
+            "devices": [device_detail[k] for k in sorted(device_detail)],
         },
         "survey": {
             "avg_scores": {k: _avg(v) for k, v in survey_scores.items()},
@@ -983,7 +1140,7 @@ async def generate_aggregated_report(
     except Exception:
         q_meta = None
 
-    stats = aggregate_statistics(reports, outcomes=outcomes, q_meta=q_meta)
+    stats = aggregate_statistics(reports, outcomes=outcomes, q_meta=q_meta, stores=stores)
     n = stats["participant_count"]
 
     # Determine runs/ dir and read page speed (must happen before prompt build)
@@ -1265,7 +1422,7 @@ def _render_aggregated_md(agg: dict) -> str:
     p(f"**Zadanie:** {agg.get('task', '')}  |  **Liczba uczestników:** {n}")
 
     if narr.get("executive_summary"):
-        h(2, "Podsumowanie wykonawcze")
+        h(2, "Podsumowanie")
         p(narr["executive_summary"])
 
     overall = narr.get("overall_ux_score")

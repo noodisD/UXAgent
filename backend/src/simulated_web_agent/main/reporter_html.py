@@ -221,6 +221,56 @@ body {
 }
 .strength-item::before { content: "✓"; color: #008573; font-weight: 700; flex-shrink: 0; }
 
+/* ── Task outcomes ── */
+.obj-tally { font-size: 13px; margin-bottom: 14px; }
+.obj-card { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 12px; background: #fff; }
+.obj-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.obj-who { font-weight: 700; font-size: 15px; }
+.obj-outcome { font-size: 11.5px; font-weight: 700; border-radius: 20px; padding: 3px 11px; }
+.obj-task { font-size: 12.5px; color: var(--muted); margin-bottom: 9px; font-style: italic; }
+.obj-summary { font-size: 13.5px; line-height: 1.55; margin: 0 0 12px; }
+.obj-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.obj-col-h { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.obj-list { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.5; color: #3a3f47; }
+.obj-list li { margin-bottom: 4px; }
+.obj-fix { margin-top: 12px; background: #fff6cc; border: 1px solid #ffee99; border-radius: 8px; padding: 10px 13px; font-size: 13px; }
+.obj-fix-l { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #8c791b; margin-bottom: 3px; }
+
+/* ── Heuristic legend ── */
+.hl-intro { font-size: 13px; color: var(--muted); line-height: 1.55; margin: 0 0 14px; }
+.hl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.hl-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.hl-id { font-weight: 700; width: 44px; color: var(--muted); }
+.hl-name { width: 46%; }
+.hl-verdict { font-size: 12.5px; }
+
+/* ── Score rationale ── */
+.sr-dim { margin-bottom: 16px; }
+.sr-dim-h { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+.sr-dim ul { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.55; color: #3a3f47; }
+.sr-dim li { margin-bottom: 5px; }
+.sr-who { font-weight: 700; color: var(--ink); margin-right: 6px; }
+
+/* ── Accessibility detail ── */
+.a11y-item { border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.a11y-head { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; flex-wrap: wrap; }
+.a11y-sev { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border-radius: 5px; padding: 3px 8px; }
+.a11y-cat { font-weight: 700; font-size: 13.5px; }
+.a11y-who { font-size: 11.5px; color: var(--muted); margin-left: auto; }
+.a11y-detail { font-size: 13px; line-height: 1.5; color: #3a3f47; }
+.a11y-fix { font-size: 13px; margin-top: 7px; }
+.a11y-fix-l { font-weight: 700; color: var(--havas-red); margin-right: 5px; }
+.a11y-where { font-size: 11.5px; color: var(--muted); margin-top: 6px; word-break: break-all; }
+
+/* ── Per-device detail ── */
+.dev-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.dev-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.dev-name { font-weight: 700; font-size: 14px; text-transform: capitalize; margin-bottom: 8px; }
+.dev-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.dev-table td { padding: 5px 0; border-bottom: 1px solid var(--line); color: #3a3f47; }
+.dev-v { text-align: right; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.dev-caveat { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 12px 0 0; }
+
 /* ── Viewport ── */
 .viewport-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .vp-card { border-radius: 8px; padding: 14px 18px; border: 1px solid #e9ecef; }
@@ -363,7 +413,9 @@ def _render_executive(narr: dict) -> str:
     body = f"<p>{summary}</p>"
     if rationale:
         body += f'<p style="margin-top:12px;font-size:13px;color:#6c757d;">{rationale}</p>'
-    return _section("Podsumowanie wykonawcze", body)
+    # "wykonawcze" reads as consultancy filler to the people who receive this;
+    # the reviewer asked for it to go.
+    return _section("Podsumowanie", body)
 
 
 def _render_strengths(narr: dict) -> str:
@@ -839,6 +891,211 @@ def _render_methodology(narr: dict) -> str:
                      f'<p style="font-size:13px;color:#6c757d;">{note}</p>')
 
 
+_OUTCOME_PL = {
+    "success": ("Cel osiągnięty", "#1f7a4d", "#e9f6ee"),
+    "partial": ("Cel osiągnięty częściowo", "#8c5a12", "#fbf2e3"),
+    "failed": ("Cel nieosiągnięty", "#b3352f", "#fdeceb"),
+}
+
+
+def _render_objectives(stats: dict) -> str:
+    """What each participant was asked to do, and how far they got.
+
+    There was no such section: the objective reached the page once, as the
+    header subtitle, so an audit of a car configurator and an audit of a
+    checkout produced the same document — the reviewer asked for a report on a
+    configurator's strengths and weaknesses and got the standard one back.
+
+    It is also the only place the reader learns whether the task was actually
+    completed, which is the headline result of any usability test. That was
+    computed for every persona and rendered nowhere.
+    """
+    rows = stats.get("objective_reflections") or []
+    if not rows:
+        return ""
+
+    counts: dict[str, int] = {}
+    for r in rows:
+        key = r.get("outcome") or "partial"
+        counts[key] = counts.get(key, 0) + 1
+    tally = " · ".join(
+        f'<span style="color:{_OUTCOME_PL.get(k, ("", "#444", ""))[1]};font-weight:700">'
+        f'{_OUTCOME_PL.get(k, (k, "", ""))[0]}: {v}</span>'
+        for k, v in sorted(counts.items())
+    )
+
+    cards = ""
+    for r in rows:
+        label, fg, bg = _OUTCOME_PL.get(r.get("outcome") or "partial", ("—", "#444", "#f1f2f4"))
+        blockers = "".join(f"<li>{_esc(b)}</li>" for b in (r.get("blockers") or [])[:4])
+        wins = "".join(f"<li>{_esc(w)}</li>" for w in (r.get("wins") or [])[:4])
+        fix = _esc(r.get("priority_fix") or "")
+        cards += f"""
+        <div class="obj-card">
+          <div class="obj-head">
+            <span class="obj-who">{_esc(r.get("persona") or "—")}</span>
+            <span class="obj-outcome" style="background:{bg};color:{fg}">{label}</span>
+          </div>
+          <div class="obj-task">{_esc(r.get("objective") or "")}</div>
+          <p class="obj-summary">{_esc(r.get("summary") or "")}</p>
+          <div class="obj-cols">
+            <div><div class="obj-col-h" style="color:#b3352f">Co przeszkadzało</div>
+              <ul class="obj-list">{blockers or "<li>—</li>"}</ul></div>
+            <div><div class="obj-col-h" style="color:#1f7a4d">Co zadziałało dobrze</div>
+              <ul class="obj-list">{wins or "<li>—</li>"}</ul></div>
+          </div>
+          {f'<div class="obj-fix"><span class="obj-fix-l">Najważniejsza poprawka</span>{fix}</div>' if fix else ""}
+        </div>"""
+
+    return _section("Realizacja zadania", f'<div class="obj-tally">{tally}</div>{cards}')
+
+
+def _render_heuristic_legend(stats: dict) -> str:
+    """All ten heuristics with their verdict, plus what the method is.
+
+    Issues render as "H1", "H3" with no key anywhere, so a reader cannot tell
+    what was assessed, how many of the ten passed, or what the numbers mean.
+    Heuristics with no finding are shown as "no violation observed" — the
+    honest wording, since the auditor is told to omit passing heuristics rather
+    than to certify them.
+    """
+    from .reporter import HEURISTIC_NAMES
+
+    by_h = {
+        h.get("heuristic_id"): h
+        for h in ((stats.get("heuristic") or {}).get("by_heuristic") or [])
+    }
+    rows = ""
+    for h_id in sorted(HEURISTIC_NAMES):
+        hit = by_h.get(h_id)
+        if hit:
+            sev = hit.get("worst_severity", "drobny")
+            _bg, fg, _bd = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
+            verdict = (f'<span style="color:{fg};font-weight:700">{_esc(sev)}</span> '
+                       f'<span style="color:#6c757d">· {_esc(hit.get("sessions_affected", ""))}</span>')
+        else:
+            verdict = '<span style="color:#1f7a4d">nie stwierdzono naruszeń</span>'
+        rows += (f'<tr><td class="hl-id">H{h_id}</td>'
+                 f'<td class="hl-name">{_esc(HEURISTIC_NAMES[h_id])}</td>'
+                 f'<td class="hl-verdict">{verdict}</td></tr>')
+
+    intro = (
+        "Ocena opiera się na dziesięciu heurystykach użyteczności Nielsena — "
+        "uznanym zestawie reguł, według których ocenia się interfejsy. Każdy "
+        "problem w raporcie jest przypisany do jednej z nich i oznaczony jako "
+        "H1–H10. Poniżej pełna lista wraz z wynikiem dla badanego serwisu."
+    )
+    return _section(
+        "Heurystyki Nielsena — zakres oceny",
+        f'<p class="hl-intro">{intro}</p>'
+        f'<table class="hl-table">{rows}</table>',
+    )
+
+
+def _render_score_reasons(stats: dict) -> str:
+    """Why the first-impression dimensions scored what they did.
+
+    The reviewer's sharpest complaint was that the report gives scores without
+    ever saying what lowered them. The answer existed per persona all along —
+    first_impression.txt asks for a rationale per dimension, grounded in the
+    step-0 screenshot — and aggregation kept only the numbers.
+    """
+    fi = stats.get("first_impression") or {}
+    reasons = fi.get("dimension_reasons") or {}
+    weaknesses = fi.get("weaknesses") or []
+    if not reasons and not weaknesses:
+        return ""
+
+    blocks = ""
+    for key, label in _FI_DIM_LABELS.items():
+        items = reasons.get(key) or []
+        if not items:
+            continue
+        lis = "".join(
+            f'<li><span class="sr-who">{_esc(i.get("persona") or "—")}'
+            f'{f" · {i['score']}/5" if i.get("score") is not None else ""}</span>'
+            f'{_esc(i.get("why") or "")}</li>'
+            for i in items
+        )
+        blocks += f'<div class="sr-dim"><div class="sr-dim-h">{_esc(label)}</div><ul>{lis}</ul></div>'
+
+    if weaknesses:
+        lis = "".join(
+            f'<li><span class="sr-who">{_esc(w.get("persona") or "—")}</span>'
+            f'{_esc(w.get("text") or "")}</li>' for w in weaknesses[:10]
+        )
+        blocks += f'<div class="sr-dim"><div class="sr-dim-h">Co obniżyło pierwsze wrażenie</div><ul>{lis}</ul></div>'
+
+    return _section("Dlaczego takie oceny", blocks) if blocks else ""
+
+
+def _render_accessibility_detail(stats: dict) -> str:
+    """The actual accessibility barriers, not just the average score.
+
+    The section rendered a single number; the pass produces categorised
+    findings with the page they were seen on and a recommendation.
+    """
+    findings = (stats.get("accessibility") or {}).get("findings") or []
+    if not findings:
+        return ""
+    rows = ""
+    for f in findings[:12]:
+        sev = f.get("severity", "drobny")
+        bg, fg, border = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
+        where = ", ".join(f.get("urls") or [])[:160]
+        who = ", ".join(f.get("personas") or [])
+        rows += f"""
+        <div class="a11y-item" style="border-left-color:{border}">
+          <div class="a11y-head">
+            <span class="a11y-sev" style="background:{bg};color:{fg}">{_esc(sev)}</span>
+            <span class="a11y-cat">{_esc(f.get("category") or "")}</span>
+            {f'<span class="a11y-who">{_esc(who)}</span>' if who else ""}
+          </div>
+          <div class="a11y-detail">{_esc(f.get("detail") or "")}</div>
+          {f'<div class="a11y-fix"><span class="a11y-fix-l">Rekomendacja</span>{_esc(f.get("recommendation"))}</div>' if f.get("recommendation") else ""}
+          {f'<div class="a11y-where">{_esc(where)}</div>' if where else ""}
+        </div>"""
+    return _section("Bariery dostępności", rows)
+
+
+def _render_device_detail(stats: dict) -> str:
+    """Per-device measurements the scan already takes and nothing read.
+
+    Answers "how does it behave on mobile?" with numbers rather than prose.
+    The caveat matters and is stated: this is a technical scan at each
+    viewport, while the walkthrough itself ran at one desktop-sized window.
+    """
+    devices = (stats.get("viewport") or {}).get("devices") or []
+    if not devices:
+        return ""
+    cards = ""
+    for d in devices:
+        small = ", ".join(
+            str(s.get("size")) for s in (d.get("small_font_examples") or [])[:3]
+            if isinstance(s, dict) and s.get("size")
+        )
+        cards += f"""
+        <div class="dev-card">
+          <div class="dev-name">{_esc(d.get("viewport") or "")}</div>
+          <table class="dev-table">
+            <tr><td>Przeskanowane strony</td><td class="dev-v">{d.get("pages_scanned", 0)}</td></tr>
+            <tr><td>Strony z poziomym przewijaniem</td><td class="dev-v">{d.get("pages_with_overflow", 0)}</td></tr>
+            <tr><td>Elementy dotykowe poniżej minimum (WCAG 2.5.8)</td><td class="dev-v">{d.get("tap_targets_below_min", 0)}</td></tr>
+            <tr><td>Teksty poniżej kontrastu AA</td><td class="dev-v">{d.get("contrast_failures", 0)}</td></tr>
+            {f'<tr><td>Najmniejsze wykryte czcionki</td><td class="dev-v">{_esc(small)}</td></tr>' if small else ""}
+          </table>
+        </div>"""
+    caveat = (
+        "Pomiar techniczny wykonany osobno dla każdej szerokości ekranu. "
+        "Przejście przez serwis (i wynikające z niego problemy heurystyczne) "
+        "odbyło się w oknie desktopowym — te wyniki opisują układ strony, nie "
+        "przebieg ścieżki na telefonie."
+    )
+    return _section("Zachowanie na urządzeniach",
+                     f'<div class="dev-grid">{cards}</div>'
+                     f'<p class="dev-caveat">{caveat}</p>')
+
+
 # ---------------------------------------------------------------------------
 # Main entry points
 # ---------------------------------------------------------------------------
@@ -858,7 +1115,14 @@ def generate_html_report(agg: dict) -> str:
         _render_header(agg, stats) +
         '<div class="page">' +
         _render_executive(narr) +
+        # What was asked and whether it was achieved, before any heuristic
+        # detail: a usability report that opens with abstract scores buries
+        # its own headline.
+        _render_objectives(stats) +
         _render_strengths(narr) +
+        # The key to "H1", "H3" — without it the issues below name a system the
+        # reader has never been shown.
+        _render_heuristic_legend(stats) +
         _render_all_issues(narr) +
         _render_recommendations(narr) +
         _render_pagespeed(ps) +
@@ -866,9 +1130,14 @@ def generate_html_report(agg: dict) -> str:
         _render_broken_links(links) +
         _render_form_funnel(forms) +
         _render_first_impression(stats, narr) +
+        # Immediately after the scores, so a low number and its explanation are
+        # read together rather than pages apart.
+        _render_score_reasons(stats) +
         _render_survey(stats) +
         _render_accessibility(stats, narr) +
+        _render_accessibility_detail(stats) +
         _render_responsiveness(stats, narr) +
+        _render_device_detail(stats) +
         _render_stats_table(stats) +
         _render_methodology(narr) +
         '</div>'
