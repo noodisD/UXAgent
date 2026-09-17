@@ -62,6 +62,77 @@ _EXECUTOR_ERROR_MARKERS = (
 )
 
 
+# Bot-detection interstitials. A WAF challenge page — Cloudflare, DataDome,
+# PerimeterX, Imperva — is the automation being *detected*, which is the one
+# thing a real visitor almost never sees. The first external review's hebe.pl
+# report was six critical site defects generated entirely from such a screen,
+# including a recommendation that the site put a timeout on its own bot
+# protection. None of the existing signatures can see it: a challenge page
+# loads successfully and renders text, so there is no executor error, no empty
+# observation and no consent state — it is ordinary page *content*.
+#
+# Matched as whole phrases, never on a bare "bot" or "captcha": a drugstore
+# selling robot vacuums, or any page explaining its cookie and bot policy,
+# would otherwise condemn its own session.
+_BOT_WALL_MARKERS = (
+    "performing verification",
+    "checking your browser",
+    "verify you are human",
+    "verifying you are human",
+    "are not a bot",
+    "is not a robot",
+    "i'm not a robot",
+    "service to protect against malicious bots",
+    "ddos protection by",
+    "enable javascript and cookies to continue",
+    "attention required! | cloudflare",
+    "please stand by, while we are checking your browser",
+    "additional security check is required",
+    "weryfikacja przeglądarki",
+    "sprawdzamy, czy nie jesteś robotem",
+    "potwierdź, że nie jesteś robotem",
+)
+
+
+def bot_wall_steps(store: TraceStore) -> set[int]:
+    """Steps whose page was a bot-detection challenge rather than the site.
+
+    Read from the observation text because that is the only place a challenge
+    page shows up — it is served with a normal status and renders normally.
+    """
+    blocked: set[int] = set()
+    try:
+        n_steps = len(store.read_action_trace() or [])
+    except Exception:
+        n_steps = 0
+    for i in range(n_steps):
+        try:
+            text = store.read_observation_step_text(i).lower()
+        except Exception:
+            continue
+        if any(m in text for m in _BOT_WALL_MARKERS):
+            blocked.add(i)
+    return blocked
+
+
+def session_blocked_by_bot_wall(store: TraceStore) -> bool:
+    """True when the session never got past a challenge page.
+
+    The distinction that matters for the run as a whole: a challenge on one
+    step is noise to be gated, but a session where *every* step was the
+    challenge observed nothing about the site at all, and no usability verdict
+    can rest on it. That is the same situation as a page that never loaded,
+    and it is handled the same way — an explicit failure, not a score.
+    """
+    try:
+        n_steps = len(store.read_action_trace() or [])
+    except Exception:
+        return False
+    if n_steps == 0:
+        return False
+    return len(bot_wall_steps(store)) == n_steps
+
+
 def harness_suspect_steps(store: TraceStore) -> set[int]:
     """Step indices whose action is a harness interaction failure.
 
@@ -73,7 +144,9 @@ def harness_suspect_steps(store: TraceStore) -> set[int]:
       3. a near-empty observation over a large raw page — a perception-capture
          artifact ("The page is empty" while raw_html is tens of KB), i.e. the
          perceiver failed, not the site;
-      4. the executor reported it could not perform the action at all.
+      4. the executor reported it could not perform the action at all;
+      5. a consent notice was on screen and never dismissed;
+      6. the page was a bot-detection challenge rather than the site.
     """
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
     suspect: set[int] = set()
@@ -108,6 +181,10 @@ def harness_suspect_steps(store: TraceStore) -> set[int]:
         n_steps = len(actions)
         for start in sorted(unresolved):
             suspect.update(range(start, n_steps))
+
+    # (6) Bot-detection challenge pages. Anything the auditor concludes from a
+    # screen that exists because we are automated is about us, not the site.
+    suspect.update(bot_wall_steps(store))
 
     for i in range(len(actions)):
         obs = store.read_observation_step_text(i).strip()

@@ -72,6 +72,15 @@ usability problems is a false positive (real site teams reject them):
   itself is genuinely unusable to a person — e.g. it cannot be dismissed at all,
   or it permanently covers the content after a choice was made. "A banner
   appeared" is never a finding.
+- A bot-detection or security-verification screen: Cloudflare "Performing
+  verification" / "Checking your browser", a CAPTCHA, "verify you are human",
+  DataDome, PerimeterX, Imperva. These appear BECAUSE the visitor is automated;
+  a real person is waved through in a second or never sees them at all. Never
+  report them as site defects, and never recommend the site change its bot
+  protection — that recommendation was the single clearest error in the first
+  external review of this tool. If the whole session was spent on such a screen,
+  you observed nothing about the site: return no findings rather than inventing
+  some from the challenge page.
 - Anything describing the AUTOMATION failing rather than the site: a click that
   "did not register", an element that "could not be found", a step that "timed
   out", a repeated attempt that "had no effect". These are this tool's own

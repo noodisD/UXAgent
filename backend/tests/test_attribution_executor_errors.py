@@ -232,3 +232,93 @@ def test_a_distinctive_id_still_condemns_by_name(tmp_path):
     }]
     attribution.flag_harness_suspects(store, findings)
     assert findings[0]["harness_suspect"] is True
+
+
+# --- bot-detection challenge pages ------------------------------------------
+#
+# The review's hebe.pl report: six critical "site" defects generated entirely
+# from a Cloudflare challenge screen, one of them advising hebe to put a
+# timeout on its own bot protection. No earlier signature could see it — a
+# challenge page loads with a normal status and renders text, so there is no
+# executor error, no empty observation and no consent state.
+
+@pytest.mark.parametrize("wall", [
+    "www.hebe.pl Performing verification This website uses a security service to "
+    "protect against malicious bots.",
+    "Checking your browser before accessing the site. DDoS protection by Cloudflare.",
+    "Verify you are human by completing the action below.",
+    "Enable JavaScript and cookies to continue",
+])
+def test_a_challenge_page_condemns_its_step(tmp_path, wall):
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "a"}, {"action": "click", "target": "b"}],
+        observations=[_ok(), _ok(), _ok()],
+        obs_texts=[wall, "Strona główna sklepu"],
+    )
+    assert 0 in attribution.harness_suspect_steps(store)
+
+
+def test_a_finding_from_the_challenge_screen_is_excluded(tmp_path):
+    """End to end, the hebe case exactly."""
+    from simulated_web_agent.main.severity import excluded_from_report
+
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "verify"}],
+        observations=[_ok(), _ok()],
+        obs_texts=["www.hebe.pl Performing verification This website uses a security "
+                   "service to protect against malicious bots."],
+    )
+    findings = [{
+        "heuristic_id": 9, "severity": "krytyczny", "step": 0,
+        "evidence": "System na stałe zablokował użytkownika na ekranie weryfikacji.",
+        "recommendation": "Zaimplementować mechanizm timeout dla weryfikacji.",
+    }]
+    attribution.flag_harness_suspects(store, findings)
+    assert findings[0]["harness_suspect"] is True
+    assert excluded_from_report(findings[0]) is True
+
+
+def test_ordinary_pages_mentioning_bots_or_cookies_are_untouched(tmp_path):
+    """Matched as whole phrases, never on a bare "bot" or "captcha" — a shop
+    selling robot vacuums, or any page explaining its own bot policy, would
+    otherwise condemn its own session."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "a"}, {"action": "click", "target": "b"}],
+        observations=[_ok(), _ok(), _ok()],
+        obs_texts=[
+            "Robot sprzątający iRobot Roomba — najlepsze oferty. Polityka cookies.",
+            "Nasz bot obsługi klienta odpowie na Twoje pytania. Captcha chroni formularz.",
+        ],
+    )
+    assert attribution.harness_suspect_steps(store) == set()
+
+
+def test_a_session_is_only_blocked_when_every_step_was_the_challenge(tmp_path):
+    """One challenge step is noise to gate; a whole session behind the wall
+    means nothing about the site was seen, which run.py treats as no evidence.
+    Getting through on any step must not count as blocked."""
+    walled = _trace(
+        tmp_path / "a",
+        actions=[{"action": "click", "target": "x"}, {"action": "click", "target": "y"}],
+        observations=[_ok(), _ok(), _ok()],
+        obs_texts=["Performing verification", "Checking your browser"],
+    )
+    assert attribution.session_blocked_by_bot_wall(walled) is True
+
+    got_through = _trace(
+        tmp_path / "b",
+        actions=[{"action": "click", "target": "x"}, {"action": "click", "target": "y"}],
+        observations=[_ok(), _ok(), _ok()],
+        obs_texts=["Performing verification", "Drogeria Hebe — kosmetyki i pielęgnacja"],
+    )
+    assert attribution.session_blocked_by_bot_wall(got_through) is False
+
+
+def test_a_session_with_no_steps_is_not_called_bot_blocked(tmp_path):
+    """It failed for some other reason; mislabelling it would send the reader
+    chasing bot protection that was never involved."""
+    empty = _trace(tmp_path, actions=[], observations=[])
+    assert attribution.session_blocked_by_bot_wall(empty) is False

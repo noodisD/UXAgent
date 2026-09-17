@@ -45,6 +45,32 @@ def site_slug(url: str) -> str:
     return re.sub(r"^www\.", "", host)
 
 
+def no_evidence_failure(persona_count: int, start_url: str, reasons: list[str]) -> dict:
+    """The failure payload for a run that never saw the site.
+
+    Its own function because the wording is the point. This is what the history
+    row and the failed-run modal show, and the one thing it must not do is read
+    like a verdict on the site: the reviewer's t-mobile run produced "a critical
+    barrier ON THE SITE" for a page that was never reached.
+    """
+    return {
+        "phase": "sessions",
+        "failedAt": start_url,
+        "error": (
+            f"No session observed the site: all {persona_count} personas either "
+            f"ended at step 0 or spent the whole session on a bot-detection "
+            f"challenge. Reported reason(s): " + "; ".join(reasons)
+        ),
+        "suggestion": (
+            "Nothing about the site was observed, so no usability verdict is "
+            "possible. Check that the site is reachable from this machine (DNS, "
+            "proxy, TLS interception, geo-blocking) and that its bot protection is "
+            "not challenging the browser, then re-run. "
+            "This is not a finding about the site."
+        ),
+    }
+
+
 def new_run_id() -> str:
     """A run-group id used as the runs/<run_id>/ folder name."""
     return f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{uuid.uuid4().hex[:4]}"
@@ -329,27 +355,31 @@ async def run_async(
     # ever saw, recommending the site fix a fault that was never theirs. The
     # older guard below could not catch it: stores existed and a report was
     # written, so nothing looked missing.
-    observed = [s for s in stores
-                if int(((s.read_session_result() or {}).get("steps_taken") or 0)) > 0]
+    # A session spent entirely behind a bot-detection challenge is the same
+    # situation wearing different clothes: the page loaded and rendered, so
+    # steps were taken, but every one of them was the challenge screen rather
+    # than the site. hebe.pl did this in the reviewer's run and produced six
+    # critical "site" defects out of it, one advising the site to put a timeout
+    # on its own bot protection.
+    from . import attribution as _attr
+
+    def _observed_the_site(store) -> bool:
+        if int(((store.read_session_result() or {}).get("steps_taken") or 0)) <= 0:
+            return False
+        try:
+            return not _attr.session_blocked_by_bot_wall(store)
+        except Exception:
+            return True
+
+    observed = [s for s in stores if _observed_the_site(s)]
     if stores and not observed:
         reasons = sorted({
-            str((s.read_session_result() or {}).get("error") or "unknown")[:200]
+            str((s.read_session_result() or {}).get("error")
+                or ("blocked by bot-detection challenge"
+                    if _attr.session_blocked_by_bot_wall(s) else "unknown"))[:200]
             for s in stores
         })
-        _finalize("error", failure={
-            "phase": "sessions",
-            "failedAt": start_url,
-            "error": (
-                f"No session reached the site: all {len(stores)} personas ended at "
-                f"step 0. Reported reason(s): " + "; ".join(reasons)
-            ),
-            "suggestion": (
-                "Nothing was observed, so no usability verdict is possible. Check "
-                "that the site is reachable from this machine (DNS, proxy, TLS "
-                "interception, geo-blocking or bot protection) and re-run. This is "
-                "not a finding about the site."
-            ),
-        })
+        _finalize("error", failure=no_evidence_failure(len(stores), start_url, reasons))
         return run_id
 
     report_error: Exception | None = None

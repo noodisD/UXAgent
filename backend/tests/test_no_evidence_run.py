@@ -72,17 +72,29 @@ def test_a_missing_or_malformed_session_result_counts_as_unobserved(tmp_path):
     assert _observed([_Broken(tmp_path, "p0", 0), _Null(tmp_path, "p1", 0)]) == []
 
 
-def test_the_failure_payload_says_it_is_not_about_the_site(tmp_path, monkeypatch):
+def test_the_failure_payload_says_it_is_not_about_the_site():
     """The whole point of the guard is what the reader is told. A failure that
     still reads as a site defect would be the same bug with a different status.
     """
-    import inspect
-    src = inspect.getsource(run_mod.run_async)
-    start = src.index("No session reached the site")
-    payload = src[start:start + 900]
-    assert "not a finding about the site" in payload
-    assert "TLS" in payload or "proxy" in payload, \
-        "the suggestion must point at reachability, which is what actually failed"
+    payload = run_mod.no_evidence_failure(
+        2, "https://www.t-mobile.pl/", ["net::ERR_CERT_AUTHORITY_INVALID"])
+
+    assert payload["phase"] == "sessions"
+    assert payload["failedAt"] == "https://www.t-mobile.pl/"
+    assert "net::ERR_CERT_AUTHORITY_INVALID" in payload["error"],         "the actual cause must survive into what the user reads"
+
+    suggestion = payload["suggestion"]
+    assert "This is not a finding about the site." in suggestion
+    assert "TLS" in suggestion and "bot protection" in suggestion,         "both routes to an unobserved run must be named, or the reader chases the wrong one"
+
+
+def test_the_failure_payload_never_scores_or_blames(tmp_path):
+    """Sanity on the wording itself: no severity, no score, no imperative aimed
+    at the site owner. This text is the whole deliverable of a failed run."""
+    payload = run_mod.no_evidence_failure(3, "https://x.pl/", ["timeout"])
+    blob = (payload["error"] + " " + payload["suggestion"]).lower()
+    for word in ("krytyczn", "usterka", "defect", "/5", "naprawić"):
+        assert word not in blob, f"failure text must not read as a verdict: {word!r}"
 
 
 def test_the_guard_runs_before_the_report_is_generated():
@@ -90,7 +102,7 @@ def test_the_guard_runs_before_the_report_is_generated():
     puts the sentence on disk, into the PDF and into the history row."""
     import inspect
     src = inspect.getsource(run_mod.run_async)
-    assert src.index("No session reached the site") < src.index("generate_aggregated_report")
+    assert src.index("no_evidence_failure") < src.index("generate_aggregated_report")
 
 
 # --- the run's own record must name the fault -------------------------------
