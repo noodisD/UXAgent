@@ -182,6 +182,15 @@ def _suspect_targets(store: TraceStore, suspect: set[int]) -> set[str]:
     # harness_suspect, which zeroes severity_score, drops them from headline
     # counts and the prioritization matrix, and caps confidence to low. The
     # match is only meaningful for distinctive parser ids ("wyszukaj_lokalizacje").
+    #
+    # The review plan proposed removing this floor, so short consent ids ("ok",
+    # "zgoda") could be flagged by name. Measured over the 28 archived sessions
+    # it condemns 2 further findings out of 135 — both matched through the ids
+    # "1" and "2" landing on digits in prose ("Koszyk, 2 artykuły"), neither
+    # about consent. The floor stays: consent no longer needs the name path,
+    # because unresolved banners are caught per step from write_consent_states,
+    # which is both stronger and not prose-dependent. See
+    # test_the_target_floor_is_measured_not_assumed.
     return {t for t in targets if len(t) >= _MIN_TARGET_LEN}
 
 

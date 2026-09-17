@@ -187,3 +187,48 @@ def test_missing_consent_file_is_not_an_error(tmp_path):
     )
     assert store.read_consent_states() == {}
     assert attribution.harness_suspect_steps(store) == set()
+
+
+# --- why the short-target floor stays --------------------------------------
+
+def test_the_target_floor_is_measured_not_assumed(tmp_path):
+    """A numeric target must not condemn a finding by naming.
+
+    The review plan proposed dropping _MIN_TARGET_LEN so short consent ids
+    ("ok", "zgoda") could be matched by name. Measured over the 28 archived
+    sessions, removing it flagged 2 extra findings out of 135 — both matched
+    through the ids "1" and "2" hitting digits in Polish prose, neither about
+    consent. Consent is caught per step from the recorded consent state, which
+    does not depend on prose at all, so the floor buys accuracy for nothing.
+    """
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "click", "target": "2"}, {"action": "click", "target": "x"}],
+        observations=[_ok(), _failed("Error executing action: Locator.click: Timeout")],
+    )
+    findings = [{
+        "heuristic_id": 1, "severity": "krytyczny", "step": 7,
+        "evidence": "Ikona koszyka wciąż pokazuje 'Koszyk, 2 artykuły'.",
+        "recommendation": "Zsynchronizować licznik koszyka.",
+    }]
+    attribution.flag_harness_suspects(store, findings)
+    assert findings[0]["harness_suspect"] is False, \
+        "a digit in prose must not demote an unrelated finding"
+
+
+def test_a_distinctive_id_still_condemns_by_name(tmp_path):
+    """The name path has to keep working — findings often anchor on a later
+    step but name the stuck element in their text."""
+    store = _trace(
+        tmp_path,
+        actions=[{"action": "type", "target": "wyszukaj_lokalizacje"},
+                 {"action": "click", "target": "x"}],
+        observations=[_ok(), _failed("Error executing action: Locator.click: Timeout")],
+    )
+    findings = [{
+        "heuristic_id": 1, "severity": "poważny", "step": 28,
+        "evidence": "Wpisanie tekstu w pole 'wyszukaj_lokalizacje' nie dało efektu.",
+        "recommendation": "Naprawić pole.",
+    }]
+    attribution.flag_harness_suspects(store, findings)
+    assert findings[0]["harness_suspect"] is True
