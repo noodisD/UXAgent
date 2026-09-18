@@ -181,6 +181,7 @@ body {
 .issue-card .impact { font-size: 13px; margin-bottom: 8px; }
 .issue-card .rec { font-size: 13px; background: rgba(255,255,255,.55); border-radius: 6px; padding: 8px 12px; }
 .issue-card .rec-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-bottom: 3px; opacity: .7; }
+.obj-caveat { font-size: 12px; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; padding: 6px 10px; margin: 6px 0 2px; }
 .unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
 .evidence { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; background: rgba(255,255,255,.6); border-radius: 6px; padding: 10px; }
 .ev-thumb { width: 140px; height: auto; border: 1px solid #dee2e6; border-radius: 4px; display: block; }
@@ -968,12 +969,23 @@ def _render_objectives(stats: dict) -> str:
         blockers = "".join(f"<li>{_esc(b)}</li>" for b in (r.get("blockers") or [])[:4])
         wins = "".join(f"<li>{_esc(w)}</li>" for w in (r.get("wins") or [])[:4])
         fix = _esc(r.get("priority_fix") or "")
+        # A reflection is the persona's own account, never checked against the
+        # trace. When it names our machinery or repeats a claim the gate threw
+        # out, rendering it as plain fact is how a suppressed finding still
+        # reaches the client — which is exactly what both re-run reports did.
+        unverified = (
+            '<div class="obj-caveat">⚠ Relacja uczestnika, niezweryfikowana '
+            'względem zapisu sesji — część opisanych trudności może wynikać z '
+            'ograniczeń narzędzia, a nie z serwisu.</div>'
+            if r.get("self_reported_only") else ""
+        )
         cards += f"""
         <div class="obj-card">
           <div class="obj-head">
             <span class="obj-who">{_esc(r.get("persona") or "—")}</span>
             <span class="obj-outcome" style="background:{bg};color:{fg}">{label}</span>
           </div>
+          {unverified}
           <div class="obj-task">{_esc(r.get("objective") or "")}</div>
           <p class="obj-summary">{_esc(r.get("summary") or "")}</p>
           <div class="obj-cols">

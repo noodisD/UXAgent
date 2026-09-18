@@ -80,6 +80,19 @@ class TraceStore:
             html, encoding="utf-8"
         )
 
+    def read_raw_html(self, step: int) -> str:
+        """The page as the browser had it, before simplification.
+
+        The only record of what was actually on screen that does not pass
+        through the simplifier — which is what makes it usable as independent
+        evidence when a finding claims content was missing.
+        """
+        path = self.trace_dir / "raw_html" / f"raw_html_{step}.html"
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
     def raw_html_size(self, step: int) -> int:
         """Byte size of the step's raw HTML capture (0 if absent). Used to tell
         a genuinely blank page from a perception artifact: a near-empty

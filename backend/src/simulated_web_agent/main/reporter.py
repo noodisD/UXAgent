@@ -28,6 +28,7 @@ from .severity import (
     heuristic_id as _heuristic_id,
     severity_rank,
 )
+from .attribution import restates_a_gated_finding
 from .redaction import clean as _redact, mentions_harness_fault
 from .trace_store import TraceStore
 
@@ -624,11 +625,22 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "wins": [w for w in (refl.get("wins") or []) if str(w).strip()],
             "priority_fix": refl.get("priorityFix", ""),
         })
-        entry["self_reported_only"] = any(
-            mentions_harness_fault(t) for t in (
-                [refl.get("summary", ""), refl.get("priorityFix", "")]
-                + [str(b) for b in (refl.get("blockers") or [])]
-            )
+        refl_texts = (
+            [refl.get("summary", ""), refl.get("priorityFix", "")]
+            + [str(b) for b in (refl.get("blockers") or [])]
+        )
+        # Two ways a reflection fails to be evidence about the site: it names
+        # our own machinery, or it restates a claim the gate already threw out.
+        # The second is how both re-run reports carried a suppressed finding to
+        # the client — gating protects the findings list, not the persona's own
+        # account of the same session.
+        try:
+            own_findings = TraceStore(Path(trace_dir)).read_heuristic_findings() or []
+        except Exception:
+            own_findings = []
+        entry["self_reported_only"] = (
+            any(mentions_harness_fault(t) for t in refl_texts)
+            or restates_a_gated_finding(refl_texts, own_findings)
         )
         objective_reflections.append(entry)
 

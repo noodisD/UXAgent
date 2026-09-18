@@ -289,6 +289,108 @@ def _names_target(text: str, targets: set[str]) -> bool:
     )
 
 
+# Perception loss: the page had the content, our simplifier dropped it.
+#
+# The lidl.pl re-run produced three findings that carried the whole report —
+# "the page says 10 products and shows none", two of them critical — and all
+# three were artifacts. raw_html at the cited steps holds 18 and 22 price
+# strings; the simplified observation the agent saw holds none. The product
+# grid never reached the agent.
+#
+# Worse, the claim verifier confirmed them. It re-reads the cited step's
+# observation, which is the same simplified text that produced the claim, so a
+# perception failure certifies itself: claim_verdict "supported", confidence
+# high, no gate. Raw HTML is the only record that does not pass through the
+# simplifier, which is what makes it usable as independent evidence here.
+#
+# Prices are the signal because they are unambiguous and locale-specific: a
+# listing page that showed money has content, whatever else is arguable. The
+# check is deliberately one-directional — it only ever exonerates the site.
+_PRICE_RE = re.compile(r"\d+[,.]\d{2}\s*(?:zł|PLN|EUR|€)", re.I)
+_PRICES_FOR_LOSS = 5
+
+# Claims of the form "the content is not there". Only these are affected: a
+# step that lost its product grid can still host a perfectly good finding about
+# something else, and suppressing that would be over-reach.
+_ABSENCE_MARKERS = (
+    "nie jest widoczn", "nie są widoczn", "niewidoczn", "nie wyświetla",
+    "nie pokazuje", "nie widać", "brak produkt", "brak listy", "pusta lista",
+    "żadnej listy", "żadnych produkt", "nie załadowa", "nie renderuj",
+)
+
+
+def perception_loss_steps(store: TraceStore) -> set[int]:
+    """Steps where the raw page carried prices and the observation carried none.
+
+    Evidence that the agent was shown less than the visitor would have been, so
+    "I could not see it" says something about this tool, not about the site.
+    """
+    lost: set[int] = set()
+    try:
+        n_steps = len(store.read_action_trace() or [])
+    except Exception:
+        return lost
+    for i in range(n_steps):
+        try:
+            raw = store.read_raw_html(i)
+        except Exception:
+            continue
+        if not raw or len(_PRICE_RE.findall(raw)) < _PRICES_FOR_LOSS:
+            continue
+        try:
+            seen = store.read_observation_step_text(i)
+        except Exception:
+            seen = ""
+        if not _PRICE_RE.search(seen or ""):
+            lost.add(i)
+    return lost
+
+
+def _claims_content_absent(finding: dict) -> bool:
+    text = f"{finding.get('evidence', '')} {finding.get('recommendation', '')}".lower()
+    return any(m in text for m in _ABSENCE_MARKERS)
+
+
+# Quoted element names inside a finding's evidence — 'Następny krok',
+# "Pokaż 10 produktów". Distinctive enough to match the same claim restated in
+# free text, short enough not to need fuzzy matching.
+_QUOTED_RE = re.compile(r"['‘’\"„”]([^'‘’\"„”]{4,60})['‘’\"„”]")
+
+
+def restates_a_gated_finding(texts, findings) -> bool:
+    """Does this free text repeat a claim the gate already threw out?
+
+    Gating protects the findings list. It does not protect the persona's own
+    reflection, which is written from the same session and often says the same
+    thing in the first person — and which the report renders directly under
+    "Co przeszkadzało" and "Najważniejsza poprawka". Both re-run reports carried
+    a suppressed claim to the client this way: hyundai's "'Następny krok' był
+    nieaktywny" (gated unsupported) and lidl's filter-modal failure (gated
+    harness_suspect) were asserted as site defects in the narrative.
+
+    Matching is on the element name the finding quotes, because that is the part
+    a restatement keeps. Two independent claims about the same button are rare;
+    a restatement of the same one is not.
+    """
+    from .severity import excluded_from_report
+
+    blob = " ".join(str(t) for t in (texts or []) if t).lower()
+    if not blob:
+        return False
+    for f in findings or []:
+        if not isinstance(f, dict) or not excluded_from_report(f):
+            continue
+        evidence = f"{f.get('evidence', '')} {f.get('recommendation', '')}"
+        for quoted in _QUOTED_RE.findall(evidence):
+            token = quoted.strip().lower()
+            # Skip fragments too generic to identify a claim.
+            if len(token) < 4 or " " not in token and len(token) < 6:
+                continue
+            if token in blob:
+                return True
+    return False
+
+
 def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     """Stamp each finding with `harness_suspect` / `requires_human_check` when it
     is attributable to a harness interaction failure — either its cited step
@@ -296,6 +398,9 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     Returns the same list (findings mutated in place); non-dicts pass through."""
     suspect = harness_suspect_steps(store)
     targets = _suspect_targets(store, suspect)
+    # Steps where our own simplifier dropped the page's content. Only findings
+    # that claim the content was missing are affected by it.
+    perception_lost = perception_loss_steps(store)
     # If the search demonstrably ran, any "search is broken" claim is
     # contradicted by the agent's own navigation.
     search_contradicted = _search_ran(store)
@@ -312,6 +417,10 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         if _names_target(text, targets):
             return True
         if search_contradicted and _claims_search_broken(f):
+            return True
+        # "The products are not displayed" cited against a step whose raw page
+        # was full of prices: the browser had them, the agent did not.
+        if step is not None and step in perception_lost and _claims_content_absent(f):
             return True
         return False
 
