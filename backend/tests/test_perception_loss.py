@@ -168,3 +168,32 @@ def test_an_unflagged_reflection_renders_clean():
         "priority_fix": "", "self_reported_only": False,
     }]})
     assert "niezweryfikowana" not in html
+
+
+# --- a link the server refused to US is not a broken link -------------------
+
+def test_statuses_that_mean_we_were_refused_are_not_broken():
+    """The hyundai re-run reported the client's own homepage as broken and told
+    them to fix it. hyundai.com/pl/pl.html answers 403 to an automated request
+    and serves the page to a person. A UX specialist checks a broken-link claim
+    by clicking it, so a false one costs more than a missed real one."""
+    from simulated_web_agent.main.link_checker import (
+        _OK_STATUSES,
+        _REFUSED_US_STATUSES,
+    )
+
+    for status in (401, 403, 405, 429):
+        assert status in _REFUSED_US_STATUSES
+
+    for status in (404, 410, 500, 502, 503):
+        assert status not in _REFUSED_US_STATUSES and status not in _OK_STATUSES, \
+            "a genuinely dead link must still be reported"
+
+
+def test_the_two_status_sets_do_not_overlap():
+    from simulated_web_agent.main.link_checker import (
+        _OK_STATUSES,
+        _REFUSED_US_STATUSES,
+    )
+
+    assert not (_OK_STATUSES & _REFUSED_US_STATUSES)

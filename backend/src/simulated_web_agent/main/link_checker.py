@@ -4,7 +4,8 @@ Link checker — verifies <a href> links found on each visited page.
 For each unique URL visited during an agent session, opens a Playwright
 browser, collects all on-page anchors, then probes them with JS fetch()
 HEAD requests.  Links returning non-2xx/3xx status codes (after redirects)
-are flagged as broken.
+are flagged as broken — except the ones that mean the server refused this
+client rather than the link being dead (see _REFUSED_US_STATUSES).
 
 Limits: first 5 visited URLs × first 40 links each, to keep scan fast.
 
@@ -30,6 +31,20 @@ _NAV_TIMEOUT_MS = 15_000
 
 # HTTP statuses that are NOT considered broken
 _OK_STATUSES = {0, 200, 201, 204, 301, 302, 303, 304, 307, 308}
+
+# ...and statuses that mean the server refused *us*, not that the link is dead.
+# The hyundai re-run reported the client's own homepage as a broken link, and
+# the report told them to fix it: hyundai.com/pl/pl.html answered 403 to our
+# automated request, as did their Twitter profile. A visitor clicking either
+# one gets the page. A UX specialist checks a "broken link" claim by clicking
+# it, so a false one here costs more credibility than a missed real one.
+#
+#   401/403 — refused this client (bot protection, auth wall)
+#   405     — the server dislikes our request method, not the URL
+#   429     — we asked too often
+#
+# Genuinely broken still is: 404, 410, any 5xx, and connection failures.
+_REFUSED_US_STATUSES = {401, 403, 405, 429}
 
 _COLLECT_HREFS_JS = """
 () => Array.from(document.querySelectorAll('a[href]'))
@@ -86,7 +101,7 @@ async def _check_links_on_page(page, url: str) -> dict[str, Any]:
                 resp: dict = await page.evaluate(_FETCH_JS, href)
                 status = resp.get("status", 0)
                 ok = resp.get("ok", False)
-                if not ok and status not in _OK_STATUSES:
+                if not ok and status not in _OK_STATUSES                         and status not in _REFUSED_US_STATUSES:
                     broken.append(
                         {
                             "url": href,
