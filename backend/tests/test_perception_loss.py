@@ -197,3 +197,36 @@ def test_the_two_status_sets_do_not_overlap():
     )
 
     assert not (_OK_STATUSES & _REFUSED_US_STATUSES)
+
+
+# --- pressing "Next" again is the task, not a loop --------------------------
+
+def test_the_revisit_guard_leaves_a_wizard_next_button_alone():
+    """The hyundai configurator is a step wizard, so 'Następny krok' is the
+    correct action on every step. The guard fired on its third use with "Do not
+    open it again", the agent navigated around it, and the report told the
+    client the button was inactive and needed a workaround — a claim the
+    reviewer would falsify in one click, exactly as she did the cookie banner.
+
+    'nast_pny_krok' is the real semantic id from the run: the parser mangles
+    Polish diacritics, so the match has to survive that."""
+    from simulated_web_agent.main.experiment import _revisit_warning
+
+    assert _revisit_warning(4, "nast_pny_krok") == (None, None)
+    assert _revisit_warning(9, "pokaz_wiecej") == (None, None)
+    assert _revisit_warning(4, "continue_button") == (None, None)
+
+
+def test_the_guard_still_catches_a_real_revisit_loop():
+    """Its reason for existing: A-B-A-B product loops wasted ~20% of steps."""
+    from simulated_web_agent.main.experiment import _revisit_warning
+
+    thought, error = _revisit_warning(4, "produkt_ioniq_5")
+    assert thought and error and "times this session" in error
+
+
+@pytest.mark.parametrize("target", ["koszyk", "menu", "filtry", "zaloguj", ""])
+def test_ordinary_controls_are_not_mistaken_for_progression(target):
+    from simulated_web_agent.main.experiment import _is_progression_control
+
+    assert _is_progression_control(target) is False

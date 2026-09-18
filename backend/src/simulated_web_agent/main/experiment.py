@@ -29,6 +29,32 @@ _RESERVED_KEYS = {"persona", "intent", "site_context", "analytics_context"}
 
 
 
+# Controls whose whole purpose is to be pressed again: a wizard's Next, "load
+# more", pagination. The revisit guard must never forbid these.
+#
+# Found in the hyundai re-run: the configurator is a step wizard, so "Następny
+# krok" is the correct action on every step. The guard fired on its third use
+# with "Do not open it again — choose a product or link you have not visited
+# yet", the agent dutifully navigated around it, and the report told the client
+# the button was inactive and required a workaround. The reviewer would have
+# falsified that in one click, exactly as she falsified the cookie banner.
+#
+# Matched against the parser's semantic id, which mangles Polish diacritics
+# ("następny_krok" arrives as "nast_pny_krok"), so the stems are chosen to
+# survive that and the id is stripped of separators before comparison.
+_PROGRESSION_STEMS = (
+    "nast", "dalej", "kontynu", "przejdzdalej",
+    "next", "continue", "proceed", "forward",
+    "loadmore", "showmore", "wiecej", "wicej", "pokazwi",
+    "pagination", "nextpage", "strona",
+)
+
+
+def _is_progression_control(target: str) -> bool:
+    flat = "".join(ch for ch in str(target or "").lower() if ch.isalnum())
+    return any(stem in flat for stem in _PROGRESSION_STEMS)
+
+
 def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Optional[str]]:
     """Warnings for re-clicking a target already clicked this session.
 
@@ -38,6 +64,9 @@ def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Opt
     advisory only — repeated clicks on navigation or "load more" are legitimate.
     """
     if prior_clicks < 1:
+        return None, None
+    # Pressing "Next" again is the task, not a loop.
+    if _is_progression_control(target):
         return None, None
     thought = (
         f"I already clicked '{target}' earlier in this session. If this is deliberate "
