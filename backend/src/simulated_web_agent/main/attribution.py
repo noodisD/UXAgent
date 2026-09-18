@@ -357,6 +357,29 @@ def _claims_content_absent(finding: dict) -> bool:
 _QUOTED_RE = re.compile(r"['‘’\"„”]([^'‘’\"„”]{4,60})['‘’\"„”]")
 
 
+# Words too common to carry a topic. Kept short on purpose: the threshold below
+# does the real work, and a long list would quietly stop matching real pairs.
+_STOPWORDS = frozenset("""
+przez które który która żeby jest są była było były został została zostało
+oraz także jednak ponieważ dlatego bardzo tylko nawet wszystkie każdy
+strona stronie strony użytkownik użytkownika użytkownikowi system systemu
+this that with from have been were there their which what when
+""".split())
+
+# How many distinctive stems two texts must share before one counts as a
+# restatement of the other. Four is high enough that two genuinely different
+# complaints about the same page do not collide, and low enough to catch a
+# one-sentence blocker summarising a three-sentence finding. Measured over the
+# archived corpus before being chosen.
+_RESTATEMENT_STEMS = 4
+
+
+def _content_stems(text: str) -> set:
+    """Distinctive word stems, for comparing what two texts are *about*."""
+    words = re.findall(r"[a-ząćęłńóśźż]{5,}", (text or "").lower())
+    return {w[:6] for w in words if w not in _STOPWORDS}
+
+
 def restates_a_gated_finding(texts, findings) -> bool:
     """Does this free text repeat a claim the gate already threw out?
 
@@ -381,13 +404,28 @@ def restates_a_gated_finding(texts, findings) -> bool:
         if not isinstance(f, dict) or not excluded_from_report(f):
             continue
         evidence = f"{f.get('evidence', '')} {f.get('recommendation', '')}"
+
+        # 1. The element name, when the finding quotes one.
         for quoted in _QUOTED_RE.findall(evidence):
             token = quoted.strip().lower()
-            # Skip fragments too generic to identify a claim.
-            if len(token) < 4 or " " not in token and len(token) < 6:
+            if len(token) < 4 or (" " not in token and len(token) < 6):
                 continue
             if token in blob:
                 return True
+
+        # A prose restatement with nothing quoted on either side — "formularzem
+        # zapisu na jazdę próbną" in the finding, "Niedziałający formularz
+        # zapisu na jazdę próbną" in the blocker — is NOT caught here, and
+        # deliberately so. Word-overlap was tried: at every threshold that
+        # caught the known case it also flagged most of the archived corpus,
+        # and without ground truth there is no way to tell restatement from two
+        # honest complaints about the same page. Shipping a tuned guess would
+        # suppress real findings invisibly, which is worse than the leak.
+        #
+        # The leak is closed structurally instead: reporter_html labels the
+        # whole "Realizacja zadania" section as participants' own accounts,
+        # which is true of every reflection whether or not it restates
+        # anything. See _render_objectives.
     return False
 
 

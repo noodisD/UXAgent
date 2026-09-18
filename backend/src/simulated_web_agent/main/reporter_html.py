@@ -181,6 +181,7 @@ body {
 .issue-card .impact { font-size: 13px; margin-bottom: 8px; }
 .issue-card .rec { font-size: 13px; background: rgba(255,255,255,.55); border-radius: 6px; padding: 8px 12px; }
 .issue-card .rec-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-bottom: 3px; opacity: .7; }
+.obj-note { font-size: 12.5px; color: #5a5f66; background: #f6f7f9; border-left: 3px solid #c9ced6; border-radius: 4px; padding: 8px 12px; margin: 0 0 14px; }
 .obj-caveat { font-size: 12px; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; padding: 6px 10px; margin: 6px 0 2px; }
 .unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
 .evidence { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; background: rgba(255,255,255,.6); border-radius: 6px; padding: 10px; }
@@ -997,7 +998,22 @@ def _render_objectives(stats: dict) -> str:
           {f'<div class="obj-fix"><span class="obj-fix-l">Najważniejsza poprawka</span>{fix}</div>' if fix else ""}
         </div>"""
 
-    return _section("Realizacja zadania", f'<div class="obj-tally">{tally}</div>{cards}')
+    # Standing caveat on the whole section, not just the reflections a rule
+    # managed to flag. Every reflection here is the participant's own account,
+    # written from the same session and never checked against the trace — so a
+    # blocker can restate a finding the verification gate threw out, and in the
+    # hyundai run all four of one persona's blockers did exactly that. Detecting
+    # which ones proved unreliable (see attribution.restates_a_gated_finding),
+    # but saying plainly what this section IS costs nothing and is always true.
+    note = (
+        '<p class="obj-note">Poniższe relacje pochodzą od uczestników badania '
+        'i opisują ich własne odczucia z sesji. W odróżnieniu od sekcji '
+        '„Problemy" nie są automatycznie weryfikowane względem zapisu sesji — '
+        'część opisanych trudności może wynikać z ograniczeń narzędzia, '
+        'a nie z serwisu.</p>'
+    )
+    return _section("Realizacja zadania",
+                     f'{note}<div class="obj-tally">{tally}</div>{cards}')
 
 
 def _render_heuristic_legend(stats: dict) -> str:

@@ -230,3 +230,35 @@ def test_ordinary_controls_are_not_mistaken_for_progression(target):
     from simulated_web_agent.main.experiment import _is_progression_control
 
     assert _is_progression_control(target) is False
+
+
+# --- the reflection section says what it is ---------------------------------
+
+def test_the_task_section_declares_itself_unverified():
+    """Rule-based detection of restated gated findings proved unreliable: every
+    word-overlap threshold that caught the known hyundai case also flagged most
+    of the archived corpus, and without ground truth there is no telling
+    restatement from two honest complaints about one page. Saying plainly what
+    the section is costs nothing and is true of every reflection in it."""
+    from simulated_web_agent.main.reporter_html import _render_objectives
+
+    html = _render_objectives({"objective_reflections": [{
+        "persona": "Magdalena", "objective": "Skonfiguruj auto", "outcome": "partial",
+        "summary": "Częściowo się udało.",
+        "blockers": ["Niedziałający formularz zapisu na jazdę próbną."],
+        "wins": [], "priority_fix": "Naprawić formularz.",
+        "self_reported_only": False,
+    }]})
+    assert "nie są automatycznie weryfikowane" in html
+    assert "ograniczeń narzędzia" in html
+
+
+def test_the_caveat_is_there_even_when_nothing_is_flagged():
+    from simulated_web_agent.main.reporter_html import _render_objectives
+
+    html = _render_objectives({"objective_reflections": [{
+        "persona": "Zofia", "objective": "Kup produkt", "outcome": "success",
+        "summary": "Udało się.", "blockers": [], "wins": ["Szybka wyszukiwarka"],
+        "priority_fix": "", "self_reported_only": False,
+    }]})
+    assert "nie są automatycznie weryfikowane" in html
