@@ -128,6 +128,11 @@ def main() -> int:
     ap.add_argument("--personas", type=int, default=2)
     ap.add_argument("--device", default="desktop")
     ap.add_argument("--max-steps", type=int, default=None)
+    # hebe.pl serves a Cloudflare challenge to headless Chromium and the real
+    # site to a headed one — verified by probing both. Nothing about the page is
+    # different; only whether the browser has a display.
+    ap.add_argument("--headed", action="store_true",
+                    help="run with a visible browser (needed where bot protection blocks headless)")
     args = ap.parse_args()
 
     case = CASES[args.site]
@@ -149,7 +154,7 @@ def main() -> int:
         start_url=case["start_url"],
         max_steps=args.max_steps or case["max_steps"],
         questionnaire=QUESTIONNAIRE,
-        headless=True,
+        headless=not args.headed,
         concurrency=1,
         device=args.device,
         site_context=case["site_context"],

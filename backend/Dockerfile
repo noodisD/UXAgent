@@ -52,7 +52,21 @@ RUN uv sync --frozen --no-dev --no-install-project
 # a file that does not arrive until the COPY below. Keeping this layer before
 # the source copy is deliberate: it is by far the slowest step, and it must not
 # be invalidated every time a source file changes.
+# xvfb is installed alongside it: a virtual X display, so the browser can run
+# headed in a container that has no screen.
+#
+# Not a convenience — it decides whether some sites can be audited at all.
+# hebe.pl serves Cloudflare's "verify you are human" interstitial to headless
+# Chromium and the real site to a headed one: same machine, same IP, same URL,
+# seconds apart. Every session in the review re-run spent all 16 and all 9 of
+# its steps on that challenge page, and the first external review's hebe
+# report — six critical "site" defects — was generated entirely from it.
+#
+# Nothing here spoofs or patches anything. It is an ordinary Chrome with an
+# ordinary display; the only thing that changes is that the display exists.
 RUN .venv/bin/playwright install --with-deps chromium \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Application ──────────────────────────────────────────────────────────────
@@ -88,7 +102,12 @@ EXPOSE 8080
 # would be invisible to /progress served by the other.
 # --timeout 0 disables the worker kill: reading a large run's trace can take a
 # while, and the audit threads must not be reaped mid-run.
-CMD exec .venv/bin/gunicorn \
+# Wrapped in xvfb-run so a run with headless unticked has a display to draw on.
+# -a picks a free display number, which matters because a restarted container
+# can find the previous lock file still in place. A headless run is unaffected:
+# it simply never opens the display.
+CMD exec xvfb-run -a --server-args="-screen 0 1440x900x24" \
+    .venv/bin/gunicorn \
     --bind "0.0.0.0:${PORT}" \
     --workers 1 \
     --threads 8 \
@@ -161,3 +180,11 @@ CMD exec .venv/bin/gunicorn \
 #
 # If chromium still fails to launch on Cloud Run's gVisor sandbox, add
 # "--no-sandbox" to environment.browser.launch_options.args in conf/base.yaml.
+#
+# Bot protection: sites behind Cloudflare, DataDome or PerimeterX commonly pass
+# a headed browser and challenge a headless one. Untick "headless" in the
+# wizard for those; the xvfb above is what makes that possible here. A run that
+# never gets past the challenge now ends as an explicit error rather than a
+# fabricated report — but an error is still not an audit. For a client
+# engagement the durable fix is asking them to allowlist the auditing IP or
+# user-agent, which also survives the vendor tightening its heuristics.
