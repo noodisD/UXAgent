@@ -832,12 +832,46 @@ def _render_pagespeed(ps: dict | None) -> str:
     return _section("Szybkość strony (PageSpeed Insights)", body)
 
 
+_SCROLL_METHOD = (
+    "Jak to mierzymy: przed każdym krokiem uczestnika zapisywana jest pozycja "
+    "przewinięcia okna przeglądarki i wysokość strony; wynik to odsetek strony, "
+    "do którego uczestnik przewinął. Pierwszy zapis (sprzed pierwszej akcji) jest "
+    "pomijany, bo nie odzwierciedla zachowania uczestnika. Są to zachowania "
+    "symulowanych uczestników badania, a nie rzeczywistych użytkowników, i dane "
+    "nie pochodzą z Google PageSpeed."
+)
+
+
 def _render_scroll_depth(scroll: dict | None) -> str:
+    """Scroll depth, with the answer to "how does the AI know?" on the page.
+
+    The first external reviewer asked exactly that, and the section answered
+    with a bare percentage placed under the PageSpeed source line. It also
+    printed the wrong number on app-style pages: the Hyundai figure was the
+    landing position recorded before any participant acted, identical in all
+    three sessions. The method, the steps it rests on and what it cannot see
+    are now stated where the number is.
+    """
     if not scroll:
         return ""
     avg = scroll.get("avg_max_depth_pct")
+    measured = int(scroll.get("steps_measured") or 0)
+    unmeasurable = int(scroll.get("steps_unmeasurable") or 0)
+    coverage = ""
+    if measured or unmeasurable:
+        coverage = (f"Zmierzono na {measured} z {measured + unmeasurable} kroków. "
+                    if unmeasurable else f"Zmierzono na {measured} krokach. ")
+        if unmeasurable:
+            coverage += ("Na pozostałych strona przewija się wewnątrz własnych "
+                         "paneli (jak konfigurator), czego ta metoda nie widzi.")
+    method = f'<p class="sb-rules">{_esc(coverage)} {_esc(_SCROLL_METHOD)}</p>'
     if avg is None:
-        return ""
+        if not unmeasurable:
+            return ""
+        return _section("Głębokość przewijania", (
+            '<p style="font-size:14px;">Nie do zmierzenia na tej stronie — strona '
+            'nie przewija się jako całość, a treść przesuwa się wewnątrz paneli.</p>'
+            + method))
     lo = scroll.get("min_max_depth_pct", "—")
     hi = scroll.get("max_max_depth_pct", "—")
     sessions = scroll.get("sessions_with_depth_pct", "—")
@@ -845,12 +879,15 @@ def _render_scroll_depth(scroll: dict | None) -> str:
     color = "#008573" if pct >= 60 else ("#B07A00" if pct >= 30 else "#E60000")
     warning = ""
     if pct < 30:
-        warning = '<p style="margin-top:10px;color:#E60000;font-size:13px;">⚠ Uczestnicy rzadko przewijali poniżej 30% strony — treści below-the-fold mogą być pomijane.</p>'
+        # Participant behaviour, not a site verdict — worded as such.
+        warning = ('<p style="margin-top:10px;color:#6b6f76;font-size:13px;">'
+                   'Uczestnicy badania rzadko przewijali poniżej 30% strony. Warto '
+                   'sprawdzić, czy ważne treści nie leżą zbyt nisko.</p>')
     body = f"""
     <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:14px;">
       <div>
         <div style="font-size:42px;font-weight:800;color:{color};">{avg}%</div>
-        <div style="font-size:12px;color:#6c757d;">Avg. maks. głębokość przewijania</div>
+        <div style="font-size:12px;color:#6c757d;">Średnia maksymalna głębokość przewijania</div>
       </div>
       <div style="flex:1;min-width:180px;">
         <div style="background:#e9ecef;border-radius:6px;height:14px;overflow:hidden;">
@@ -859,7 +896,8 @@ def _render_scroll_depth(scroll: dict | None) -> str:
         <div style="font-size:12px;color:#6c757d;margin-top:4px;">zakres {lo}–{hi}% &nbsp;·&nbsp; {sessions} sesji</div>
       </div>
     </div>
-    {warning}"""
+    {warning}
+    {method}"""
     return _section("Głębokość przewijania", body)
 
 

@@ -39,8 +39,18 @@ def run_scroll_analysis(store: TraceStore) -> dict:
         store.write_scroll_summary(summary)
         return summary
 
-    depth_pcts = [d["depth_pct"] for d in depths if d.get("depth_pct") is not None]
-    scroll_tops = [d["scroll_top"] for d in depths if d.get("scroll_top") is not None]
+    # The first recording is made before the participant has acted, so it is
+    # never their behaviour. On the Hyundai configurator it read 2090 px of a
+    # 3890 px page — 69.9%, the figure the report printed as every session's
+    # "maximum scroll depth", identical across all three because it was the
+    # page's landing position, not anything a participant did.
+    first = min((d["step"] for d in depths), default=None)
+    acted = [d for d in depths if d["step"] != first] or []
+    depth_pcts = [d["depth_pct"] for d in acted if d.get("depth_pct") is not None]
+    scroll_tops = [d["scroll_top"] for d in acted if d.get("scroll_top") is not None]
+    # Steps whose page could not be scrolled at the document level at all.
+    unmeasurable = sum(1 for d in acted if d.get("depth_pct") is None
+                       and d.get("page_height") is not None)
 
     if depth_pcts:
         max_depth = round(max(depth_pcts), 1)
@@ -57,6 +67,10 @@ def run_scroll_analysis(store: TraceStore) -> dict:
         "max_scroll_px": round(max(scroll_tops)) if scroll_tops else None,
         "steps_count": len(depths),
         "has_depth_pct": has_depth,
+        # How much of the session the figure actually rests on, so the report
+        # can say "measured on 4 of 12 steps" instead of implying all of them.
+        "steps_measured": len(depth_pcts),
+        "steps_unmeasurable": unmeasurable,
     }
 
     store.write_scroll_summary(summary)

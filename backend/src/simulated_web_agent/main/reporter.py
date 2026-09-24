@@ -1043,6 +1043,10 @@ def _aggregate_scroll(stores: list[TraceStore]) -> tuple[dict, str]:
         "min_max_depth_pct": round(min(max_depths), 1) if max_depths else None,
         "max_max_depth_pct": round(max(max_depths), 1) if max_depths else None,
         "avg_max_scroll_px": _avg(max_pxs),
+        # What the figure rests on. Older summaries lack these and read as 0.
+        "sessions": len(summaries),
+        "steps_measured": sum(int(s.get("steps_measured") or 0) for s in summaries),
+        "steps_unmeasurable": sum(int(s.get("steps_unmeasurable") or 0) for s in summaries),
     }
 
     if max_depths:

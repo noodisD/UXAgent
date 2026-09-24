@@ -375,8 +375,15 @@ class TraceStore:
                     scroll_top = float(data.get("scroll_top") or 0)
                     page_height = float(data.get("page_height") or 0)
                     viewport_height = float(data.get("viewport_height") or 0)
-                    scrollable = max(page_height - viewport_height, 1)
-                    depth_pct = round(min(100.0, scroll_top / scrollable * 100), 1)
+                    # A page no taller than the window cannot be scrolled at the
+                    # document level — app-style pages like the Hyundai
+                    # configurator scroll inside their own panels, and
+                    # window.scrollY stays 0 whatever the participant does. This
+                    # used to divide by max(…, 1) and report 0%, which reads as
+                    # "measured: nobody scrolled". It is "not measurable".
+                    room = page_height - viewport_height
+                    depth_pct = (round(min(100.0, scroll_top / room * 100), 1)
+                                 if room > 5 else None)
                 except (json.JSONDecodeError, ValueError):
                     # Legacy format: plain number
                     scroll_top = float(text)
