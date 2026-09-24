@@ -60,7 +60,7 @@ chat_router = Router(
         {
             "model_name": "anthropic",
             "litellm_params": {
-                "model": "claude-sonnet-4-20250514",
+                "model": "anthropic/claude-sonnet-4-20250514",
             },
         },
         {
@@ -83,7 +83,7 @@ chat_router = Router(
         {
             "model_name": "anthropic_thinking",
             "litellm_params": {
-                "model": "claude-sonnet-4-20250514",
+                "model": "anthropic/claude-sonnet-4-20250514",
                 "thinking": {
                     "type": "enabled",
                     "budget_tokens": 32000,
@@ -132,7 +132,7 @@ slow_chat_router = Router(
         {
             "model_name": "anthropic",
             "litellm_params": {
-                "model": "claude-sonnet-4-20250514",
+                "model": "anthropic/claude-sonnet-4-20250514",
             },
         },
         {
@@ -152,7 +152,7 @@ slow_chat_router = Router(
         {
             "model_name": "anthropic_thinking",
             "litellm_params": {
-                "model": "claude-sonnet-4-20250514",
+                "model": "anthropic/claude-sonnet-4-20250514",
                 "thinking": {
                     "type": "enabled",
                     "budget_tokens": 32000,

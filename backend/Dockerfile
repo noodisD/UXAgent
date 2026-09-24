@@ -32,7 +32,13 @@ ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     # Browsers go to a shared path, not ~/.cache, so the non-root runtime user
     # can read what root installed below.
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    # Use the model map bundled with the pinned litellm, not the copy it
+    # downloads from GitHub on import. When that remote file dropped
+    # claude-sonnet-4-20250514 the router could not be built and the service
+    # failed to boot. Also set in simulated_web_agent/__init__.py; repeated here
+    # so nothing that imports litellm first can bypass it.
+    LITELLM_LOCAL_MODEL_COST_MAP=True
 
 WORKDIR /app
 
