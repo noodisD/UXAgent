@@ -199,6 +199,12 @@ body {
 .nv-claim { font-size: 13px; color: #3a3f47; font-style: italic; margin: 4px 0 6px; }
 .nv-why, .nv-check { font-size: 12.5px; color: #5a5f66; margin: 2px 0; }
 .ev-quote-l { font-style: normal; font-size: 11px; color: #7a808a; }
+.st-card { display: flex; gap: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.st-card .ev-thumb { width: 160px; flex: none; }
+.st-who { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.st-h { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #7a808a; margin-top: 4px; }
+.st-body ul { margin: 2px 0 4px 16px; font-size: 12.5px; }
+.st-ground-h { font-weight: 600; font-size: 13px; margin: 16px 0 4px; }
 .obj-note { font-size: 12.5px; color: #5a5f66; background: #f6f7f9; border-left: 3px solid #c9ced6; border-radius: 4px; padding: 8px 12px; margin: 0 0 14px; }
 .obj-caveat { font-size: 12px; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; padding: 6px 10px; margin: 6px 0 2px; }
 .unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
@@ -467,12 +473,53 @@ def _render_executive(narr: dict) -> str:
     return _section("Podsumowanie", body)
 
 
-def _render_strengths(narr: dict) -> str:
+def _render_strengths(narr: dict, stats: dict | None = None) -> str:
+    """Strengths, with what each participant actually praised and saw.
+
+    Karolina asked to mark concretely what works, with screenshots "żeby było
+    wiadomo o czym mówię". The section was a bare list of the aggregate model's
+    sentences with no source. Each participant's own first-impression strengths
+    (judged on the landing screen, shown beside them) and what went well during
+    the task now sit underneath, so every summary line can be traced to who said
+    it and what they were looking at.
+    """
     items = narr.get("key_strengths") or []
-    if not items:
+    stats = stats or {}
+    fi = stats.get("first_impression") or {}
+    by_persona: dict[str, list[str]] = {}
+    for s in fi.get("strengths") or []:
+        if isinstance(s, dict) and s.get("persona") and s.get("text"):
+            by_persona.setdefault(s["persona"], []).append(s["text"])
+    wins = {r.get("persona"): [w for w in (r.get("wins") or []) if str(w).strip()]
+            for r in (stats.get("objective_reflections") or []) if isinstance(r, dict)}
+    shots = {s.get("persona"): s.get("screenshot")
+             for s in (fi.get("screenshots") or []) if isinstance(s, dict)}
+    if not items and not by_persona and not any(wins.values()):
         return ""
+
     rows = "".join(f'<div class="strength-item">{_esc(s)}</div>' for s in items)
-    return _section("Mocne strony", f'<div class="strength-list">{rows}</div>')
+    cards = ""
+    for persona in sorted(set(by_persona) | {p for p, w in wins.items() if w and p}):
+        shot = shots.get(persona)
+        thumb = (f'<a href="{_esc(shot)}" target="_blank"><img class="ev-thumb" src="{_esc(shot)}" '
+                 f'alt="ekran startowy — {_esc(persona)}"/></a>') if shot else ""
+        fi_list = "".join(f"<li>{_esc(t)}</li>" for t in by_persona.get(persona, [])[:3])
+        win_list = "".join(f"<li>{_esc(t)}</li>" for t in wins.get(persona, [])[:3])
+        cards += f"""
+        <div class="st-card">
+          {thumb}
+          <div class="st-body"><div class="st-who">{_esc(persona)}</div>
+            {f'<div class="st-h">Na ekranie startowym</div><ul>{fi_list}</ul>' if fi_list else ''}
+            {f'<div class="st-h">W trakcie zadania</div><ul>{win_list}</ul>' if win_list else ''}
+          </div>
+        </div>"""
+    grounding = (
+        '<div class="st-ground-h">Na czym to się opiera</div>'
+        '<p class="sb-rules">Słowa uczestników badania i ekran, który oceniali. To ich '
+        'opinie, nie pomiar — zbieżność między uczestnikami jest tu najmocniejszym '
+        'sygnałem.</p>' + cards) if cards else ""
+    return _section("Mocne strony",
+                    f'<div class="strength-list">{rows}</div>{grounding}')
 
 
 def _render_issues_group(title: str, issues: list) -> str:
@@ -1484,7 +1531,7 @@ def generate_html_report(agg: dict) -> str:
         # detail: a usability report that opens with abstract scores buries
         # its own headline.
         _render_objectives(stats) +
-        _render_strengths(narr) +
+        _render_strengths(narr, stats) +
         # The key to "H1", "H3" — without it the issues below name a system the
         # reader has never been shown.
         _render_heuristic_legend(stats) +

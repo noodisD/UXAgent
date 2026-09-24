@@ -93,6 +93,11 @@ async def _check_links_on_page(page, url: str) -> dict[str, Any]:
                 break
 
         finding["links_checked"] = len(unique)
+        # Which links, so aggregation can count distinct ones. The header and
+        # footer repeat on every page and every persona revisits pages, so the
+        # summed count ("brak niedziałających linków na 313 sprawdzonych") was
+        # the same links over and over.
+        finding["checked_urls"] = unique
         broken: list[dict] = []
         errors: list[dict] = []
 

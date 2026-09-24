@@ -1201,15 +1201,26 @@ def _aggregate_scroll(stores: list[TraceStore]) -> tuple[dict, str]:
 def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
     """Return (data_dict, plain_text_summary) for broken links across all sessions."""
     all_broken: list[str] = []
-    total_checked = 0
     sessions_with_broken = 0
+    checked_urls: set[str] = set()
+    per_page_count: dict[str, int] = {}
 
     for store in stores:
         findings = store.read_link_findings()
         session_broken = set()
         for page_result in findings:
-            checked = page_result.get("links_checked", 0)
-            total_checked += checked
+            # Distinct links, not a sum over pages and personas: the same
+            # header and footer sit on every page and every persona revisits the
+            # same pages. The summed figure reached the report as a strength
+            # ("brak niedziałających linków na 313 sprawdzonych"). Checks that
+            # recorded their URLs are counted by URL; older ones once per page.
+            urls = page_result.get("checked_urls")
+            if urls:
+                checked_urls.update(urls)
+            else:
+                page = str(page_result.get("url") or "")
+                per_page_count[page] = max(per_page_count.get(page, 0),
+                                           int(page_result.get("links_checked") or 0))
             for b in page_result.get("broken") or []:
                 url = b.get("url", "")
                 session_broken.add(url)
@@ -1218,6 +1229,7 @@ def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
         if session_broken:
             sessions_with_broken += 1
 
+    total_checked = len(checked_urls) + sum(per_page_count.values())
     data = {
         "total_links_checked": total_checked,
         "unique_broken_urls": len(all_broken),
