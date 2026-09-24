@@ -935,12 +935,27 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 "viewport": label, "pages_scanned": 0, "pages_with_overflow": 0,
                 "tap_targets_below_min": 0, "contrast_failures": 0,
                 "small_font_examples": [], "wide_element_examples": [],
+                "_tap_keys": set(), "_contrast_keys": set(),
+                "_tap_page_max": 0, "_contrast_page_max": 0,
             })
             d["pages_scanned"] += 1
             if v.get("horizontal_overflow"):
                 d["pages_with_overflow"] += 1
-            d["tap_targets_below_min"] += int((v.get("tap_targets") or {}).get("below_24px") or 0)
-            d["contrast_failures"] += int((v.get("contrast") or {}).get("below_threshold") or 0)
+            # Distinct failures, not a per-page sum. The same header and footer
+            # sit on every page, so summing counted one footer colour six times
+            # a page across every page and persona: Hyundai's single contrast
+            # issue reached the client as "73 przypadki". Scans that record a
+            # key per failure are counted by key; older scans by the worst page,
+            # which cannot overstate.
+            tap = v.get("tap_targets") or {}
+            con = v.get("contrast") or {}
+            d["_tap_keys"].update(tap.get("keys") or [])
+            d["_contrast_keys"].update(con.get("keys") or [])
+            d["_tap_page_max"] = max(d["_tap_page_max"], int(tap.get("below_24px") or 0))
+            d["_contrast_page_max"] = max(d["_contrast_page_max"],
+                                          int(con.get("below_threshold") or 0))
+            d["tap_targets_below_min"] = len(d["_tap_keys"]) or d["_tap_page_max"]
+            d["contrast_failures"] = len(d["_contrast_keys"]) or d["_contrast_page_max"]
             for sf in (v.get("small_fonts") or [])[:2]:
                 if len(d["small_font_examples"]) < 5 and isinstance(sf, dict):
                     d["small_font_examples"].append(sf)
@@ -1058,7 +1073,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # Per-device measurements the scan already takes: tap targets below
             # the WCAG minimum, contrast failures, tiny text, overflowing
             # elements. Nothing read these before.
-            "devices": [device_detail[k] for k in sorted(device_detail)],
+            # Working sets stripped: they are not JSON and not for the reader.
+            "devices": [{k: v for k, v in device_detail[key].items() if not k.startswith("_")}
+                        for key in sorted(device_detail)],
             # What the walkthrough itself ran on, as {device: session count}.
             "session_devices": session_devices,
         },

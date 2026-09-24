@@ -151,6 +151,10 @@ _TAP_TARGET_JS = r"""
     if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;
+    // Visually hidden, screen-reader-only elements ("Skip to main content",
+    // the 1x1 px .sr-only pattern). Nobody taps them, and they were every one
+    // of the Hyundai run's tap-target examples.
+    if (r.width <= 2 || r.height <= 2) return;
     if (isInlineInText(el)) return;
     targets.push({ el, r, cx: r.left + r.width / 2, cy: r.top + r.height / 2 });
   });
@@ -166,10 +170,12 @@ _TAP_TARGET_JS = r"""
 
   let below24 = 0, below48 = 0;
   const examples = [];
+  const keys = [];
   targets.forEach(t => {
     const min = Math.min(t.r.width, t.r.height);
     if (min < 24 && !spacedApart(t)) {
       below24++;
+      if (keys.length < 300) keys.push(label(t.el));
       if (examples.length < 5)
         examples.push({ el: label(t.el), w: Math.round(t.r.width),
                         h: Math.round(t.r.height) });
@@ -181,7 +187,7 @@ _TAP_TARGET_JS = r"""
     }
   });
   return { below_24px: below24, below_48px_advisory: below48,
-           elements_checked: targets.length, examples };
+           elements_checked: targets.length, examples, keys };
 }
 """
 
@@ -225,6 +231,7 @@ _CONTRAST_JS = r"""
 
   let below = 0, undetermined = 0, checked = 0;
   const examples = [];
+  const keys = [];
   document.querySelectorAll('p, li, span, a, h1, h2, h3, h4, h5, h6, td, th, label, button').forEach(el => {
     if (!el.offsetParent) return;
     const text = (el.textContent || '').trim();
@@ -247,12 +254,15 @@ _CONTRAST_JS = r"""
     const r = ratio(lum(fg.rgb), lum(bg));
     if (r < need) {
       below++;
+      // The same footer link fails on every page; a key lets aggregation count
+      // it once. Hyundai's single footer colour was reported as 73 "cases".
+      if (keys.length < 300) keys.push(text.slice(0, 40) + '|' + (Math.round(r * 100) / 100));
       if (examples.length < 5)
         examples.push({ text: text.slice(0, 30), ratio: Math.round(r * 100) / 100,
                         required: need, size_px: size });
     }
   });
-  return { below_threshold: below, undetermined, elements_checked: checked, examples };
+  return { below_threshold: below, undetermined, elements_checked: checked, examples, keys };
 }
 """
 
