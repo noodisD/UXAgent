@@ -109,8 +109,8 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
 
 {{
   "executive_summary": "Badanie z udziałem {participant_count} uczestników ujawniło...",
-  "overall_ux_score": <float 1.0-5.0 — derive it from the findings below>,
-  "score_rationale": "Ocena odzwierciedla...",
+  "overall_ux_score": {computed_score},
+  "score_rationale": "Ocena {computed_score} wynika z następujących odliczeń: ...",
   "key_strengths": [
     "Strona skutecznie komunikuje swoją główną ofertę",
     "Nawigacja główna jest spójna i przewidywalna"
@@ -143,7 +143,16 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
 Rules:
 - REGUŁA JĘZYKOWA (obowiązkowa): NIGDY nie podawaj częstotliwości jako procentu „użytkowników" (np. „72% użytkowników porzuci koszyk"). Odnoś się do „symulowanych person" lub „przebiegów"; traktuj częstotliwości jako hipotezy syntetyczne, nie statystykę populacyjną.
 - executive_summary: 3–5 sentences covering the overall picture.
-- overall_ux_score: float 1.0–5.0 (5.0 = excellent UX).
+- overall_ux_score: WPISZ DOKŁADNIE {computed_score}. Ocena NIE jest Twoją decyzją —
+  została obliczona z dowodów według jawnych reguł (patrz „OCENA OBLICZONA" niżej)
+  i zostanie nadpisana, jeśli podasz inną.
+- score_rationale: wyjaśnij TĘ ocenę, odwołując się do pozycji z rozbicia poniżej
+  — od największego odliczenia. Nie wprowadzaj innych przyczyn niż te, które są
+  w rozbiciu, i nie podawaj innych liczb. Możesz krótko wspomnieć, co nie zostało
+  wliczone i dlaczego.
+
+OCENA OBLICZONA (wiążąca, z rozbiciem):
+{score_breakdown}
 - key_strengths: 2–4 items. Only include genuine strengths backed by data.
 - critical_issues / serious_issues / minor_issues: only include issues present in the data. Use empty arrays if none.
 - priority_recommendations: ranked 1–N, most impactful first. Maximum 5.

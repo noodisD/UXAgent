@@ -183,6 +183,16 @@ body {
 .issue-card .rec-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-bottom: 3px; opacity: .7; }
 .measured { font-size: 12.5px; font-weight: 600; color: #1f4e79; margin: 6px 0; }
 .demoted { font-size: 12px; color: #6b6f76; font-style: italic; margin: 4px 0 8px; }
+.sb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sb-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.sb-kind { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: #7a808a; }
+.sb-basis { color: #5a5f66; font-size: 12px; }
+.sb-amt { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 600; }
+.sb-start td, .sb-sum td { color: #3a3f47; font-weight: 600; }
+.sb-final td { border-top: 2px solid #3a3f47; border-bottom: none; font-weight: 700; font-size: 14px; }
+.sb-left-h { font-weight: 600; font-size: 13px; margin: 16px 0 6px; }
+.sb-left { font-size: 12.5px; color: #5a5f66; padding-left: 18px; }
+.sb-rules { font-size: 11.5px; color: #7a808a; margin-top: 12px; }
 .obj-note { font-size: 12.5px; color: #5a5f66; background: #f6f7f9; border-left: 3px solid #c9ced6; border-radius: 4px; padding: 8px 12px; margin: 0 0 14px; }
 .obj-caveat { font-size: 12px; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; padding: 6px 10px; margin: 6px 0 2px; }
 .unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
@@ -1046,6 +1056,68 @@ def _render_objectives(stats: dict) -> str:
                      f'{note}<div class="obj-tally">{tally}</div>{cards}')
 
 
+_DEDUCTION_KIND_PL = {
+    "issue": "Problem użyteczności",
+    "task": "Realizacja zadania",
+    "accessibility": "Dostępność",
+    "performance": "Wydajność",
+    "adjustment": "Korekta",
+}
+
+
+def _render_score_breakdown(stats: dict) -> str:
+    """How the score was computed, line by line, so it can be checked.
+
+    The score used to be the model's own judgement with a prose rationale, so
+    there was nothing to add up. It is arithmetic now (scoring.py): the reader
+    sees the starting point, every deduction with the rule that sized it, the
+    total, and what was deliberately left out. Anyone can disagree with a weight
+    here; nobody has to take the number on trust.
+    """
+    b = stats.get("score_breakdown") or {}
+    if not b or b.get("score") is None:
+        return ""
+    rows = f"""
+        <tr class="sb-start"><td>Punkt wyjścia</td><td></td>
+            <td class="sb-amt">{b['start']:.1f}</td></tr>"""
+    for d in b.get("deductions") or []:
+        amt = d.get("amount", 0)
+        sign = "−" if amt >= 0 else "+"
+        rows += f"""
+        <tr><td><span class="sb-kind">{_esc(_DEDUCTION_KIND_PL.get(d.get('kind'), ''))}</span>
+                {_esc(d.get('label', ''))}</td>
+            <td class="sb-basis">{_esc(d.get('basis', ''))}</td>
+            <td class="sb-amt">{sign}{abs(amt):.2f}</td></tr>"""
+    floored = " (ograniczone do minimum 1,0)" if b.get("floored") else ""
+    rows += f"""
+        <tr class="sb-sum"><td>Suma odliczeń</td><td></td>
+            <td class="sb-amt">−{b['total_deduction']:.2f}</td></tr>
+        <tr class="sb-final"><td>Ocena końcowa</td>
+            <td class="sb-basis">{b['start']:.1f} − {b['total_deduction']:.2f} =
+                {b['raw']:.2f}, zaokrąglone{floored}</td>
+            <td class="sb-amt">{b['score']:.1f}</td></tr>"""
+
+    left_out = "".join(
+        f"<li><b>{_esc(n.get('label', ''))}</b> — {_esc(n.get('reason', ''))}</li>"
+        for n in b.get("not_counted") or []
+    )
+    rules = b.get("rules") or {}
+    issue = rules.get("issue") or {}
+    rule_note = (
+        "Reguły: problem krytyczny {k}, poważny {p}, drobny {d} punktu, "
+        "pomnożone przez zasięg (odsetek uczestników, którzy go napotkali) i pewność "
+        "dowodu. Nieukończone zadanie {tf}, częściowo {tp} na uczestnika — o połowę "
+        "mniej, gdy to samoocena. Wagi są jawne i można je zmienić."
+    ).format(k=issue.get("krytyczny"), p=issue.get("poważny"), d=issue.get("drobny"),
+             tf=(rules.get("task") or {}).get("failed"),
+             tp=(rules.get("task") or {}).get("partial"))
+    body = f"""
+      <table class="sb-table">{rows}</table>
+      {f'<div class="sb-left-h">Nie wliczono do oceny</div><ul class="sb-left">{left_out}</ul>' if left_out else ''}
+      <p class="sb-rules">{_esc(rule_note)}</p>"""
+    return _section("Jak obliczono ocenę", body)
+
+
 def _render_heuristic_legend(stats: dict) -> str:
     """All ten heuristics with their verdict, plus what the method is.
 
@@ -1233,6 +1305,7 @@ def generate_html_report(agg: dict) -> str:
         _render_header(agg, stats) +
         '<div class="page">' +
         _render_executive(narr) +
+        _render_score_breakdown(stats) +
         # What was asked and whether it was achieved, before any heuristic
         # detail: a usability report that opens with abstract scores buries
         # its own headline.

@@ -29,6 +29,7 @@ from .severity import (
     severity_rank,
 )
 from .a11y_checks import a11y_topic, measure_names
+from .scoring import breakdown_text, compute_ux_score
 from .attribution import restates_a_gated_finding
 from .redaction import clean as _redact, mentions_harness_fault
 from .trace_store import TraceStore
@@ -1313,6 +1314,15 @@ async def generate_aggregated_report(
     }
     root_cause_summary = _format_root_causes(stats["heuristic"].get("root_causes") or [])
 
+    # The score is computed here, from evidence, before the narrative exists —
+    # the model is handed the number and its itemised breakdown to explain, and
+    # its own figure is overwritten afterwards. See scoring.py for why a score
+    # the model chooses cannot be honestly itemised.
+    score_result = compute_ux_score(stats, outcomes=outcomes,
+                                    outcome_sources=outcome_sources,
+                                    pagespeed=pagespeed_data)
+    stats["score_breakdown"] = score_result
+
     prompt = prompt_template.format(
         outcome_distribution=outcome_distribution,
         root_cause_summary=root_cause_summary,
@@ -1334,6 +1344,8 @@ async def generate_aggregated_report(
         minor_count=sc.get("drobny", 0),
         top_issues=top_issues,
         survey_summary=survey_summary,
+        computed_score=f"{score_result['score']:.1f}",
+        score_breakdown=breakdown_text(score_result),
     )
 
     messages = [{"role": "user", "content": prompt}]
@@ -1346,6 +1358,12 @@ async def generate_aggregated_report(
     except Exception as e:
         log.exception("[reporter] aggregate LLM call failed: %s", e)
         narrative = {"error": str(e)}
+
+    # The computed score is the score. The model was told it and asked to
+    # explain it; if it returned something else anyway, the headline must still
+    # match the breakdown printed beneath it.
+    if isinstance(narrative, dict) and "error" not in narrative:
+        narrative["overall_ux_score"] = score_result["score"]
 
     _attach_issue_evidence(narrative, stats)
 
@@ -1544,6 +1562,13 @@ def resolve_narrative(agg: dict) -> dict:
     narr = agg.get("narrative") or {}
     if not narr or "error" in narr or not narr.get("executive_summary"):
         narr = _narrative_from_stats(stats)
+    # Every render path — HTML, PDF, Word, the LLM-failure fallback — shows the
+    # computed score when there is one, so the headline can never disagree with
+    # the breakdown printed under it. Runs made before scoring.py have no
+    # breakdown and keep the score they were delivered with.
+    computed = (stats.get("score_breakdown") or {}).get("score")
+    if computed is not None:
+        narr["overall_ux_score"] = computed
     _attach_issue_evidence(narr, stats)
     return narr
 

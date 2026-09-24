@@ -136,6 +136,35 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         if narr.get("score_rationale"):
             _add_caption(doc, str(narr["score_rationale"]))
 
+    # ── How the score was computed ───────────────────────────────────────
+    # Same breakdown as the HTML. This is the copy that gets edited and
+    # forwarded, so it must carry the arithmetic, not just the number.
+    breakdown = stats.get("score_breakdown") or {}
+    if breakdown.get("score") is not None:
+        doc.add_heading("Jak obliczono ocenę", level=1)
+        table = doc.add_table(rows=1, cols=3)
+        table.style = "Light Grid Accent 1"
+        for i, text in enumerate(["Pozycja", "Uzasadnienie", "Punkty"]):
+            table.rows[0].cells[i].text = text
+
+        def _row(a, b, c):
+            cells = table.add_row().cells
+            cells[0].text, cells[1].text, cells[2].text = a, b, c
+
+        _row("Punkt wyjścia", "", f"{breakdown['start']:.1f}")
+        for d in breakdown.get("deductions") or []:
+            amt = d.get("amount", 0)
+            _row(str(d.get("label", "")), str(d.get("basis", "")),
+                 f"{'−' if amt >= 0 else '+'}{abs(amt):.2f}")
+        _row("Suma odliczeń", "", f"−{breakdown['total_deduction']:.2f}")
+        _row("Ocena końcowa",
+             f"{breakdown['start']:.1f} − {breakdown['total_deduction']:.2f} = "
+             f"{breakdown['raw']:.2f}, zaokrąglone"
+             + (" (minimum 1,0)" if breakdown.get("floored") else ""),
+             f"{breakdown['score']:.1f}")
+        for n in breakdown.get("not_counted") or []:
+            _add_caption(doc, f"Nie wliczono: {n.get('label')} — {n.get('reason')}")
+
     # ── Task outcomes ────────────────────────────────────────────────────
     reflections = stats.get("objective_reflections") or []
     if reflections:
