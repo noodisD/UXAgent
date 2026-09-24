@@ -180,3 +180,55 @@ def extract_a11y_candidates(store: TraceStore) -> dict:
     log.info("[a11y_checks] %d candidate(s) from %d snapshot(s) in %s",
              len(candidates), len(snapshots), store.trace_dir)
     return {"candidates": candidates, "steps_scanned": len(snapshots)}
+
+
+# Topics the narrative writes WCAG issues about, keyed so a narrative issue can
+# be joined back to the measured finding it came from. The a11y prompt fixes the
+# vocabulary, so a short keyword list is more reliable here than fuzzy matching.
+# Order matters: the first topic whose keyword appears wins.
+_TOPIC_KEYWORDS = (
+    ("alt_text", ("alternatyw", "alt text", "atrybut alt", "atrybutu alt")),
+    ("control_name", ("etykiet", "bez nazwy", "nazwy dostępnej", "accessible name")),
+    ("landmark", ("orientacyjn", "landmark")),
+    ("small_text", ("czcionk", "12px", "12 px", "rozmiar tekstu")),
+    ("contrast", ("kontrast",)),
+)
+
+
+def a11y_topic(text: str) -> str | None:
+    """Which measured check a WCAG sentence is about, if any."""
+    low = (text or "").lower()
+    for topic, words in _TOPIC_KEYWORDS:
+        if any(w in low for w in words):
+            return topic
+    return None
+
+
+def measure_names(store: TraceStore) -> dict:
+    """How many images and controls were seen, and how many had no name.
+
+    extract_a11y_candidates counts only the failures. Handed "images missing alt
+    text on 13 of 13 pages" with no denominator, the narrator wrote that the
+    configurator's product images lack alt text — in a run whose snapshots named
+    611 of 678 images, every car by its model. The failures were real (icons
+    inside already-labelled links); the claim built from them was not. The share
+    is what stops a handful of icons being reported as a systemic barrier.
+    """
+    images = {"total": 0, "unnamed": 0}
+    controls = {"total": 0, "unnamed": 0}
+    for _step, text in _steps(store.read_a11y_snapshots()):
+        if not isinstance(text, str):
+            continue
+        for n in parse_aria_snapshot(text):
+            named = bool(n.name.strip())
+            if n.role == "img":
+                images["total"] += 1
+                images["unnamed"] += not named
+            elif n.role in _NAMED_CONTROLS:
+                controls["total"] += 1
+                controls["unnamed"] += not named
+    for bucket in (images, controls):
+        bucket["share_unnamed"] = (
+            round(bucket["unnamed"] / bucket["total"], 3) if bucket["total"] else None
+        )
+    return {"images": images, "controls": controls}

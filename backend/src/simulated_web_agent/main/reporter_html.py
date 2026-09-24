@@ -181,6 +181,8 @@ body {
 .issue-card .impact { font-size: 13px; margin-bottom: 8px; }
 .issue-card .rec { font-size: 13px; background: rgba(255,255,255,.55); border-radius: 6px; padding: 8px 12px; }
 .issue-card .rec-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-bottom: 3px; opacity: .7; }
+.measured { font-size: 12.5px; font-weight: 600; color: #1f4e79; margin: 6px 0; }
+.demoted { font-size: 12px; color: #6b6f76; font-style: italic; margin: 4px 0 8px; }
 .obj-note { font-size: 12.5px; color: #5a5f66; background: #f6f7f9; border-left: 3px solid #c9ced6; border-radius: 4px; padding: 8px 12px; margin: 0 0 14px; }
 .obj-caveat { font-size: 12px; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; padding: 6px 10px; margin: 6px 0 2px; }
 .unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
@@ -461,6 +463,32 @@ def _render_issues_group(title: str, issues: list) -> str:
             if issue.get("verified") is False
             else ""
         )
+        # WCAG issues have no Nielsen heuristic. "HNone: Dostępność (WCAG)" was
+        # printed as the title of both in the hyundai run.
+        title_prefix = f"H{h_id}: " if isinstance(h_id, int) else ""
+
+        # The measured denominator, where one exists. Without it the reader
+        # sees "images lack alt text" and cannot tell 5 icons from every car.
+        measured = issue.get("measured") or {}
+        measured_html = ""
+        if measured.get("images_total"):
+            pct = round(100 * (measured.get("share_unnamed") or 0))
+            measured_html = (
+                f'<div class="measured">Zmierzono: {measured["images_unnamed"]} z '
+                f'{measured["images_total"]} obrazów bez tekstu alternatywnego '
+                f'({pct}%).</div>'
+            )
+        demotion_html = ""
+        reason = issue.get("demotion_reason")
+        if reason:
+            was = {"critical_issues": "krytyczne", "serious_issues": "poważne"}.get(
+                issue.get("demoted_from"), "wyższej kategorii")
+            why = ("pomiar pokazuje, że dotyczy to niewielkiej części elementów"
+                   if reason == "measured_share"
+                   else "brak dowodu w zapisie sesji")
+            demotion_html = (f'<div class="demoted">Przeniesiono z kategorii '
+                             f'„{was}”: {why}.</div>')
+
         evidence_html = ""
         for ex in issue.get("examples") or []:
             url = _esc(ex.get("url", ""))
@@ -486,11 +514,13 @@ def _render_issues_group(title: str, issues: list) -> str:
         <div class="issue-card" style="background:{bg};border-left-color:{border};">
           <div class="issue-header">
             {_severity_chip(sev)}
-            <div class="issue-title" style="color:{fg};">H{h_id}: {h_name}</div>
+            <div class="issue-title" style="color:{fg};">{title_prefix}{h_name}</div>
             {unverified_badge}
           </div>
           <div class="freq">Częstotliwość: {freq}</div>
           <div class="impact">{impact}</div>
+          {measured_html}
+          {demotion_html}
           <div class="rec"><div class="rec-label">Rekomendacja</div>{rec}</div>
           {evidence_html}
         </div>"""

@@ -28,6 +28,7 @@ from .severity import (
     heuristic_id as _heuristic_id,
     severity_rank,
 )
+from .a11y_checks import a11y_topic, measure_names
 from .attribution import restates_a_gated_finding
 from .redaction import clean as _redact, mentions_harness_fault
 from .trace_store import TraceStore
@@ -781,15 +782,22 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         if not isinstance(acc, dict):
             continue
         who = _persona_label(r)
+        p_dir = str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1]
         for f in (acc.get("findings") or []):
             if not isinstance(f, dict):
                 continue
             category = str(f.get("category") or "").strip() or "Inne"
+            detail = str(f.get("detail") or "").strip()
             entry = a11y_by_category.setdefault(category, {
                 "category": category, "severity": f.get("severity", "drobny"),
-                "detail": str(f.get("detail") or "").strip(),
+                "detail": detail,
                 "recommendation": str(f.get("recommendation") or "").strip(),
                 "urls": [], "personas": set(),
+                # Which measured check this is, so a WCAG issue in the narrative
+                # can be joined back to it — narrative issues carry no
+                # heuristic_id, so the heuristic join could never find them.
+                "topic": a11y_topic(f"{category} {detail}"),
+                "examples": [], "verified": False,
             })
             if severity_rank(f.get("severity")) > severity_rank(entry["severity"]):
                 entry["severity"] = f.get("severity", "drobny")
@@ -798,11 +806,43 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 entry["urls"].append(url)
             if who:
                 entry["personas"].add(who)
+            # The per-persona finding carries step, screenshot and a quote, and
+            # aggregation used to drop all three. Both WCAG issues in the hyundai
+            # run then rendered with no proof while their evidence sat on disk.
+            shot = str(f.get("screenshot") or "").strip()
+            if len(entry["examples"]) < 3:
+                entry["examples"].append({
+                    "persona_dir": p_dir, "persona_name": who,
+                    "step": f.get("step"), "url": url,
+                    "screenshot": f"{p_dir}/{shot}" if shot and p_dir else None,
+                    "observation_quote": str(f.get("observation_quote") or "")[:300],
+                    "evidence": detail[:300],
+                    "verified": bool(f.get("verified")),
+                })
+            entry["verified"] = entry["verified"] or bool(f.get("verified"))
     a11y_findings = sorted(
         ({**e, "personas": sorted(e["personas"]), "urls": e["urls"][:5]}
          for e in a11y_by_category.values()),
         key=lambda e: (-severity_rank(e["severity"]), e["category"]),
     )
+
+    # The denominators the candidate checks never recorded: images and controls
+    # seen, and how many lacked a name. Summed across personas; the share is
+    # what matters, and it is what _attach_issue_evidence checks a narrative
+    # claim against.
+    a11y_measured = {"images": {"total": 0, "unnamed": 0},
+                     "controls": {"total": 0, "unnamed": 0}}
+    for _st in (stores or []):
+        try:
+            m = measure_names(_st)
+        except Exception:
+            continue
+        for k in ("images", "controls"):
+            a11y_measured[k]["total"] += m[k]["total"]
+            a11y_measured[k]["unnamed"] += m[k]["unnamed"]
+    for bucket in a11y_measured.values():
+        bucket["share_unnamed"] = (round(bucket["unnamed"] / bucket["total"], 3)
+                                   if bucket["total"] else None)
 
     # Viewport — count sessions (not pages) with at least one overflow
     mobile_overflow = 0
@@ -940,6 +980,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # The actual barriers, deduplicated by category — the section used
             # to be a bare number with nothing a developer could act on.
             "findings": a11y_findings,
+            "measured": a11y_measured,
         },
         "viewport": {
             "mobile_overflow_sessions": mobile_overflow,
@@ -1367,17 +1408,92 @@ def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
         h.get("heuristic_id"): h
         for h in ((stats.get("heuristic") or {}).get("by_heuristic") or [])
     }
+    a11y = stats.get("accessibility") or {}
+    # Worst-first, so the first entry per topic is the one to cite.
+    by_topic: dict = {}
+    for entry in a11y.get("findings") or []:
+        topic = entry.get("topic") if isinstance(entry, dict) else None
+        if topic and topic not in by_topic:
+            by_topic[topic] = entry
+    images = (a11y.get("measured") or {}).get("images") or {}
+
+    demoted: list = []
     for key in ("critical_issues", "serious_issues", "minor_issues"):
+        kept = []
         for issue in narrative.get(key) or []:
             if not isinstance(issue, dict):
+                kept.append(issue)
                 continue
             group = by_h.get(issue.get("heuristic_id"))
             if group:
                 issue["examples"] = group.get("examples", [])
                 issue["verified"] = bool(group.get("verified"))
+            elif _is_wcag_issue(issue):
+                # WCAG issues carry heuristic_id null, so the join above could
+                # never find them and both of the hyundai run's WCAG issues
+                # rendered as unproven while their evidence sat on disk.
+                text = " ".join(str(issue.get(k) or "") for k in
+                                ("impact", "recommendation", "frequency", "heuristic_name"))
+                topic = a11y_topic(text)
+                source = by_topic.get(topic)
+                issue["examples"] = (source or {}).get("examples", [])
+                issue["verified"] = bool((source or {}).get("verified"))
+                if topic == "alt_text" and images.get("total"):
+                    issue["measured"] = {
+                        "images_total": images["total"],
+                        "images_unnamed": images["unnamed"],
+                        "share_unnamed": images.get("share_unnamed"),
+                    }
             else:
                 issue["examples"] = []
                 issue["verified"] = False
+
+            reason = _wcag_demotion_reason(issue, key)
+            if reason:
+                issue["demoted_from"] = key
+                issue["demotion_reason"] = reason
+                # Explicit, so no later setdefault can restore the old label.
+                issue["severity"] = "drobny"
+                demoted.append(issue)
+            else:
+                kept.append(issue)
+        narrative[key] = kept
+    if demoted:
+        narrative["minor_issues"] = (narrative.get("minor_issues") or []) + demoted
+
+
+# Below this share of unnamed images, "the images lack alt text" is not a
+# systemic barrier. In the hyundai runs about 10% of images were unnamed — icons
+# inside links that already carried their text — while every car was named by
+# its model, and the report still called missing alt text a serious problem
+# "on 13 of 13 pages". Applied to alt text only: for controls a single unnamed
+# submit button on a booking form is a genuine barrier at any share.
+_ALT_TEXT_SYSTEMIC_SHARE = 0.2
+
+
+def _is_wcag_issue(issue: dict) -> bool:
+    if issue.get("heuristic_id") is not None:
+        return False
+    name = str(issue.get("heuristic_name") or "").lower()
+    return "wcag" in name or "dostępn" in name
+
+
+def _wcag_demotion_reason(issue: dict, key: str) -> str | None:
+    """Why a WCAG issue cannot stay critical or serious, if it cannot.
+
+    Enforces in code what aggregate_synthesize.txt already asks for and the
+    model did not do: a critical or serious issue needs cover in verified
+    evidence. Scoped to WCAG issues — the channel that was shown to break it —
+    so measured PageSpeed results and heuristic issues keep their placement.
+    """
+    if key == "minor_issues" or not _is_wcag_issue(issue):
+        return None
+    if not issue.get("verified"):
+        return "no_evidence"
+    share = (issue.get("measured") or {}).get("share_unnamed")
+    if share is not None and share < _ALT_TEXT_SYSTEMIC_SHARE:
+        return "measured_share"
+    return None
 
 
 def resolve_narrative(agg: dict) -> dict:

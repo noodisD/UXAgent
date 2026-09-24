@@ -200,10 +200,10 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         doc.add_heading(heading, level=1)
         for issue in issues:
             sev = issue.get("severity") or ""
-            doc.add_heading(
-                f"H{issue.get('heuristic_id', '?')}: {issue.get('heuristic_name', '')}",
-                level=2,
-            )
+            h_id = issue.get("heuristic_id")
+            # WCAG issues have no Nielsen heuristic; "HNone:" was the title.
+            prefix = f"H{h_id}: " if isinstance(h_id, int) else ""
+            doc.add_heading(f"{prefix}{issue.get('heuristic_name', '')}", level=2)
             meta = []
             if _SEVERITY_LABEL.get(sev):
                 meta.append(_SEVERITY_LABEL[sev])
@@ -215,6 +215,23 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 _add_caption(doc, " · ".join(meta))
             if issue.get("impact"):
                 doc.add_paragraph(str(issue["impact"]))
+            # Same measured denominator and demotion note as the HTML: this is
+            # the copy a client edits and forwards, so it must not be the one
+            # place the number is missing.
+            measured = issue.get("measured") or {}
+            if measured.get("images_total"):
+                pct = round(100 * (measured.get("share_unnamed") or 0))
+                p = doc.add_paragraph()
+                p.add_run(f"Zmierzono: {measured['images_unnamed']} z "
+                          f"{measured['images_total']} obrazów bez tekstu "
+                          f"alternatywnego ({pct}%).").bold = True
+            if issue.get("demotion_reason"):
+                was = {"critical_issues": "krytyczne", "serious_issues": "poważne"}.get(
+                    issue.get("demoted_from"), "wyższej kategorii")
+                why = ("pomiar pokazuje, że dotyczy to niewielkiej części elementów"
+                       if issue["demotion_reason"] == "measured_share"
+                       else "brak dowodu w zapisie sesji")
+                _add_caption(doc, f"Przeniesiono z kategorii „{was}”: {why}.")
             if issue.get("recommendation"):
                 p = doc.add_paragraph()
                 p.add_run("Rekomendacja: ").bold = True
