@@ -15,8 +15,10 @@ of scans. A model rating its own output does not discriminate.
 The trace already answers the question:
 
     impact = reach x task consequence
-      reach   — how many of the run's personas reported this finding (counted
-                from the findings themselves)
+      reach   — how many of the run's personas reported this finding, plus,
+                for broken rendering only (null, undefined, NaN), those whose
+                own pages showed the same text — a visible defect reached them
+                whether or not they wrote it down
       blocked — whether any persona who reported it failed or abandoned the task
 
     high    widespread AND blocking
@@ -116,7 +118,13 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
 
     for key, group in groups.items():
         is_cluster = isinstance(key, str)
-        personas = {f.get("_persona_dir") for f in group if f.get("_persona_dir")}
+        reported = {f.get("_persona_dir") for f in group if f.get("_persona_dir")}
+        # Plus participants whose own pages showed the same rendering artifact
+        # (reporter._encountered_by): a defect visible on the page reached
+        # everyone who saw that page, whether or not they wrote it down.
+        personas = set(reported)
+        for f in group:
+            personas.update(f.get("_encountered_by") or ())
         blocked_personas = sorted(
             p for p in personas
             if str(outcomes.get(p, "")).strip().lower() in _BLOCKED_OUTCOMES
@@ -147,6 +155,8 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
             "confidence": confidence,
             # The evidence for `impact`, so the rule can be checked, not trusted.
             "personas_affected": len(personas),
+            # How many of those wrote it down, when fewer than saw it.
+            "personas_reported": len(reported),
             "participant_count": participant_count,
             "blocked": bool(blocked_personas),
             "blocked_personas": blocked_personas,

@@ -73,6 +73,7 @@ def _issue_lines(stats: dict, participants: int) -> list[dict]:
         sev = r.get("severity") or "drobny"
         base = RULES["issue"].get(sev, RULES["issue"]["drobny"])
         affected = int(r.get("personas_affected") or 0)
+        reported = int(r.get("personas_reported") or affected)
         n = int(r.get("participant_count") or participants or 0)
         share, reach = _reach(affected, n)
         conf = str(r.get("confidence") or "high")
@@ -88,7 +89,10 @@ def _issue_lines(stats: dict, participants: int) -> list[dict]:
             # reviewer as an arithmetic error, because the 0.5 floor that turns
             # a third into two thirds was nowhere on the page.
             "basis": (f"problem {_SEVERITY_PL.get(sev, sev)} ({base}) × zasięg "
-                      f"{affected}/{n} (0.5 + 0.5 × {share:.2f} = {reach:.2f}) × "
+                      f"{affected}/{n}"
+                      + (f" — zgłosił {reported}, na stronie widoczne u {affected}"
+                         if reported < affected else "")
+                      + f" (0.5 + 0.5 × {share:.2f} = {reach:.2f}) × "
                       f"pewność {_CONFIDENCE_PL.get(conf, conf)} ({cf})"),
             "heuristic_id": h_id,
         })

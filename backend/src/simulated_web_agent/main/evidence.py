@@ -39,6 +39,37 @@ def _window(text: str, needle: str, width: int) -> str:
     return ("…" if start > 0 else "") + out + ("…" if end < len(text) else "")
 
 
+# Broken rendering: text a page shows only when its template or data failed.
+_ARTIFACT_RE = re.compile(
+    r"(\bnull\b|\bundefined\b|\bNaN\b|\[object \w+\]|\{\{|\}\}|lorem ipsum)", re.IGNORECASE)
+
+
+def rendering_artifact(evidence: str) -> str:
+    """The quoted fragment of broken rendering a finding names, or "".
+
+    Only fragments the finding quotes count — 'null kW (null KM)' — so a finding
+    that merely uses the word "null" in its prose does not qualify.
+    """
+    for fragment in sorted(set(_QUOTED.findall(evidence or "")), key=len, reverse=True):
+        if _ARTIFACT_RE.search(fragment):
+            return fragment.strip()
+    return ""
+
+
+def pages_contain(store: TraceStore, fragment: str) -> bool:
+    """Did any page this session recorded show `fragment`?"""
+    if not fragment or store is None:
+        return False
+    needle = fragment.lower()
+    for path in sorted((store.trace_dir / "simp_html").glob("simp_html_*.html")):
+        try:
+            if needle in _visible_text(path.read_text(encoding="utf-8", errors="replace")).lower():
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def page_quote(store: TraceStore, step, evidence: str) -> str:
     """The page's own words at the cited step, centred on what the finding quotes.
 

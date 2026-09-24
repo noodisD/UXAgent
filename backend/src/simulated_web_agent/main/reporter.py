@@ -29,7 +29,7 @@ from .severity import (
     severity_rank,
 )
 from .a11y_checks import a11y_topic, measure_names
-from .evidence import page_quote
+from .evidence import page_quote, pages_contain, rendering_artifact
 from .scoring import breakdown_text, compute_ux_score
 from .attribution import restates_a_gated_finding
 from .redaction import clean as _redact, mentions_harness_fault
@@ -733,6 +733,19 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             if isinstance(f, dict):
                 all_findings.append({**f, "_persona_dir": persona_dir, "_persona_name": persona_name})
 
+    # Who else's pages showed the same rendering artifact. Reach counted the
+    # participants who wrote a finding down, not those who met the defect:
+    # "null kW (null KM)" was on the engine step in all three hyundai sessions
+    # and was reported as affecting 1 of 3. Deliberately limited to broken
+    # rendering — null, undefined, NaN, unrendered templates — which anyone on
+    # the page sees; "the button did not work" still counts only who hit it.
+    for f in all_findings:
+        artifact = rendering_artifact(str(f.get("evidence") or ""))
+        if artifact:
+            f["_encountered_by"] = {
+                d for d, st in _stores_by_dir.items() if pages_contain(st, artifact)
+            }
+
     # Exclude gated findings (harness failures, off-site pages, claims the
     # verifier could not support) from the headline severity counts and
     # per-heuristic grouping, so they can't drive the critical/serious verdict
@@ -852,7 +865,10 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         # times is still ONE affected participant. Counting findings produced
         # impossible frequencies ("10 z 5 uczestników") that the narrative then
         # repeated to the client verbatim.
-        personas_affected = len({f.get("_persona_dir") for f in group if f.get("_persona_dir")}) or 1
+        affected_dirs = {f.get("_persona_dir") for f in group if f.get("_persona_dir")}
+        for f in group:
+            affected_dirs.update(f.get("_encountered_by") or ())
+        personas_affected = len(affected_dirs) or 1
         worst_severity = max(group, key=severity_rank).get("severity", "drobny")
         verified_group = [f for f in group if f.get("verified")]
         examples = [_example(f) for f in (verified_group or group)[:3]]
