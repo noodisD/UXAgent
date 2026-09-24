@@ -87,6 +87,13 @@ fences). Every <...> is a placeholder you must replace:
     "visual_hierarchy": "<IN POLISH: barrier + why that score>",
     "trustworthiness": "<IN POLISH: barrier + why that score>"
   }},
+  "suggested_changes": {{
+    "purpose_clarity": "<IN POLISH: one concrete change that removes that barrier for this person, or \"\" if the score is 5>",
+    "navigation_visibility": "<IN POLISH: one concrete change, or \"\">",
+    "call_to_action": "<IN POLISH: one concrete change, or \"\">",
+    "visual_hierarchy": "<IN POLISH: one concrete change, or \"\">",
+    "trustworthiness": "<IN POLISH: one concrete change, or \"\">"
+  }},
   "persona_lens": "<1 sentence IN POLISH: what this person noticed that a different person would not>",
   "strengths": ["<2–4 specific, concrete items IN POLISH>"],
   "weaknesses": ["<2–4 specific, concrete items IN POLISH>"]
@@ -97,3 +104,8 @@ Rules:
 - Scores must be integers 1–5; overall_score a float to 1 decimal.
 - Ground strengths/weaknesses in what is visible in the screenshot, phrased from
   this person's point of view.
+- Each suggested change answers the barrier named in the SAME dimension's
+  rationale. Name the element on this screen and what to do with it (move,
+  enlarge, rename, add, remove, reword) — quoting its visible text where it has
+  any. Advice that would fit any website ("poprawić nawigację", "zwiększyć
+  przejrzystość") is not a change: say what, and where.

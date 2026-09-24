@@ -643,10 +643,18 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         for k, v in scores.items():
             if v is not None:
                 fi_dimension_scores[k].append(float(v))
+        # "Co można zaproponować do zmiany?" — the reviewer's follow-up to the
+        # missing why. One change per dimension, answering that dimension's
+        # barrier, so the proposal travels with the reason it answers. Older
+        # runs have no suggested_changes and render the reason alone.
+        changes = fi.get("suggested_changes") or {}
+        if not isinstance(changes, dict):
+            changes = {}
         for k, why in (fi.get("score_rationale") or {}).items():
             if str(why or "").strip():
                 fi_dimension_reasons[k].append(
-                    {"persona": who, "score": scores.get(k), "why": str(why).strip()}
+                    {"persona": who, "score": scores.get(k), "why": str(why).strip(),
+                     "change": str(changes.get(k) or "").strip()}
                 )
         for w in fi.get("weaknesses") or []:
             if str(w or "").strip():

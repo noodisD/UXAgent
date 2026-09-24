@@ -288,6 +288,7 @@ body {
 .sr-dim ul { margin: 0; padding-left: 16px; font-size: 12.5px; line-height: 1.55; color: #3a3f47; }
 .sr-dim li { margin-bottom: 5px; }
 .sr-who { font-weight: 700; color: var(--ink); margin-right: 6px; }
+.sr-fix { margin-top: 3px; padding-left: 10px; border-left: 2px solid #008573; color: #1f4f47; }
 
 /* ── Accessibility detail ── */
 .a11y-item { border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
@@ -1387,10 +1388,19 @@ def _render_score_reasons(stats: dict) -> str:
         lis = "".join(
             f'<li><span class="sr-who">{_esc(i.get("persona") or "—")}'
             f'{f" · {i['score']}/5" if i.get("score") is not None else ""}</span>'
-            f'{_esc(i.get("why") or "")}</li>'
+            f'{_esc(i.get("why") or "")}'
+            # The reviewer's next question after "why": what to change.
+            + (f'<div class="sr-fix"><b>Propozycja zmiany:</b> {_esc(i["change"])}</div>'
+               if i.get("change") else "")
+            + '</li>'
             for i in items
         )
         blocks += f'<div class="sr-dim"><div class="sr-dim-h">{_esc(label)}</div><ul>{lis}</ul></div>'
+    if any(i.get("change") for items in reasons.values() for i in items or []):
+        blocks = ('<p class="sv-legend">Przy każdym powodzie — zmiana, która usunęłaby '
+                  'tę barierę dla tej osoby, zaproponowana w tej samej ocenie '
+                  'pierwszego ekranu. To propozycja do rozważenia, nie zmierzony '
+                  'wynik.</p>' + blocks)
 
     if weaknesses:
         lis = "".join(

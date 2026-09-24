@@ -356,6 +356,10 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                     sc = f" ({i['score']}/5)" if i.get("score") is not None else ""
                     doc.add_paragraph(f"{who}{sc}: {i.get('why', '')}",
                                       style="List Bullet")
+                    if i.get("change"):
+                        fix = doc.add_paragraph(style="List Bullet 2")
+                        fix.add_run("Propozycja zmiany: ").bold = True
+                        fix.add_run(str(i["change"]))
 
     # ── Accessibility ────────────────────────────────────────────────────
     acc = stats.get("accessibility") or {}
