@@ -3,6 +3,7 @@ import base64
 import contextlib
 import inspect
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -43,6 +44,83 @@ def resolve_url(url: str, base_url: str) -> str:
 # anchored on the step. A scope refusal is a policy decision that worked exactly
 # as intended, so it must not discredit that step's findings.
 SCOPE_REFUSAL_PREFIX = "Navigation blocked:"
+
+
+# ── Personal data ───────────────────────────────────────────────────────────
+#
+# A UX audit never has a real identity to enter, so it must never type one.
+# Checked before every typing action, because nothing else stood between a
+# persona and a real form: the only rule was a line in planning.txt, framed
+# around login walls, and absent from the prompt that actually emits typing.
+#
+# The consequences are not hypothetical. Hyundai's test-drive form asks for
+# name, surname, email, phone and an SMS verification code, so a filled phone
+# field can text whoever owns that number and a submission books a real dealer
+# appointment. The first external reviewer's own T-Mobile task ended "jeśli
+# tak, to ją zakup". Without names, email and phone none of those forms can be
+# submitted, so this one check closes every such path at once.
+#
+# Addresses and postcodes are deliberately allowed: "is fibre available at this
+# address" is a lookup, not a commitment, and that same review task needed it.
+# Same prefix convention as SCOPE_REFUSAL_PREFIX, for the same reason: a
+# refusal is a policy working, not an interaction failing.
+INPUT_REFUSAL_PREFIX = "Input blocked:"
+
+_PERSONAL_INPUT_TYPES = frozenset({"email", "tel", "password"})
+_PERSONAL_AUTOCOMPLETE = frozenset({
+    "email", "tel", "tel-national", "tel-local", "name", "given-name",
+    "family-name", "additional-name", "username", "current-password",
+    "new-password", "one-time-code", "cc-name", "cc-number", "cc-csc", "cc-exp",
+    "cc-exp-month", "cc-exp-year", "bday",
+})
+_PERSONAL_NAME_RE = re.compile(
+    r"(first.?name|last.?name|full.?name|surname|imi[eę]\b|nazwisk|e-?mail|"
+    r"phone|telefon|\btel\b|mobile|kom[oó]rk|pesel|\bnip\b|password|has[lł]o|"
+    r"sms|verification.?code|kod.?weryfik|card.?number|numer.?karty|cvv|cvc)",
+    re.IGNORECASE,
+)
+_EMAIL_RE = re.compile(r"[^\s@]+@[^\s@]+\.[a-z]{2,}", re.IGNORECASE)
+
+
+def personal_field_reason(attrs: dict) -> str | None:
+    """Why this field asks for personal data, or None if it does not."""
+    kind = str(attrs.get("type") or "").lower()
+    if kind in _PERSONAL_INPUT_TYPES:
+        return f"type={kind}"
+    auto = str(attrs.get("autocomplete") or "").lower().split()
+    hit = next((a for a in auto if a in _PERSONAL_AUTOCOMPLETE), None)
+    if hit:
+        return f"autocomplete={hit}"
+    for key in ("name", "id", "placeholder", "aria_label", "label"):
+        value = str(attrs.get(key) or "")
+        if _PERSONAL_NAME_RE.search(value):
+            return f"{key}={value[:40]!r}"
+    return None
+
+
+def personal_text_reason(text: str) -> str | None:
+    """Why this text is personal data, whatever field it is going into.
+
+    Catches the mislabelled field the attribute check cannot see. Nine digits is
+    a Polish phone number; a price, a postcode or a year never reaches it.
+    """
+    text = str(text or "")
+    if _EMAIL_RE.search(text):
+        return "an email address"
+    digits = re.sub(r"[\s\-()+./]", "", text)
+    if re.search(r"\d{9,}", digits):
+        return "a phone or ID number"
+    return None
+
+
+def input_refusal_message(reason: str) -> str:
+    return (
+        f"{INPUT_REFUSAL_PREFIX} this would enter personal data ({reason}). This "
+        "audit never types names, email, phone numbers, passwords or payment "
+        "details, and never submits forms that send them — a filled form here "
+        "can reach a real person. Note what the form asks for, and treat reaching "
+        "it as the end of this path."
+    )
 
 
 async def select_places_suggestion(page, timeout: int = 2500) -> bool:
@@ -857,6 +935,38 @@ class WebAgentEnv:
     # SITE SCOPE
     # ===================================================================
 
+    async def _personal_data_refusal(self, semantic_id, text) -> str | None:
+        """Refusal message if this typing action would enter personal data."""
+        reason = personal_text_reason(text)
+        if reason:
+            return input_refusal_message(reason)
+        try:
+            if semantic_id is None:
+                handle = await self.page.evaluate_handle("document.activeElement")
+                element = handle.as_element()
+                if element is None:
+                    return None
+            else:
+                locator = await self._locate_or_reparse(semantic_id)
+                if await locator.count() == 0:
+                    return None  # type() reports the missing element itself
+                element = locator.first
+            attrs = await element.evaluate(
+                """el => ({
+                    type: el.getAttribute('type'),
+                    autocomplete: el.getAttribute('autocomplete'),
+                    name: el.getAttribute('name'), id: el.id,
+                    placeholder: el.getAttribute('placeholder'),
+                    aria_label: el.getAttribute('aria-label'),
+                    label: (el.labels && el.labels[0]) ? el.labels[0].innerText : ''
+                })"""
+            )
+        except Exception:
+            # Inspection is best effort; the content check above already ran.
+            return None
+        reason = personal_field_reason(attrs or {})
+        return input_refusal_message(reason) if reason else None
+
     def _off_site_refusal(self, url) -> str | None:
         """Refusal message if `url` would leave the site under test, else None.
 
@@ -955,9 +1065,21 @@ class WebAgentEnv:
                 text = action_data["text"]
                 target = action_data["target"]
                 press_enter = action_data.get("enter", False)
+                refusal = await self._personal_data_refusal(target, text)
+                if refusal:
+                    observation = await self.observation()
+                    observation["error"] = refusal
+                    return observation
                 await self.type(target, text, press_enter)
 
             elif action_name == "raw_type":
+                # Types into whatever has focus, so it would walk straight past a
+                # per-field check: the focused element is inspected instead.
+                refusal = await self._personal_data_refusal(None, action_data["text"])
+                if refusal:
+                    observation = await self.observation()
+                    observation["error"] = refusal
+                    return observation
                 await self.raw_type(action_data["text"])
 
             elif action_name == "scroll":
