@@ -1163,13 +1163,30 @@ def _format_root_causes(root_causes: list) -> str:
 _ADDED_RUNGS = {"cart_has_items", "order_summary_reached"}
 
 
-def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int) -> str:
-    """Measured task-completion summary for the aggregate narrator — evidence
-    from the trace (§4.2), so the UX score is anchored to what participants
-    actually achieved, not only their synthetic self-report (survey/SEQ)."""
+def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
+                                 sources: dict | None = None) -> str:
+    """Task-completion summary for the aggregate narrator, labelled by source.
+
+    It used to open with "zmierzone z zapisu sesji … nie samoocena agenta"
+    unconditionally, whatever the outcomes actually were. When the goal ladder
+    cannot score a task — a configurator, say — every outcome is the persona's
+    own verdict, and the narrator was told that verdict was trace evidence. The
+    aggregate prompt calls measured completion its strongest evidence, so this
+    sentence decided the score. It now says what it is.
+    """
     if not n:
         return "Brak danych o ukończeniu zadania."
+    src = Counter((sources or {}).values())
+    observed_n, declared_n = src.get("observed", 0), src.get("declared", 0)
     c = Counter((v or "").lower() for v in outcomes.values())
+    if sources and observed_n == 0:
+        parts = [f"sukces: {c.get('success', 0)}/{n}", f"częściowo: {c.get('partial', 0)}/{n}",
+                 f"porażka: {c.get('failed', 0)}/{n}"]
+        return ("UKOŃCZENIE ZADANIA — DEKLAROWANE, nie zmierzone. Zapis sesji nie "
+                "pozwala automatycznie ocenić tego typu zadania, więc poniższe liczby "
+                "to samoocena uczestników. Traktuj je jako słabszy dowód niż "
+                "zweryfikowane problemy i zaznacz w podsumowaniu, że są to "
+                "deklaracje, a nie pomiar:\n- " + "; ".join(parts) + ".")
     succ, part, fail = c.get("success", 0), c.get("partial", 0), c.get("failed", 0)
     ab = c.get("persona_abandoned", 0)
     parts = [f"sukces: {succ}/{n}", f"częściowo: {part}/{n}", f"porażka: {fail}/{n}"]
@@ -1182,8 +1199,12 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int) ->
         checkout = sum(1 for r in reached_rungs if r == "order_summary_reached")
         line2 = (f"\n- {added}/{m} uczestników dodało produkt do koszyka; "
                  f"{checkout}/{m} dotarło do etapu kasy / podsumowania zamówienia.")
+    mixed = ""
+    if sources and declared_n:
+        mixed = (f"\n- Uwaga: {observed_n}/{n} wyników zmierzono z zapisu sesji, "
+                 f"{declared_n}/{n} to samoocena uczestników.")
     return ("UKOŃCZENIE ZADANIA — zmierzone z zapisu sesji (dowód z przebiegu, "
-            "nie samoocena agenta):\n- " + "; ".join(parts) + "." + line2)
+            "nie samoocena agenta):\n- " + "; ".join(parts) + "." + line2 + mixed)
 
 
 async def generate_aggregated_report(
@@ -1216,20 +1237,26 @@ async def generate_aggregated_report(
     # A persona who abandoned did not finish, whatever either concluded, so
     # ended_reason wins where it says so.
     outcomes: dict[str, str] = {}
+    # Where each outcome came from. They are not equally strong — one is the
+    # trace, the other is the persona grading its own run — and the aggregate
+    # prompt treats measured completion as its strongest evidence.
+    outcome_sources: dict[str, str] = {}
     reached_rungs: list[str] = []
     for s in stores:
         reflection = s.read_objective_reflection() or {}
         session = s.read_session_result() or {}
         eff = (s.read_iso_metrics() or {}).get("effectiveness", {}) or {}
         ended = str(session.get("ended_reason") or "")
-        if eff.get("outcome_source") == "observed":
+        observed = eff.get("outcome_source") == "observed"
+        if observed:
             outcome = str(eff.get("observed_outcome") or "")
         else:
             outcome = str(reflection.get("outcome") or "")
         outcomes[s.trace_dir.name] = (
             ended if ended == "persona_abandoned" else outcome
         )
-        if eff.get("outcome_source") == "observed":
+        outcome_sources[s.trace_dir.name] = "observed" if observed else "declared"
+        if observed:
             reached_rungs.append(str(eff.get("reached_rung") or ""))
 
     # Questionnaire (from the run manifest) supplies real prompts + scales for
@@ -1275,8 +1302,15 @@ async def generate_aggregated_report(
 
     # Measured task-completion — anchors the score to observed reality (§4.2),
     # not only synthetic self-report. Also recorded in stats for the payload.
-    outcome_distribution = _format_outcome_distribution(outcomes, reached_rungs, n)
-    stats["outcomes"] = {"counts": dict(Counter(outcomes.values())), "participant_count": n}
+    outcome_distribution = _format_outcome_distribution(
+        outcomes, reached_rungs, n, outcome_sources)
+    stats["outcomes"] = {
+        "counts": dict(Counter(outcomes.values())),
+        "participant_count": n,
+        # How many of those counts the trace can vouch for, so no renderer can
+        # present self-assessed completion as measured.
+        "sources": dict(Counter(outcome_sources.values())),
+    }
     root_cause_summary = _format_root_causes(stats["heuristic"].get("root_causes") or [])
 
     prompt = prompt_template.format(

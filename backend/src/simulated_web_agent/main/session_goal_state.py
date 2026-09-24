@@ -252,7 +252,10 @@ def compute_goal_state(store: TraceStore, target_url: str) -> dict:
 
 # Highest rung mentioned in the intent wins. Word-boundary matched.
 _TARGET_KEYWORDS = (
-    ("order_summary_reached", ("podsumowani", "do kasy", "kasa", "checkout",
+    # "podsumowani" is NOT here on its own: a configuration summary, an order
+    # summary and "podsumuj swoje wrażenia" all contain it. It counts only
+    # alongside cart or order vocabulary — see _SUMMARY_NEEDS_CONTEXT below.
+    ("order_summary_reached", ("do kasy", "kasa", "checkout",
                                "zamówieni", "zamowieni", "sfinalizuj", "złóż zam",
                                "zloz zam")),
     ("cart_has_items", ("koszyk", "do koszyk", "cart", "dodaj do")),
@@ -270,12 +273,35 @@ _TARGET_KEYWORDS = (
 )
 
 
+# Tasks this ladder cannot score. A product configurator has no cart, no
+# product-detail URLs and no checkout: every rung is decided from URL markers
+# that a configurator never produces, so any configurator task scored against it
+# reaches "none" and is recorded as failed. The hyundai run did exactly that —
+# three personas reached the configuration summary, one of them by its own
+# account successfully, and all three were scored "failed" and reported as
+# "0% skuteczności". Abstaining hands the outcome back to the declared verdict,
+# labelled as declared, which is honest about what the trace can and cannot
+# show. (Same class as the "godziny otwarcia centrum handlowego" task below.)
+_OFF_LADDER_MARKERS = ("skonfigur", "konfigur")
+
+# "podsumowani" signals the checkout rung only in a shopping sentence.
+_SUMMARY_NEEDS_CONTEXT = ("koszyk", "cart", "dodaj do", "zamówieni", "zamowieni",
+                          "do kasy", "checkout")
+
+
 def infer_target_rung(intent: str) -> str | None:
     """Deterministic: the highest ladder rung the intent asks for, or None
-    (abstain) when the intent names no shopping rung."""
+    (abstain) when the intent names no shopping rung — or names a task the
+    shopping ladder cannot score at all."""
     text = (intent or "").lower()
+    if has_marker(text, _OFF_LADDER_MARKERS):
+        return None
     for rung, keywords in _TARGET_KEYWORDS:  # ordered highest-rung first
         if has_marker(text, keywords):
+            return rung
+        if (rung == "order_summary_reached"
+                and has_marker(text, ("podsumowani",))
+                and has_marker(text, _SUMMARY_NEEDS_CONTEXT)):
             return rung
     return None
 
