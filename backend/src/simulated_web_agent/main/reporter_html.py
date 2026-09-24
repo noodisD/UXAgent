@@ -674,7 +674,27 @@ def _render_scale_question(q: dict) -> str:
       <div class="sv-track"><span class="sv-marker" style="left:{pct}%;"></span></div>
       <div class="sv-anchors"><span>{lo} · {_esc(q['low_label'])}</span>
         <span>{_esc(q['high_label'])} · {hi}</span></div>
-      <div class="sv-n">n = {q.get('n', 0)}</div>
+      <div class="sv-n">n = {q.get('n', 0)}{_na_note(q)}</div>
+    </div>"""
+
+
+def _na_note(q: dict) -> str:
+    """How many participants said they could not answer, beside n.
+
+    Their placeholder "3"s used to sit in the average as neutral ratings, so a
+    question nobody could really answer looked like a lukewarm result.
+    """
+    na = int(q.get("not_assessable") or 0)
+    return (f" · {na} bez oceny (pytanie nie dotyczyło przebiegu sesji)" if na else "")
+
+
+def _render_not_assessable_question(q: dict) -> str:
+    return f"""
+    <div class="sv-q">
+      <div class="sv-q-head"><span class="sv-q-text">{_esc(q.get('prompt', ''))}</span>
+        <span class="sv-q-avg" style="color:#6c757d;">brak ocen</span></div>
+      <div class="sv-n">Żaden uczestnik nie mógł odpowiedzieć ({int(q.get('not_assessable') or 0)}):
+        pytanie dotyczy etapu, do którego sesje nie dotarły.</div>
     </div>"""
 
 
@@ -712,6 +732,7 @@ def _render_survey(stats: dict, summaries: dict | None = None) -> str:
     body = [legend]
     for q in questions:
         body.append(_render_open_question(q) if q.get("kind") == "open"
+                    else _render_not_assessable_question(q) if q.get("kind") == "not_assessable"
                     else _render_scale_question(q))
         # Why the participants answered that way — one synthesis per question,
         # generated at report time and, until now, never rendered. A bar chart

@@ -509,8 +509,32 @@ def _survey_prompt(qid: str, meta: dict | None) -> str:
     return qid
 
 
+# Phrases a survey answer's reason uses to say the question could not be
+# answered from the session. The agents then entered the scale midpoint as a
+# placeholder, and those 3s went into the averages as neutral ratings: "Czułem
+# kontrolę przy podawaniu danych do płatności — śr. 3,00" on a car configurator
+# where no participant ever reached a payment step. One answered "N/A" to a 1–5
+# question, which aggregation then filed as an open-text answer.
+_NOT_ASSESSABLE_MARKERS = (
+    "cannot assess", "can't assess", "unable to assess", "impossible to assess",
+    "not possible to assess", "no experience to form", "cannot form an opinion",
+    "not applicable", "do not contain any information", "does not contain any information",
+    "no information about", "nie mogę ocenić", "nie da się ocenić", "nie można ocenić",
+    "nie dotyczy", "brak doświadczenia", "brak informacji",
+)
+
+
+def _not_assessable(value, reason) -> bool:
+    """Was this survey answer a placeholder rather than a rating?"""
+    v = str(value or "").strip().lower()
+    if v in {"n/a", "na", "n.d.", "nd", "nie dotyczy", "-", "—"}:
+        return True
+    r = str(reason or "").lower()
+    return any(m in r for m in _NOT_ASSESSABLE_MARKERS)
+
+
 def _build_survey_questions(survey_scores: dict, survey_open: dict,
-                            q_meta: list | None, avg) -> list[dict]:
+                            q_meta: list | None, avg, survey_na: dict | None = None) -> list[dict]:
     """One entry per question in questionnaire order (synthetic metrics last):
     rated -> value distribution + average + anchored scale; open -> the answers.
     This is what lets the report show the real prompt, the response spread (vital
@@ -518,7 +542,7 @@ def _build_survey_questions(survey_scores: dict, survey_open: dict,
     q_list = [q for q in (q_meta or []) if isinstance(q, dict)]
     q_map = {q.get("id"): q for q in q_list}
     order = [q.get("id") for q in q_list]
-    for qid in list(survey_scores) + list(survey_open):
+    for qid in list(survey_scores) + list(survey_open) + list(survey_na or {}):
         if qid not in order:
             order.append(qid)  # data present but not declared (e.g. synthetic_*)
 
@@ -537,6 +561,9 @@ def _build_survey_questions(survey_scores: dict, survey_open: dict,
                 "id": qid, "prompt": _survey_prompt(qid, meta), "kind": "scale",
                 "min": lo, "max": hi, "low_label": low_l, "high_label": high_l,
                 "avg": avg(vals), "n": len(vals),
+                # Participants who said they could not answer — shown beside n
+                # so the reader knows how thin the average is.
+                "not_assessable": int((survey_na or {}).get(qid, 0)),
                 "distribution": [{"value": v, "count": counts[v]}
                                  for v in range(lo, hi + 1)],
             })
@@ -545,6 +572,11 @@ def _build_survey_questions(survey_scores: dict, survey_open: dict,
             if answers:
                 out.append({"id": qid, "prompt": _survey_prompt(qid, meta),
                             "kind": "open", "answers": answers})
+        elif (survey_na or {}).get(qid):
+            # Nobody could answer it. Dropping the question would hide that the
+            # questionnaire asked about something the sessions never reached.
+            out.append({"id": qid, "prompt": _survey_prompt(qid, meta),
+                        "kind": "not_assessable", "not_assessable": int(survey_na[qid])})
     return out
 
 
@@ -985,6 +1017,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # scores stay in — those are formed on the first page and remain valid).
     survey_scores: dict[str, list[float]] = defaultdict(list)
     survey_open: dict[str, list[str]] = defaultdict(list)
+    # Answers the participant said it could not give. Kept out of the
+    # averages and counted instead — see _not_assessable.
+    survey_na: dict[str, int] = defaultdict(int)
     excluded_surveys: list[dict] = []
     for r in reports:
         if _is_truncated_session(r):
@@ -999,6 +1034,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         for a in survey.get("answers") or []:
             qid = a.get("question_id", "")
             val = a.get("value", "")
+            if _not_assessable(val, a.get("reason") or a.get("reasoning")):
+                survey_na[qid] += 1
+                continue
             try:
                 survey_scores[qid].append(float(val))
             except (ValueError, TypeError):
@@ -1084,7 +1122,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "open_answers": {k: v for k, v in survey_open.items()},
             # Enriched, questionnaire-ordered view: real prompts, per-value
             # distribution, correct scale + anchors. reporter_html renders this.
-            "questions": _build_survey_questions(survey_scores, survey_open, q_meta, _avg),
+            "questions": _build_survey_questions(survey_scores, survey_open, q_meta, _avg,
+                                                 survey_na),
+            "not_assessable": dict(survey_na),
             "surveys_included": n - len(excluded_surveys),
             "excluded_surveys": excluded_surveys,
         },
