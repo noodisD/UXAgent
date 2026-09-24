@@ -999,11 +999,18 @@ def _render_form_funnel(forms: dict | None) -> str:
 
     body = (
         _step("Wszyscy uczestnicy", n, "#6c757d") +
-        _step("Wypełnili pole formularza", engaged, "#17a2b8") +
-        _step("Dotarli do akcji submit", submitted, "#008573")
+        _step("Wpisali coś w pole (także wyszukiwarkę)", engaged, "#17a2b8") +
+        _step("Wysłali formularz", submitted, "#008573")
     )
     if avg_fields is not None:
         body += f'<p style="font-size:13px;color:#6c757d;margin-top:12px;">Średnio {avg_fields} pól na sesję.</p>'
+    # "Dotarli do akcji submit 1/3" was a link click counted as a submission.
+    # Say how submission is judged — and that personal-data forms are never
+    # sent by design, or a 0 here reads as the site failing.
+    body += ('<p class="sb-rules">Wysłanie liczy się tylko wtedy, gdy po wpisaniu danych '
+             'kliknięto przycisk, który rzeczywiście wysyła formularz — nie link ani '
+             'przycisk nawigacji. Audyt nigdy nie wpisuje danych osobowych, więc '
+             'formularzy kontaktowych, rezerwacji i zamówień z założenia nie wysyła.</p>')
     return _section("Lejek formularzy", body)
 
 
