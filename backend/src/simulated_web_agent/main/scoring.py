@@ -92,14 +92,25 @@ def _issue_lines(stats: dict, participants: int) -> list[dict]:
     return lines
 
 
-def _task_line(outcomes: dict, sources: dict) -> dict | None:
+def _task_line(outcomes: dict, sources: dict, held: set | None = None) -> dict | None:
+    """Task completion, per participant.
+
+    `held` are participants whose verdict rests on a finding the gate set
+    aside. The hyundai run: Krzysztof's "failed" was the model's conclusion that
+    the configurator ignored his EXECUTIVE choice — the very claim held back for
+    a human check. Counting it would charge the same unconfirmed claim twice,
+    once as an issue and once as a failed task.
+    """
     if not outcomes:
         return None
+    held = held or set()
     n = len(outcomes)
     total = 0.0
     counts = {"failed": 0, "partial": 0}
     declared = 0
     for key, outcome in outcomes.items():
+        if key in held:
+            continue
         outcome = (outcome or "").lower()
         if outcome == "persona_abandoned":
             outcome = "failed"
@@ -114,11 +125,15 @@ def _task_line(outcomes: dict, sources: dict) -> dict | None:
         total += weight * factor / n
     if not total:
         return None
-    measured_note = ("samoocena uczestników — waga ×"
-                     f"{RULES['declared_factor']:g}" if declared == sum(counts.values())
-                     else f"{declared} z {sum(counts.values())} to samoocena (waga ×"
-                          f"{RULES['declared_factor']:g})" if declared
-                     else "zmierzone z zapisu sesji")
+    # "Declared" is the model's verdict on the participant's run, not the
+    # participant's own rating — the survey is that, and it can disagree
+    # (Krzysztof rated his confidence 7/7 and was declared "failed").
+    factor = f"{RULES['declared_factor']:g}"
+    counted = sum(counts.values())
+    measured_note = (f"ocena deklarowana (werdykt modelu, niezmierzony) — waga ×{factor}"
+                     if declared == counted
+                     else f"{declared} z {counted} to ocena deklarowana (waga ×{factor})"
+                     if declared else "zmierzone z zapisu sesji")
     return {
         "kind": "task",
         "label": "Realizacja zadania",
@@ -195,7 +210,12 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
             "basis": f"łączna kara za drobne problemy ograniczona do {RULES['minor_cap']:g}",
         })
 
-    for extra in (_task_line(outcomes or {}, outcome_sources or {}),
+    # Participants whose verdict rests on a held-back finding.
+    held = {r.get("persona_dir") for r in (stats.get("objective_reflections") or [])
+            if isinstance(r, dict) and r.get("self_reported_only") and r.get("persona_dir")}
+    held &= set((outcomes or {}).keys())
+
+    for extra in (_task_line(outcomes or {}, outcome_sources or {}, held),
                   *_accessibility_lines(stats),
                   _performance_line(pagespeed)):
         if extra:
@@ -213,6 +233,13 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
             "label": f"{gated} wniosków wykluczonych przez weryfikację",
             "reason": "nieudana interakcja narzędzia, brak potwierdzenia w zapisie "
                       "sesji lub inna domena — nie są dowodem o stronie",
+        })
+    if held:
+        not_counted.append({
+            "label": f"Wynik zadania {len(held)} uczestnika(ów)",
+            "reason": "werdykt opiera się na wniosku wstrzymanym do weryfikacji — "
+                      "liczenie go obciążyłoby ocenę tym samym niepotwierdzonym "
+                      "twierdzeniem drugi raz",
         })
     not_counted.append({
         "label": "Oceny pierwszego wrażenia i odpowiedzi w ankiecie",

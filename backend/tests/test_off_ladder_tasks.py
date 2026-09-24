@@ -91,7 +91,7 @@ def test_measured_outcomes_still_say_so():
 def test_a_mixed_run_says_how_many_of_each():
     text = _format_outcome_distribution(
         OUTCOMES, ["none"], 3, {"a": "observed", "b": "declared", "c": "declared"})
-    assert "1/3 wyników zmierzono" in text and "2/3 to samoocena" in text
+    assert "1/3 wyników zmierzono" in text and "2/3 to ocena deklarowana" in text
 
 
 def test_callers_without_sources_keep_the_old_wording():

@@ -193,6 +193,11 @@ body {
 .sb-left-h { font-weight: 600; font-size: 13px; margin: 16px 0 6px; }
 .sb-left { font-size: 12.5px; color: #5a5f66; padding-left: 18px; }
 .sb-rules { font-size: 11.5px; color: #7a808a; margin-top: 12px; }
+.nv-card { border: 1px solid #ffe08a; background: #fffbea; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.nv-head { font-size: 13.5px; margin-bottom: 4px; }
+.nv-meta { color: #7a808a; font-size: 12px; margin-left: 6px; }
+.nv-claim { font-size: 13px; color: #3a3f47; font-style: italic; margin: 4px 0 6px; }
+.nv-why, .nv-check { font-size: 12.5px; color: #5a5f66; margin: 2px 0; }
 .obj-note { font-size: 12.5px; color: #5a5f66; background: #f6f7f9; border-left: 3px solid #c9ced6; border-radius: 4px; padding: 8px 12px; margin: 0 0 14px; }
 .obj-caveat { font-size: 12px; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; padding: 6px 10px; margin: 6px 0 2px; }
 .unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
@@ -1156,6 +1161,43 @@ def _render_score_breakdown(stats: dict) -> str:
     return _section("Jak obliczono ocenę", body)
 
 
+def _render_verification_list(stats: dict) -> str:
+    """Findings the verification gate held back, each with what would settle it.
+
+    They used to be a count. A specialist cannot act on a count — she can act on
+    "click EXECUTIVE MY27 in a normal browser and see whether it selects", and
+    if it does not, she has found a real defect the automation could only
+    suspect. That is also why they are shown rather than dropped: excluded is
+    not the same as false.
+    """
+    items = (stats.get("heuristic") or {}).get("needs_verification_items") or []
+    if not items:
+        return ""
+    cards = ""
+    for it in items:
+        shot = it.get("screenshot")
+        thumb = (f'<a href="{_esc(shot)}" target="_blank"><img class="ev-thumb" '
+                 f'src="{_esc(shot)}" alt="krok {it.get("step")}"/></a>') if shot else ""
+        h_id = it.get("heuristic_id")
+        title = (f"H{h_id}: {it.get('heuristic_name', '')}" if isinstance(h_id, int) and h_id
+                 else it.get("heuristic_name", "") or "Wniosek")
+        claimed = it.get("severity_claimed") or ""
+        cards += f"""
+        <div class="nv-card">
+          <div class="nv-head"><b>{_esc(title)}</b>
+            <span class="nv-meta">zgłoszone jako {_esc(claimed)} · {_esc(it.get('persona_name', ''))}, krok {it.get('step')}</span></div>
+          <div class="nv-claim">„{_esc(str(it.get('evidence', ''))[:300])}”</div>
+          <div class="nv-why"><b>Dlaczego wstrzymane:</b> {_esc(it.get('reason', ''))}</div>
+          <div class="nv-check"><b>Co sprawdzić:</b> {_esc(it.get('check', ''))}</div>
+          {thumb}
+        </div>"""
+    intro = (f"{len(items)} wniosków nie trafiło do ocen i liczników, bo zapis sesji "
+             "nie pozwala ich potwierdzić. Nie znaczy to, że są fałszywe — każdy "
+             "wymaga krótkiej weryfikacji przez człowieka, opisanej poniżej.")
+    return _section("Do weryfikacji przez człowieka",
+                    f'<p class="sb-rules">{_esc(intro)}</p>{cards}')
+
+
 def _render_heuristic_legend(stats: dict) -> str:
     """All ten heuristics with their verdict, plus what the method is.
 
@@ -1171,14 +1213,26 @@ def _render_heuristic_legend(stats: dict) -> str:
         h.get("heuristic_id"): h
         for h in ((stats.get("heuristic") or {}).get("by_heuristic") or [])
     }
+    held_back = {int(k): v for k, v in
+                 ((stats.get("heuristic") or {}).get("excluded_by_heuristic") or {}).items()
+                 if str(k).lstrip("-").isdigit()}
     rows = ""
     for h_id in sorted(HEURISTIC_NAMES):
         hit = by_h.get(h_id)
+        pending = held_back.get(h_id, 0)
+        pending_note = (f' <span style="color:#8a6d00">· {pending} do weryfikacji</span>'
+                        if pending else "")
         if hit:
             sev = hit.get("worst_severity", "drobny")
             _bg, fg, _bd = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
             verdict = (f'<span style="color:{fg};font-weight:700">{_esc(sev)}</span> '
-                       f'<span style="color:#6c757d">· {_esc(hit.get("sessions_affected", ""))}</span>')
+                       f'<span style="color:#6c757d">· {_esc(hit.get("sessions_affected", ""))}</span>'
+                       f'{pending_note}')
+        elif pending:
+            # Not "no violation": something was raised here and set aside. The
+            # list below says what, and what would settle it.
+            verdict = ('<span style="color:#6c757d">brak potwierdzonych naruszeń</span>'
+                       f'{pending_note}')
         else:
             verdict = '<span style="color:#1f7a4d">nie stwierdzono naruszeń</span>'
         rows += (f'<tr><td class="hl-id">H{h_id}</td>'
@@ -1353,6 +1407,7 @@ def generate_html_report(agg: dict) -> str:
         # reader has never been shown.
         _render_heuristic_legend(stats) +
         _render_all_issues(narr) +
+        _render_verification_list(stats) +
         _render_recommendations(narr) +
         _render_pagespeed(ps) +
         _render_scroll_depth(scroll) +

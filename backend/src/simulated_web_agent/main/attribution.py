@@ -405,6 +405,18 @@ def restates_a_gated_finding(texts, findings) -> bool:
             continue
         evidence = f"{f.get('evidence', '')} {f.get('recommendation', '')}"
 
+        # 0. An unresponsive-control finding restated: the same "ignored my
+        # choice" claim about the same control. The hyundai reflection wrote
+        # "system zignorował wybór droższej wersji" without quoting the full
+        # "EXECUTIVE MY27", so the quoted-name match below missed it — and that
+        # persona's "failed" verdict rested entirely on the held-back claim.
+        control = str(f.get("unresponsive_control") or "")
+        if control:
+            first = next((w for w in control.split("_") if len(w) >= 5 and not w.isdigit()), "")
+            if (first and first in _norm_label(blob)
+                    and any(m in blob for m in _IGNORED_CHOICE_MARKERS)):
+                return True
+
         # 1. The element name, when the finding quotes one.
         for quoted in _QUOTED_RE.findall(evidence):
             token = quoted.strip().lower()
@@ -429,6 +441,68 @@ def restates_a_gated_finding(texts, findings) -> bool:
     return False
 
 
+# "The site ignored my choice." The claim a failed click produces when the
+# participant's own click never registered.
+#
+# The hyundai run's headline critical finding: "system ignoruje wybór
+# użytkownika dotyczący wersji wyposażenia", cited at the summary page.
+# EXECUTIVE was clicked in all three sessions, six clicks in all, and none of
+# them registered: SMART stayed ticked in the screenshot straight after each
+# one. The summary then showed SMART — correctly, since nothing else had been
+# chosen. So the claim that the site ignored a choice is false whatever the
+# cause. Whether the card would respond to a person is a separate, open
+# question a trace cannot settle; that is exactly what requires_human_check is
+# for, and the finding goes to the report's verification list, not away.
+_IGNORED_CHOICE_MARKERS = (
+    "zignorow", "ignoruj", "nie zapisał", "nie zapisuje", "nie zapisano",
+    "nie uwzględni", "nie zarejestrow", "nie został wybran", "nie została wybran",
+    "nie zostało wybran", "wybór nie", "ignored", "did not register",
+    "was not selected", "not saved",
+)
+
+
+def _norm_label(text: str) -> str:
+    """Lowercase, letters and digits only — non-ASCII dropped, not transliterated.
+
+    The parser mangles Polish letters out of its ids ("Następny krok" becomes
+    "nast_pny_krok"), so the same must happen to prose for the two to compare.
+    """
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def _retried_controls(store: TraceStore) -> dict[str, str]:
+    """Controls clicked more than once this session, keyed for matching prose.
+
+    Keyed on the first two words of the parser id — "executive_my27_od_14"
+    becomes "executivemy27" — because the id's tail is the card's price text,
+    which the finding never repeats.
+    """
+    counts: dict[str, int] = {}
+    for raw in store.read_action_trace() or []:
+        a = _parse_action(raw)
+        if str(a.get("action", "")).lower() != "click" or not a.get("target"):
+            continue
+        counts[str(a["target"])] = counts.get(str(a["target"]), 0) + 1
+    keyed: dict[str, str] = {}
+    for target, n in counts.items():
+        if n < 2:
+            continue
+        words = [w for w in target.split("_") if w and not w.isdigit()]
+        key = _norm_label("".join(words[:2]))
+        if len(key) >= 6:
+            keyed[key] = target
+    return keyed
+
+
+def _unresponsive_control(finding: dict, retried: dict[str, str]) -> str | None:
+    text = f"{finding.get('evidence', '')} {finding.get('recommendation', '')}"
+    low = text.lower()
+    if not any(m in low for m in _IGNORED_CHOICE_MARKERS):
+        return None
+    flat = _norm_label(text)
+    return next((target for key, target in retried.items() if key in flat), None)
+
+
 def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     """Stamp each finding with `harness_suspect` / `requires_human_check` when it
     is attributable to a harness interaction failure — either its cited step
@@ -442,6 +516,7 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     # If the search demonstrably ran, any "search is broken" claim is
     # contradicted by the agent's own navigation.
     search_contradicted = _search_ran(store)
+    retried = _retried_controls(store)
 
     def _is_suspect(f: dict) -> bool:
         step = f.get("step")
@@ -467,7 +542,10 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     for f in findings or []:
         if not isinstance(f, dict):
             continue
-        suspected = _is_suspect(f)
+        control = _unresponsive_control(f, retried)
+        suspected = _is_suspect(f) or control is not None
+        # Named so the report can say exactly what a person should click.
+        f["unresponsive_control"] = control
         f["harness_suspect"] = suspected
         # Two keys, not one, and they are not synonyms even though this writer
         # sets both from the same bool:

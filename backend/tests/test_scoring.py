@@ -84,7 +84,9 @@ def test_a_self_assessed_failure_costs_half_a_measured_one():
     measured = compute_ux_score(_stats(), outcomes={"a": "failed"}, outcome_sources={"a": "observed"})
     declared = compute_ux_score(_stats(), outcomes={"a": "failed"}, outcome_sources={"a": "declared"})
     assert declared["total_deduction"] == measured["total_deduction"] * RULES["declared_factor"]
-    assert "samoocena" in declared["deductions"][0]["basis"]
+    assert "ocena deklarowana" in declared["deductions"][0]["basis"]
+    # the model's verdict on a run, not the participant's own rating
+    assert "samoocena" not in declared["deductions"][0]["basis"]
 
 
 def test_cosmetic_issues_cannot_sink_a_site_and_the_cap_is_shown():

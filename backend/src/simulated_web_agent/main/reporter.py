@@ -76,6 +76,9 @@ def _gate_reason(finding: dict) -> str:
     """
     if not isinstance(finding, dict):
         return ""
+    if finding.get("unresponsive_control"):
+        return ("element nie zareagował na automatyczne kliknięcia — nie wiadomo, "
+                "czy to wada strony, czy ograniczenie narzędzia")
     if finding.get("harness_suspect"):
         return "prawdopodobna awaria narzędzia, nie strony"
     if finding.get("off_site"):
@@ -85,6 +88,40 @@ def _gate_reason(finding: dict) -> str:
     if finding.get("requires_human_check"):
         return "wymaga weryfikacji przez człowieka"
     return ""
+
+
+def _control_label(finding: dict) -> str:
+    """The on-screen name of the control a finding is about, for a human to find.
+
+    The parser id ("executive_my27_od_14") is not what anybody sees, so prefer
+    the label the finding quotes ('EXECUTIVE MY27') when it matches the control.
+    """
+    control = str(finding.get("unresponsive_control") or "")
+    if not control:
+        return ""
+    words = [w for w in control.split("_") if w and not w.isdigit()]
+    key = re.sub(r"[^a-z0-9]", "", "".join(words[:2]).lower())
+    evidence = str(finding.get("evidence") or "")
+    for quoted in re.findall(r"['\"‘’„”]([^'\"‘’„”]{2,60})['\"‘’„”]", evidence):
+        if key and key in re.sub(r"[^a-z0-9]", "", quoted.lower()):
+            return quoted.strip()
+    return " ".join(words[:2]).upper()
+
+
+def _human_check(finding: dict) -> str:
+    """What a person should do to settle a finding the trace could not."""
+    label = _control_label(finding)
+    if label:
+        return (f"Kliknij „{label}” w zwykłej przeglądarce i sprawdź, czy wybór "
+                "się zmienia. Jeśli nie — to rzeczywista wada strony.")
+    if finding.get("off_site"):
+        return "Dotyczy innej domeny niż badana — zwykle do pominięcia."
+    if finding.get("harness_suspect"):
+        return "Powtórz tę interakcję ręcznie i sprawdź, czy strona reaguje."
+    if finding.get("claim_verdict") in ("unsupported", "partial"):
+        return ("Sprawdź na stronie, czy opisany problem występuje — zapis sesji "
+                "go nie potwierdza.")
+    return "Zweryfikuj ręcznie na stronie."
 
 
 def _severity_sort_key(finding: dict) -> int:
@@ -620,6 +657,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         # headline defect on it alone.
         entry = _redact({
             "persona": _persona_label(r),
+            # Keyed like `outcomes`, so scoring can set aside a verdict whose
+            # reasoning rests on a finding the gate held back.
+            "persona_dir": str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1],
             "objective": r.get("intent", ""),
             "outcome": refl.get("outcome", ""),
             "summary": refl.get("summary", ""),
@@ -737,6 +777,29 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "evidence": f.get("evidence", ""),
             "verified": bool(f.get("verified")),
         }
+
+    # Everything the gate held back, with the reason and what a person should
+    # do to settle it. excluded_from_report's docstring always promised that
+    # "excluded findings are still rendered, separately, as needing
+    # verification" — the aggregate report only ever showed a count, so the
+    # heuristic list read "nie stwierdzono naruszeń" over findings that had been
+    # raised and set aside. A specialist can use this list; a hidden count she
+    # cannot.
+    verification_items: list[dict] = []
+    excluded_by_heuristic: dict[int, int] = defaultdict(int)
+    for f in all_findings:
+        if not excluded_from_report(f):
+            continue
+        h_id = _heuristic_id(f)
+        excluded_by_heuristic[h_id] += 1
+        verification_items.append({
+            **_redact(_example(f)),
+            "heuristic_id": h_id,
+            "heuristic_name": HEURISTIC_NAMES.get(h_id, ""),
+            "severity_claimed": f.get("severity", ""),
+            "reason": _gate_reason(f),
+            "check": _human_check(f),
+        })
 
     heuristic_summary = []
     for h_id in sorted(by_heuristic):
@@ -967,6 +1030,10 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 "drobny": severity_totals.get("drobny", 0),
                 "needs_verification": needs_verification,
             },
+            # The findings behind that count, each with its reason and the check
+            # that would settle it — rendered as "Do weryfikacji przez człowieka".
+            "needs_verification_items": verification_items,
+            "excluded_by_heuristic": dict(excluded_by_heuristic),
             "by_heuristic": heuristic_summary,
             # Cross-heuristic dedup (root_cause.py): findings for the same
             # underlying defect, wherever the Nielsen category, collapsed once.
@@ -1189,7 +1256,8 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
                  f"porażka: {c.get('failed', 0)}/{n}"]
         return ("UKOŃCZENIE ZADANIA — DEKLAROWANE, nie zmierzone. Zapis sesji nie "
                 "pozwala automatycznie ocenić tego typu zadania, więc poniższe liczby "
-                "to samoocena uczestników. Traktuj je jako słabszy dowód niż "
+                "to werdykt modelu o przebiegu każdej sesji (ocena deklarowana), a nie "
+                "pomiar ani ocena samych uczestników. Traktuj je jako słabszy dowód niż "
                 "zweryfikowane problemy i zaznacz w podsumowaniu, że są to "
                 "deklaracje, a nie pomiar:\n- " + "; ".join(parts) + ".")
     succ, part, fail = c.get("success", 0), c.get("partial", 0), c.get("failed", 0)
@@ -1207,7 +1275,7 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
     mixed = ""
     if sources and declared_n:
         mixed = (f"\n- Uwaga: {observed_n}/{n} wyników zmierzono z zapisu sesji, "
-                 f"{declared_n}/{n} to samoocena uczestników.")
+                 f"{declared_n}/{n} to ocena deklarowana (werdykt modelu, niezmierzony).")
     return ("UKOŃCZENIE ZADANIA — zmierzone z zapisu sesji (dowód z przebiegu, "
             "nie samoocena agenta):\n- " + "; ".join(parts) + "." + line2 + mixed)
 
