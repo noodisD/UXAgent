@@ -391,12 +391,29 @@ def _section(title: str, body: str) -> str:
     return f'<div class="section"><h2>{_esc(title)}</h2>{body}</div>'
 
 
-def _render_header(agg: dict, stats: dict) -> str:
+def _issue_counts(narr: dict | None) -> dict:
+    """Counts of the issue cards the report actually renders.
+
+    The header and the statistics table used to count verified Nielsen findings
+    only, while the cards beneath also carry the accessibility issues — so the
+    review found "Łącznie problemów 2" above a body listing four. Counting the
+    rendered lists (after evidence is joined and unproven WCAG claims demoted)
+    means a number can never disagree with what is under it.
+    """
+    narr = narr or {}
+    c = {k: len(narr.get(f"{k}_issues") or []) for k in ("critical", "serious", "minor")}
+    c["total"] = sum(c.values())
+    return c
+
+
+def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
     n = stats.get("participant_count", 0)
     fi_avg = (stats.get("first_impression") or {}).get("avg_score")
     heur = stats.get("heuristic") or {}
-    sc = heur.get("severity_counts") or {}
-    narr = agg.get("narrative") or {}
+    narr = narr if narr is not None else (agg.get("narrative") or {})
+    counts = _issue_counts(narr)
+    sc = {"krytyczny": counts["critical"], "poważny": counts["serious"],
+          "drobny": counts["minor"]}
     overall = narr.get("overall_ux_score") or fi_avg
 
     score_color = _score_color(overall)
@@ -969,7 +986,7 @@ def _render_form_funnel(forms: dict | None) -> str:
     return _section("Lejek formularzy", body)
 
 
-def _render_stats_table(stats: dict) -> str:
+def _render_stats_table(stats: dict, narr: dict | None = None) -> str:
     n = stats.get("participant_count", 0)
     heur = stats.get("heuristic") or {}
     sc = heur.get("severity_counts") or {}
@@ -981,13 +998,15 @@ def _render_stats_table(stats: dict) -> str:
         style = f' style="color:{color};font-weight:700;"' if color else ""
         return f"<tr><td>{_esc(label)}</td><td{style}>{_esc(value)}</td></tr>"
 
-    total = heur.get("total_findings", 0)
+    counts = _issue_counts(narr)
+    held = int(sc.get("needs_verification") or 0)
     rows = (
         row("Uczestnicy", n) +
-        row("Łącznie problemów", total) +
-        row("Problemy krytyczne", sc.get("krytyczny", 0), "#E60000") +
-        row("Problemy poważne", sc.get("poważny", 0), "#856404") +
-        row("Problemy drobne", sc.get("drobny", 0), "#0c5460") +
+        row("Łącznie problemów", counts["total"]) +
+        row("Problemy krytyczne", counts["critical"], "#E60000") +
+        row("Problemy poważne", counts["serious"], "#856404") +
+        row("Problemy drobne", counts["minor"], "#0c5460") +
+        row("Do weryfikacji przez człowieka", held) +
         row("Pierwsze wrażenie (śr.)", f"{fi_avg}/5" if fi_avg else "—") +
         row("Dostępność (śr.)", f"{a11y_avg}/5" if a11y_avg else "—") +
         row("Overflow mobile", f"{vp.get('mobile_overflow_sessions',0)}/{n} sesji") +
@@ -1148,9 +1167,11 @@ def _render_score_breakdown(stats: dict) -> str:
     issue = rules.get("issue") or {}
     rule_note = (
         "Reguły: problem krytyczny {k}, poważny {p}, drobny {d} punktu, "
-        "pomnożone przez zasięg (odsetek uczestników, którzy go napotkali) i pewność "
-        "dowodu. Nieukończone zadanie {tf}, częściowo {tp} na uczestnika — o połowę "
-        "mniej, gdy to samoocena. Wagi są jawne i można je zmienić."
+        "pomnożone przez zasięg i pewność dowodu. Zasięg = 0,5 + 0,5 × odsetek "
+        "uczestników, którzy napotkali problem — rzeczywista wada zauważona przez "
+        "jedną osobę nie jest trzecią częścią wady. Nieukończone zadanie {tf}, "
+        "częściowo {tp} na uczestnika — o połowę mniej, gdy to ocena deklarowana, a "
+        "nie zmierzona. Wagi są jawne i można je zmienić."
     ).format(k=issue.get("krytyczny"), p=issue.get("poważny"), d=issue.get("drobny"),
              tf=(rules.get("task") or {}).get("failed"),
              tp=(rules.get("task") or {}).get("partial"))
@@ -1295,12 +1316,27 @@ def _render_accessibility_detail(stats: dict) -> str:
     The section rendered a single number; the pass produces categorised
     findings with the page they were seen on and a recommendation.
     """
-    findings = (stats.get("accessibility") or {}).get("findings") or []
+    from .reporter import _ALT_TEXT_SYSTEMIC_SHARE
+
+    a11y = stats.get("accessibility") or {}
+    findings = a11y.get("findings") or []
     if not findings:
         return ""
+    images = (a11y.get("measured") or {}).get("images") or {}
+    share = images.get("share_unnamed")
     rows = ""
     for f in findings[:12]:
         sev = f.get("severity", "drobny")
+        measured = ""
+        # The same rule the issue cards and the score apply. The review found
+        # alt text "poważny" here and "drobny" in the issue list — one finding,
+        # two severities, depending on where the reader looked.
+        if (f.get("topic") == "alt_text" and share is not None
+                and share < _ALT_TEXT_SYSTEMIC_SHARE):
+            sev = "drobny"
+            measured = (f'<div class="measured">Zmierzono: {images.get("unnamed")} z '
+                        f'{images.get("total")} obrazów bez tekstu alternatywnego '
+                        f'({round(100 * share)}%).</div>')
         bg, fg, border = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
         where = ", ".join(f.get("urls") or [])[:160]
         who = ", ".join(f.get("personas") or [])
@@ -1312,6 +1348,7 @@ def _render_accessibility_detail(stats: dict) -> str:
             {f'<span class="a11y-who">{_esc(who)}</span>' if who else ""}
           </div>
           <div class="a11y-detail">{_esc(f.get("detail") or "")}</div>
+          {measured}
           {f'<div class="a11y-fix"><span class="a11y-fix-l">Rekomendacja</span>{_esc(f.get("recommendation"))}</div>' if f.get("recommendation") else ""}
           {f'<div class="a11y-where">{_esc(where)}</div>' if where else ""}
         </div>"""
@@ -1394,7 +1431,7 @@ def generate_html_report(agg: dict) -> str:
     forms = agg.get("forms")
 
     body = (
-        _render_header(agg, stats) +
+        _render_header(agg, stats, narr) +
         '<div class="page">' +
         _render_executive(narr) +
         _render_score_breakdown(stats) +
@@ -1422,7 +1459,7 @@ def generate_html_report(agg: dict) -> str:
         _render_accessibility_detail(stats) +
         _render_responsiveness(stats, narr) +
         _render_device_detail(stats) +
-        _render_stats_table(stats) +
+        _render_stats_table(stats, narr) +
         _render_methodology(narr) +
         '</div>'
     )

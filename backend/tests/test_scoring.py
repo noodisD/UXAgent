@@ -166,3 +166,34 @@ def test_the_html_section_prints_the_arithmetic():
     assert "Punkt wyjścia" in html and "Ocena końcowa" in html
     assert f"{res['score']:.1f}" in html
     assert "Nie wliczono do oceny" in html
+
+
+# --- numbers that agree with each other ------------------------------------
+
+def test_the_reach_floor_is_on_the_page():
+    """"zasięg 1/3 (0.67)" read to every reviewer as an arithmetic error: the 0.5
+    floor that turns a third into two thirds was not shown."""
+    res = compute_ux_score(_stats(prioritization=[_issue(9, "poważny", 1)]))
+    assert "0.5 + 0.5 × 0.33 = 0.67" in res["deductions"][0]["basis"]
+
+
+def test_the_header_counts_the_cards_it_sits_above():
+    from simulated_web_agent.main.reporter_html import _issue_counts, _render_header
+
+    narr = {"critical_issues": [{}], "serious_issues": [{}, {}], "minor_issues": [{}],
+            "overall_ux_score": 3.7}
+    assert _issue_counts(narr) == {"critical": 1, "serious": 2, "minor": 1, "total": 4}
+    html = _render_header({"website": "x.pl"}, {"heuristic": {"severity_counts":
+                          {"krytyczny": 1, "poważny": 1, "drobny": 0}}}, narr)
+    assert ">2<" in html.replace(" ", ""), "serious count must be the 2 cards, not 1 finding"
+
+
+def test_one_finding_has_one_severity_in_every_section():
+    from simulated_web_agent.main.reporter_html import _render_accessibility_detail
+
+    html = _render_accessibility_detail({"accessibility": {
+        "findings": [{"category": "Brak tekstu alternatywnego", "severity": "poważny",
+                      "topic": "alt_text", "detail": "…"}],
+        "measured": {"images": {"total": 1287, "unnamed": 133, "share_unnamed": 0.103}}}})
+    assert ">drobny<" in html and ">poważny<" not in html
+    assert "133 z 1287" in html

@@ -84,9 +84,12 @@ def _issue_lines(stats: dict, participants: int) -> list[dict]:
             "severity": sev,
             "label": f"H{h_id}: {r.get('heuristic_name') or ''}".strip(),
             "amount": amount,
+            # The reach factor is spelled out: "zasięg 1/3 (0.67)" read to every
+            # reviewer as an arithmetic error, because the 0.5 floor that turns
+            # a third into two thirds was nowhere on the page.
             "basis": (f"problem {_SEVERITY_PL.get(sev, sev)} ({base}) × zasięg "
-                      f"{affected}/{n} ({reach:.2f}) × pewność "
-                      f"{_CONFIDENCE_PL.get(conf, conf)} ({cf})"),
+                      f"{affected}/{n} (0.5 + 0.5 × {share:.2f} = {reach:.2f}) × "
+                      f"pewność {_CONFIDENCE_PL.get(conf, conf)} ({cf})"),
             "heuristic_id": h_id,
         })
     return lines

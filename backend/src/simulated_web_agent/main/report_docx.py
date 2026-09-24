@@ -123,10 +123,13 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     _add_kv_table(doc, [
         ("Uczestnicy", stats.get("participant_count", "—")),
         ("Ocena ogólna", f"{score}/5" if score is not None else "—"),
-        ("Problemy krytyczne", (stats.get("heuristic") or {}).get(
-            "severity_counts", {}).get("krytyczny", 0)),
-        ("Problemy poważne", (stats.get("heuristic") or {}).get(
-            "severity_counts", {}).get("poważny", 0)),
+        # The rendered issue lists, as in the HTML: counting only verified
+        # Nielsen findings disagreed with the cards that follow.
+        ("Problemy krytyczne", len(narr.get("critical_issues") or [])),
+        ("Problemy poważne", len(narr.get("serious_issues") or [])),
+        ("Problemy drobne", len(narr.get("minor_issues") or [])),
+        ("Do weryfikacji przez człowieka", (stats.get("heuristic") or {}).get(
+            "severity_counts", {}).get("needs_verification", 0)),
     ])
 
     # ── Summary ──────────────────────────────────────────────────────────
