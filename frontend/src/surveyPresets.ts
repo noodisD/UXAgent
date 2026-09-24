@@ -17,7 +17,7 @@ const L = (id: string, prompt: string): PresetQuestion => ({
 const O = (id: string, prompt: string): PresetQuestion => ({ id, type: 'short_text', prompt })
 
 export const PRESET_KEYS = [
-  'ecommerce', 'catalog', 'directory', 'corporate',
+  'ecommerce', 'leadgen', 'catalog', 'directory', 'corporate',
 ] as const
 export type PresetKey = typeof PRESET_KEYS[number]
 
@@ -28,6 +28,14 @@ export type PresetKey = typeof PRESET_KEYS[number]
 // being judged as a shop in every downstream prompt.
 export const PRESET_SITE_CONTEXT: Record<PresetKey, string> = {
   ecommerce: 'Sklep internetowy z możliwością zakupu online (koszyk, kasa, płatność).',
+  // Configurators and lead generation: car brands, telecoms, banks. There was
+  // no category for them, so hyundai.com was audited as "e-commerce (koszyk,
+  // kasa, płatność)": the first-impression pass marked it down for lacking a
+  // cart, the narrative called it "more of a catalogue" despite its Click to Buy
+  // path, and the survey asked about delivery and payment no session reached.
+  leadgen: 'Serwis marki z konfiguratorem lub wyborem oferty. Celem jest zapytanie ' +
+    'ofertowe, kontakt z doradcą, umówienie wizyty lub jazdy testowej albo zakup ' +
+    'przez dedykowaną ścieżkę — bez klasycznego koszyka. Brak koszyka nie jest wadą.',
   catalog: 'Katalog produktów z wyszukiwarką sklepów stacjonarnych; brak zakupów online i koszyka.',
   directory: 'Katalog/portal z listą pozycji (np. firm, ofert, artykułów) bez transakcji online.',
   corporate: 'Strona firmowa / prezentacja marki; brak katalogu produktów i zakupów online.',
@@ -45,6 +53,19 @@ export const SURVEY_PRESETS: Record<PresetKey, PresetQuestion[]> = {
     L('e8', 'Strona wydaje się wiarygodna i godna zaufania.'),
     O('e9', 'Co (jeśli cokolwiek) powstrzymałoby Cię przed finalizacją zakupu?'),
     O('e10', 'Czego szukałeś/szukałaś, a czego nie udało się znaleźć?'),
+  ],
+  // Nothing here needs a payment or delivery step the audit never reaches.
+  leadgen: [
+    L('g1', 'Strona była łatwa w obsłudze.'),
+    L('g2', 'Łatwo było znaleźć i wybrać interesujący mnie produkt lub ofertę.'),
+    L('g3', 'Łatwo było porównać dostępne wersje i zrozumieć, czym się różnią.'),
+    L('g4', 'Konfigurowanie (wybór wersji, opcji, dodatków) było proste i zrozumiałe.'),
+    L('g5', 'Cena i jej składniki (wersja, opcje, promocje) były dla mnie jasne.'),
+    L('g6', 'Było jasne, jaki jest następny krok (zapytanie, kontakt, jazda testowa, zakup).'),
+    L('g7', 'Strona wydaje się wiarygodna i godna zaufania.'),
+    L('g8', 'Chętnie wróciłbym/wróciłabym na tę stronę przy wyborze.'),
+    O('g9', 'Co (jeśli cokolwiek) powstrzymałoby Cię przed wysłaniem zapytania lub zakupem?'),
+    O('g10', 'Czego szukałeś/szukałaś, a czego nie udało się znaleźć?'),
   ],
   catalog: [
     L('c1', 'Strona była łatwa w obsłudze.'),

@@ -388,7 +388,7 @@ async function fillSettings() {
     if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
     if (data.general_intent) form.persona.generalIntent = data.general_intent
     // NOT data.site_context: siteContext is now driven by the category select
-    // (presetKey), which must always hold one of the 4 known texts or empty —
+    // (presetKey), which must always hold one of the known preset texts or empty —
     // writing an arbitrary AI sentence here would desync the dropdown from the
     // text silently applied underneath it.
     if (data.num_subjects) form.persona.numSubjects = Math.min(MAX_PERSONAS, Math.max(MIN_PERSONAS, Number(data.num_subjects)))
