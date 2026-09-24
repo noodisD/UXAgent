@@ -147,8 +147,13 @@ def test_the_objective_and_its_outcome_lead_the_report():
     assert "Cel nieosiągnięty" in html
     assert "Koszyk gubił produkt" in html
     assert "Wyszukiwarka działała" in html, "what worked must be shown, not only faults"
-    # the outcome must precede the heuristic detail
-    assert html.index("Realizacja zadania") < html.index("Heurystyki Nielsena")
+    # The outcome must precede the issue detail. The list of all ten heuristics
+    # comes first of all, as Karolina asked ("na początku raportu wszystkie
+    # spisać"), so the reader knows the key before meeting "H1", "H9".
+    first_issue = min(i for i in (html.find("Problemy krytyczne"), html.find("Problemy poważne"),
+                                  html.find("Problemy drobne")) if i >= 0)
+    assert html.index("Realizacja zadania") < first_issue
+    assert html.index("Heurystyki Nielsena") < html.index("Realizacja zadania")
 
 
 def test_score_rationale_is_rendered_next_to_the_scores():

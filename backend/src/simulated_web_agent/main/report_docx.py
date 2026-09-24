@@ -139,6 +139,38 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         if narr.get("score_rationale"):
             _add_caption(doc, str(narr["score_rationale"]))
 
+    # ── Heuristic legend ─────────────────────────────────────────────────
+    # First, as Karolina asked, and before the score breakdown that cites the
+    # heuristics by number. "nie stwierdzono naruszeń" only where nothing was
+    # raised at all: a heuristic with findings held for a human says so.
+    by_h = {h.get("heuristic_id"): h
+            for h in ((stats.get("heuristic") or {}).get("by_heuristic") or [])}
+    held_back = {int(k): v for k, v in
+                 ((stats.get("heuristic") or {}).get("excluded_by_heuristic") or {}).items()
+                 if str(k).lstrip("-").isdigit()}
+    doc.add_heading("Heurystyki Nielsena — zakres oceny", level=1)
+    doc.add_paragraph(
+        "Ocena opiera się na dziesięciu heurystykach użyteczności Nielsena. "
+        "Każdy problem w raporcie jest przypisany do jednej z nich (H1–H10)."
+    )
+    table = doc.add_table(rows=1, cols=3)
+    table.style = "Light Grid Accent 1"
+    hdr = table.rows[0].cells
+    hdr[0].text, hdr[1].text, hdr[2].text = "", "Heurystyka", "Wynik"
+    for h_id in sorted(HEURISTIC_NAMES):
+        hit = by_h.get(h_id)
+        pending = held_back.get(h_id, 0)
+        note = f" · {pending} do weryfikacji" if pending else ""
+        cells = table.add_row().cells
+        cells[0].text = f"H{h_id}"
+        cells[1].text = HEURISTIC_NAMES[h_id]
+        if hit:
+            cells[2].text = f"{hit.get('worst_severity', '')} · {hit.get('sessions_affected', '')}{note}"
+        elif pending:
+            cells[2].text = f"brak potwierdzonych naruszeń{note}"
+        else:
+            cells[2].text = "nie stwierdzono naruszeń"
+
     # ── How the score was computed ───────────────────────────────────────
     # Same breakdown as the HTML. This is the copy that gets edited and
     # forwarded, so it must carry the arithmetic, not just the number.
@@ -203,28 +235,6 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         for s in strengths:
             doc.add_paragraph(str(s), style="List Bullet")
 
-    # ── Heuristic legend ─────────────────────────────────────────────────
-    by_h = {h.get("heuristic_id"): h
-            for h in ((stats.get("heuristic") or {}).get("by_heuristic") or [])}
-    doc.add_heading("Heurystyki Nielsena — zakres oceny", level=1)
-    doc.add_paragraph(
-        "Ocena opiera się na dziesięciu heurystykach użyteczności Nielsena. "
-        "Każdy problem w raporcie jest przypisany do jednej z nich (H1–H10)."
-    )
-    table = doc.add_table(rows=1, cols=3)
-    table.style = "Light Grid Accent 1"
-    hdr = table.rows[0].cells
-    hdr[0].text, hdr[1].text, hdr[2].text = "", "Heurystyka", "Wynik"
-    for h_id in sorted(HEURISTIC_NAMES):
-        hit = by_h.get(h_id)
-        cells = table.add_row().cells
-        cells[0].text = f"H{h_id}"
-        cells[1].text = HEURISTIC_NAMES[h_id]
-        cells[2].text = (
-            f"{hit.get('worst_severity', '')} · {hit.get('sessions_affected', '')}"
-            if hit else "nie stwierdzono naruszeń"
-        )
-
     # ── Issues, with their evidence ──────────────────────────────────────
     for heading, issues in _issues(narr):
         if not issues:
@@ -275,6 +285,29 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                     ex.get("url"),
                 ] if x)
                 _add_picture(doc, run_dir, ex.get("screenshot"), caption)
+
+    # ── Held for a human ─────────────────────────────────────────────────
+    held_items = (stats.get("heuristic") or {}).get("needs_verification_items") or []
+    if held_items:
+        doc.add_heading("Do weryfikacji przez człowieka", level=1)
+        doc.add_paragraph(
+            f"{len(held_items)} wniosków nie trafiło do ocen i liczników, bo zapis sesji "
+            "nie pozwala ich potwierdzić. Nie znaczy to, że są fałszywe — każdy wymaga "
+            "krótkiej weryfikacji, opisanej poniżej.")
+        for it in held_items:
+            h_id = it.get("heuristic_id")
+            title = (f"H{h_id}: {it.get('heuristic_name', '')}" if isinstance(h_id, int) and h_id
+                     else it.get("heuristic_name") or "Wniosek")
+            doc.add_heading(title, level=2)
+            _add_caption(doc, f"zgłoszone jako {it.get('severity_claimed', '')} · "
+                              f"{it.get('persona_name', '')}, krok {it.get('step')}")
+            doc.add_paragraph(f"„{str(it.get('evidence', ''))[:300]}”")
+            p = doc.add_paragraph()
+            p.add_run("Dlaczego wstrzymane: ").bold = True
+            p.add_run(str(it.get("reason", "")))
+            p = doc.add_paragraph()
+            p.add_run("Co sprawdzić: ").bold = True
+            p.add_run(str(it.get("check", "")))
 
     # ── Recommendations ──────────────────────────────────────────────────
     recs = narr.get("priority_recommendations") or []

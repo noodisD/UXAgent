@@ -57,3 +57,27 @@ def test_older_checks_without_urls_count_each_page_once():
     page = {"url": "https://x.pl/a", "links_checked": 40, "broken": []}
     data, _ = _aggregate_links([_Store([page]), _Store([page]), _Store([page])])
     assert data["total_links_checked"] == 40, "not 120"
+
+
+def test_word_and_html_put_the_heuristics_first_and_list_held_findings(tmp_path):
+    """The Word file promises the HTML's section order; both must open with the
+    heuristic key and both must list what was held back for a human."""
+    from docx import Document
+
+    from simulated_web_agent.main.report_docx import build_docx
+
+    agg = {"website": "x.pl", "narrative": {"executive_summary": "Podsumowanie testu."},
+           "statistics": {"heuristic": {
+               "by_heuristic": [], "excluded_by_heuristic": {1: 1},
+               "needs_verification_items": [{
+                   "heuristic_id": 1, "heuristic_name": "Widoczność", "severity_claimed": "krytyczny",
+                   "persona_name": "K", "step": 12, "evidence": "zignorował wybór",
+                   "reason": "nie zareagował", "check": "Kliknij „EXECUTIVE MY27”"}]},
+               "score_breakdown": {"score": 3.7, "start": 5.0, "total_deduction": 1.3, "raw": 3.7,
+                                   "floored": False, "deductions": [], "not_counted": []}}}
+    doc = Document(str(build_docx(agg, tmp_path, tmp_path / "r.docx")))
+    heads = [p.text for p in doc.paragraphs if p.style.name.startswith("Heading")]
+    assert heads.index("Heurystyki Nielsena — zakres oceny") < heads.index("Jak obliczono ocenę")
+    assert "Do weryfikacji przez człowieka" in heads
+    cells = [c.text for t in doc.tables for r in t.rows for c in r.cells]
+    assert any("1 do weryfikacji" in c for c in cells)

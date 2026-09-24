@@ -1526,6 +1526,10 @@ def generate_html_report(agg: dict) -> str:
         _render_header(agg, stats, narr) +
         '<div class="page">' +
         _render_executive(narr) +
+        # Karolina: list every heuristic at the start, so the reader knows how
+        # many are fine before reading any issue. It also has to come before the
+        # score breakdown, whose lines cite "H1", "H9" by number.
+        _render_heuristic_legend(stats) +
         _render_score_breakdown(stats) +
         # What was asked and whether it was achieved, before any heuristic
         # detail: a usability report that opens with abstract scores buries
@@ -1534,7 +1538,6 @@ def generate_html_report(agg: dict) -> str:
         _render_strengths(narr, stats) +
         # The key to "H1", "H3" — without it the issues below name a system the
         # reader has never been shown.
-        _render_heuristic_legend(stats) +
         _render_all_issues(narr) +
         _render_verification_list(stats) +
         _render_recommendations(narr) +
