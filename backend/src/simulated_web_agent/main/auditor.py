@@ -122,7 +122,9 @@ async def _chat_json(messages: list, *, model: str, prefer: type, label: str,
 # ---------------------------------------------------------------------------
 
 async def _run_first_impression(store: TraceStore) -> dict:
-    screenshot_path = store.screenshot_path(0)
+    # The landing frame, not step 0's evidence frame: the latter is scrolled to
+    # the first click target (see TraceStore.first_impression_screenshot).
+    screenshot_path = store.first_impression_screenshot()
     if not screenshot_path.exists():
         log.warning("[auditor] No step-0 screenshot found in %s", store.trace_dir)
         return {"error": "screenshot_missing"}

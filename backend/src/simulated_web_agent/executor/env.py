@@ -334,7 +334,22 @@ class ElementHighlight:
             # Clean up frame reference to avoid memory leaks
             del frame
 
+    async def _run_before_action_hook(self):
+        if self.env.before_action_hook:
+            if inspect.iscoroutinefunction(self.env.before_action_hook):
+                await self.env.before_action_hook()
+            else:
+                self.env.before_action_hook()
+
     async def __aenter__(self):
+        # The before-action hook records the evidence for this step — both
+        # screenshots, the scroll position, the accessibility snapshot. It used
+        # to run after the overlay below was drawn, so every evidence screenshot
+        # carried our cyan outlines on the element about to be clicked. The
+        # first-impression pass then judged that frame, and personas praised
+        # "the car in the blue frame" — our highlight, not the site's design.
+        # It now runs once the target is in view but before anything is drawn.
+        hook_done = False
         try:
             # Only perform highlighting and scrolling if we have a target element
             if self.semantic_id:
@@ -364,6 +379,10 @@ class ElementHighlight:
                     else:
                         await locator.scroll_into_view_if_needed(timeout=2000)
                     await asyncio.sleep(1)
+
+                    # Evidence first, with the target in view and nothing drawn.
+                    await self._run_before_action_hook()
+                    hook_done = True
 
                     # Create dual overlay highlight - inner (exact) and outer (with gap)
                     await self.page.evaluate(
@@ -440,12 +459,9 @@ class ElementHighlight:
                 except Exception as e:
                     self.logger.warning(f"Before hook failed: {e}")
 
-            # Always run environment before action hook
-            if self.env.before_action_hook:
-                if inspect.iscoroutinefunction(self.env.before_action_hook):
-                    await self.env.before_action_hook()
-                else:
-                    self.env.before_action_hook()
+            # Actions without a target (scroll, back, goto) still record evidence.
+            if not hook_done:
+                await self._run_before_action_hook()
 
             # Run this after the first snippet
             await self.page.evaluate(

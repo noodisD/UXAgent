@@ -598,10 +598,12 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         who = _persona_label(r)
         p_dir = str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1]
         shot = _stores_by_dir.get(p_dir)
-        if p_dir and shot is not None and shot.screenshot_path(0).exists():
+        if p_dir and shot is not None and shot.first_impression_screenshot().exists():
             fi_screens.append({
                 "persona": who,
-                "screenshot": f"{p_dir}/screenshot/screenshot_0.png",
+                # The frame the ratings were given for, so the thumbnail shows
+                # what was actually judged.
+                "screenshot": f"{p_dir}/screenshot/{shot.first_impression_screenshot().name}",
                 "score": fi.get("overall_score"),
             })
         scores = fi.get("scores") or {}

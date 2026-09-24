@@ -666,6 +666,18 @@ async def _run_for_persona_and_intent(
         # happens under an overlay.
         consent_states[0] = await dismiss_cookie_banners(env.page)
 
+        # The page exactly as it landed: consent handled, nothing scrolled,
+        # nothing drawn. The first-impression pass is a "5-second test" of the
+        # first screen, and it used to be given step 0's evidence frame instead,
+        # which is taken once the first click target has been scrolled into view
+        # — on the Hyundai configurator 2090 px down a 3890 px page, a screen no
+        # visitor lands on.
+        try:
+            store.landing_screenshot_path().parent.mkdir(parents=True, exist_ok=True)
+            await env.page.screenshot(path=store.landing_screenshot_path())
+        except Exception as exc:
+            log.warning("landing screenshot failed: %s", exc)
+
         obs = await env.observation()
 
         log.info("Initial observation ready")

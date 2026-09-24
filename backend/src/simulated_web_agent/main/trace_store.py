@@ -63,6 +63,19 @@ class TraceStore:
         suffix = "_full_page" if full_page else ""
         return self.trace_dir / "screenshot" / f"screenshot_{step}{suffix}.png"
 
+    def landing_screenshot_path(self) -> Path:
+        """The first screen as a visitor lands on it — before any action."""
+        return self.trace_dir / "screenshot" / "screenshot_landing.png"
+
+    def first_impression_screenshot(self) -> Path:
+        """The frame the first-impression test should judge.
+
+        The landing capture when the session has one; older sessions only have
+        step 0, which is scrolled to the first click target.
+        """
+        landing = self.landing_screenshot_path()
+        return landing if landing.exists() else self.screenshot_path(0)
+
     def scroll_top_path(self, step: int) -> Path:
         return self.trace_dir / "screenshot" / f"scroll_top_{step}.txt"
 
