@@ -7,13 +7,62 @@ a step; this module verifies the citation against the trace (the source of
 truth) and stamps each finding `verified: True/False`. Findings that cannot be
 grounded are kept but must be rendered with an "unverified" label.
 """
+import html as _html
 import logging
+import re
 
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
 
 _QUOTE_CHARS = 400
+_PAGE_QUOTE_CHARS = 240
+
+# What a finding quotes from the page — 'null kW (null KM)', 'EXECUTIVE MY27'.
+_QUOTED = re.compile(
+    r"['\"‘’‚“”„]([^'\"‘’‚“”„]{3,80})"
+    r"['\"‘’‚“”„]")
+
+
+def _visible_text(markup: str) -> str:
+    markup = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", markup or "")
+    return re.sub(r"\s+", " ", _html.unescape(re.sub(r"<[^>]+>", " ", markup))).strip()
+
+
+def _window(text: str, needle: str, width: int) -> str:
+    i = text.lower().find(needle.lower())
+    if i < 0:
+        return ""
+    start = max(0, i - (width - len(needle)) // 2)
+    end = min(len(text), start + width)
+    out = text[start:end].strip()
+    return ("…" if start > 0 else "") + out + ("…" if end < len(text) else "")
+
+
+def page_quote(store: TraceStore, step, evidence: str) -> str:
+    """The page's own words at the cited step, centred on what the finding quotes.
+
+    The report used to print the first 400 characters of the perception model's
+    description of the page — in English, always the page header ("Close button.
+    Navigation links: … Page title: Wybie"), however unrelated. For the
+    "null kW (null KM)" finding that meant a quote cut off before the word null.
+    The simplified page holds the real text; this returns the part that proves
+    the claim, or "" when the finding quotes nothing that is on the page.
+    """
+    try:
+        step = int(step)
+    except (TypeError, ValueError):
+        return ""
+    path = store.trace_dir / "simp_html" / f"simp_html_{step}.html"
+    try:
+        text = _visible_text(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return ""
+    for fragment in sorted(set(_QUOTED.findall(evidence or "")), key=len, reverse=True):
+        found = _window(text, fragment.strip(), _PAGE_QUOTE_CHARS)
+        if found:
+            return found
+    return ""
 
 
 def resolve_evidence(store: TraceStore, finding: dict) -> dict:
@@ -52,15 +101,24 @@ def resolve_evidence(store: TraceStore, finding: dict) -> dict:
             screenshot = str(path.relative_to(store.trace_dir)).replace("\\", "/")
             break
 
-    quote = store.read_observation_step_text(step).strip()
-    if len(quote) > _QUOTE_CHARS:
-        quote = quote[:_QUOTE_CHARS] + "…"
+    evidence_text = str(enriched.get("evidence") or "")
+    observation = store.read_observation_step_text(step).strip()
+    # Centred on what the finding quotes when possible, not the first 400
+    # characters, which are the page header whatever the claim is about.
+    quote = ""
+    for fragment in sorted(set(_QUOTED.findall(evidence_text)), key=len, reverse=True):
+        quote = _window(observation, fragment.strip(), _QUOTE_CHARS)
+        if quote:
+            break
+    if not quote:
+        quote = observation[:_QUOTE_CHARS] + ("…" if len(observation) > _QUOTE_CHARS else "")
 
     enriched.update(
         {
             "step": step,
             "screenshot": screenshot,
             "observation_quote": quote,
+            "page_quote": page_quote(store, step, evidence_text),
             "verified": bool(screenshot or quote),
         }
     )

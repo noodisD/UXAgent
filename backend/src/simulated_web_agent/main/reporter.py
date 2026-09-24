@@ -29,6 +29,7 @@ from .severity import (
     severity_rank,
 )
 from .a11y_checks import a11y_topic, measure_names
+from .evidence import page_quote
 from .scoring import breakdown_text, compute_ux_score
 from .attribution import restates_a_gated_finding
 from .redaction import clean as _redact, mentions_harness_fault
@@ -800,6 +801,13 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
 
     def _example(f: dict) -> dict:
         screenshot = f.get("screenshot")
+        # The page's own words, centred on the claim. Findings recorded before
+        # evidence.page_quote existed get it here, from the same page on disk.
+        quote_from_page = f.get("page_quote")
+        if quote_from_page is None:
+            store = _stores_by_dir.get(f.get("_persona_dir", ""))
+            quote_from_page = (page_quote(store, f.get("step"), str(f.get("evidence") or ""))
+                               if store is not None else "")
         return {
             "persona_dir": f.get("_persona_dir", ""),
             "persona_name": f.get("_persona_name", ""),
@@ -808,6 +816,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # persona-relative → run-relative so report.html can embed it
             "screenshot": f"{f.get('_persona_dir')}/{screenshot}" if screenshot else None,
             "observation_quote": f.get("observation_quote", ""),
+            "page_quote": quote_from_page or "",
             "evidence": f.get("evidence", ""),
             "verified": bool(f.get("verified")),
         }

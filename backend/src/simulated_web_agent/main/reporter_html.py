@@ -198,6 +198,7 @@ body {
 .nv-meta { color: #7a808a; font-size: 12px; margin-left: 6px; }
 .nv-claim { font-size: 13px; color: #3a3f47; font-style: italic; margin: 4px 0 6px; }
 .nv-why, .nv-check { font-size: 12.5px; color: #5a5f66; margin: 2px 0; }
+.ev-quote-l { font-style: normal; font-size: 11px; color: #7a808a; }
 .obj-note { font-size: 12.5px; color: #5a5f66; background: #f6f7f9; border-left: 3px solid #c9ced6; border-radius: 4px; padding: 8px 12px; margin: 0 0 14px; }
 .obj-caveat { font-size: 12px; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; padding: 6px 10px; margin: 6px 0 2px; }
 .unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
@@ -524,7 +525,14 @@ def _render_issues_group(title: str, issues: list) -> str:
         evidence_html = ""
         for ex in issue.get("examples") or []:
             url = _esc(ex.get("url", ""))
-            quote = _esc((ex.get("observation_quote") or "")[:300])
+            # The page's own words where they can be found; otherwise the
+            # session's description of the page, labelled as such — it is
+            # written by the perception model, often in English, and is not a
+            # quotation from the site.
+            page_text = (ex.get("page_quote") or "").strip()
+            quote = _esc((page_text or ex.get("observation_quote") or "")[:300])
+            quote_label = ("Tekst ze strony" if page_text
+                           else "Opis strony w zapisie sesji (automatyczny)")
             who = _esc(ex.get("persona_name", ""))
             step = ex.get("step")
             shot = ex.get("screenshot")
@@ -539,7 +547,7 @@ def _render_issues_group(title: str, issues: list) -> str:
               <div class="ev-meta">
                 <div class="ev-label">Dowód — uczestnik {who}, krok {step}</div>
                 <a class="ev-url" href="{url}" target="_blank">{url}</a>
-                {f'<div class="ev-quote">„{quote}"</div>' if quote else ''}
+                {f'<div class="ev-quote"><span class="ev-quote-l">{quote_label}:</span> „{quote}”</div>' if quote else ''}
               </div>
             </div>"""
         cards += f"""
@@ -831,10 +839,19 @@ def _render_pagespeed(ps: dict | None) -> str:
     def _card(strategy: str) -> str:
         data = ps.get(strategy) or {}
         if data.get("error"):
+            # Plain language, in grey. The report printed the raw exception in
+            # red — "Błąd: The read operation timed out" — which reads as a
+            # fault on the site, in English, in a Polish client document. It is
+            # a measurement that did not complete.
+            err = str(data.get("error") or "").lower()
+            why = ("usługa Google PageSpeed nie odpowiedziała w czasie"
+                   if "timed out" in err or "timeout" in err
+                   else "usługa Google PageSpeed zwróciła błąd")
             return f"""
             <div class="ps-card">
               <div class="ps-device">{strategy.capitalize()}</div>
-              <div style="color:#E60000;font-size:13px;">Błąd: {_esc(data['error'])}</div>
+              <div style="color:#6c757d;font-size:13px;">Pomiar nie powiódł się — {why}.
+                To błąd pomiaru, nie wada strony; warto go powtórzyć.</div>
             </div>"""
 
         score = data.get("performance_score")
