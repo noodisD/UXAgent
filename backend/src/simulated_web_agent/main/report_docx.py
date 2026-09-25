@@ -36,6 +36,7 @@ _OUTCOME_LABEL = {
     "partial": "Cel osiągnięty częściowo",
     "failed": "Cel nieosiągnięty",
     "unknown": "Wynik nieustalony",
+    "persona_abandoned": "Sesja przerwana",
 }
 
 _FI_DIM_LABELS = {
@@ -220,12 +221,19 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     reflections = stats.get("objective_reflections") or []
     if reflections:
         doc.add_heading("Realizacja zadania", level=1)
+        from .reporter_html import _SOURCE_PL, objective_outcome
         for r in reflections:
+            outcome = objective_outcome(r)
             doc.add_heading(
-                f"{r.get('persona', '—')} — "
-                f"{_OUTCOME_LABEL.get(r.get('outcome'), r.get('outcome') or '—')}",
+                f"{r.get('persona', '—')} — {_OUTCOME_LABEL.get(outcome, outcome or '—')}",
                 level=2,
             )
+            src = _SOURCE_PL.get(r.get("outcome_source") or "")
+            declared = r.get("outcome") or ""
+            if src and r.get("outcome_source") != "declared" and declared and declared != outcome:
+                src += f"; model ocenił: {_OUTCOME_LABEL.get(declared, declared).lower()}"
+            if src:
+                _add_caption(doc, src)
             if r.get("objective"):
                 _add_caption(doc, f"Cel: {r['objective']}")
             if r.get("summary"):

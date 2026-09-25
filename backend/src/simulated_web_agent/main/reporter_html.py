@@ -136,6 +136,7 @@ body {
    five and dropped the sixth onto a line by itself. Three columns give every
    label room and pair the severities on one row. */
 .vp-na { color: #6c757d; font-weight: 600; }
+.obj-src { font-size: 11.5px; color: #6c757d; margin: 2px 0 6px; }
 .header-note { position: relative; z-index: 1; margin-top: 18px; font-size: 12.5px; line-height: 1.5;
   color: rgba(255,255,255,.78); border-left: 2px solid rgba(255,255,255,.35); padding-left: 10px; }
 .header-meta { display: grid; grid-template-columns: repeat(3, 1fr);
@@ -1203,7 +1204,19 @@ _OUTCOME_PL = {
     "failed": ("Cel nieosiągnięty", "#b3352f", "#fdeceb"),
     # No verdict: the reflection call failed or returned something else.
     "unknown": ("Wynik nieustalony", "#5b6470", "#f1f2f4"),
+    "persona_abandoned": ("Sesja przerwana", "#5b6470", "#f1f2f4"),
 }
+
+_SOURCE_PL = {
+    "observed": "zmierzone z zapisu sesji",
+    "session": "przerwane przez narzędzie po kilku identycznych próbach bez zmiany strony",
+    "declared": "werdykt modelu, niezmierzony",
+}
+
+
+def objective_outcome(r: dict) -> str:
+    """The outcome the score counts for this participant, else the model's verdict."""
+    return r.get("effective_outcome") or r.get("outcome") or "unknown"
 
 
 def _render_objectives(stats: dict) -> str:
@@ -1224,7 +1237,7 @@ def _render_objectives(stats: dict) -> str:
 
     counts: dict[str, int] = {}
     for r in rows:
-        key = r.get("outcome") or "unknown"
+        key = objective_outcome(r)
         counts[key] = counts.get(key, 0) + 1
     tally = " · ".join(
         f'<span style="color:{_OUTCOME_PL.get(k, ("", "#444", ""))[1]};font-weight:700">'
@@ -1234,7 +1247,13 @@ def _render_objectives(stats: dict) -> str:
 
     cards = ""
     for r in rows:
-        label, fg, bg = _OUTCOME_PL.get(r.get("outcome") or "unknown", ("—", "#444", "#f1f2f4"))
+        label, fg, bg = _OUTCOME_PL.get(objective_outcome(r), ("—", "#444", "#f1f2f4"))
+        # Where the badge comes from, and what the model said when it differs.
+        src = _SOURCE_PL.get(r.get("outcome_source") or "")
+        declared = r.get("outcome") or ""
+        if src and r.get("outcome_source") != "declared" and declared and declared != objective_outcome(r):
+            src += f"; model ocenił: {_OUTCOME_PL.get(declared, (declared,))[0].lower()}"
+        source_html = f'<div class="obj-src">{_esc(src)}</div>' if src else ""
         blockers = "".join(f"<li>{_esc(b)}</li>" for b in (r.get("blockers") or [])[:4])
         wins = "".join(f"<li>{_esc(w)}</li>" for w in (r.get("wins") or [])[:4])
         fix = _esc(r.get("priority_fix") or "")
@@ -1254,6 +1273,7 @@ def _render_objectives(stats: dict) -> str:
             <span class="obj-who">{_esc(r.get("persona") or "—")}</span>
             <span class="obj-outcome" style="background:{bg};color:{fg}">{label}</span>
           </div>
+          {source_html}
           {unverified}
           <div class="obj-task">{_esc(r.get("objective") or "")}</div>
           <p class="obj-summary">{_esc(r.get("summary") or "")}</p>

@@ -140,8 +140,8 @@
                     <span
                       class="src-chip mono"
                       :class="{ measured: detail.outcomeSource === 'observed' }"
-                      :title="detail.outcomeSource === 'observed' ? t('rep.pt.measuredHint') : t('rep.pt.declaredHint')"
-                    >{{ detail.outcomeSource === 'observed' ? t('rep.pt.measured') : t('rep.pt.declared') }}</span>
+                      :title="detail.outcomeSource === 'observed' ? t('rep.pt.measuredHint') : detail.outcomeSource === 'session' ? t('rep.pt.sessionHint') : t('rep.pt.declaredHint')"
+                    >{{ detail.outcomeSource === 'observed' ? t('rep.pt.measured') : detail.outcomeSource === 'session' ? t('rep.pt.session') : t('rep.pt.declared') }}</span>
                     <span
                       v-if="detail.outcomeDisagreement"
                       class="src-chip mono disagree"

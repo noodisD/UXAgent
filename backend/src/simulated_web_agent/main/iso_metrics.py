@@ -159,3 +159,43 @@ def run_iso_metrics(store: TraceStore) -> dict:
     metrics = compute_iso_metrics(store)
     store.write_iso_metrics(metrics)
     return metrics
+
+
+def current_effectiveness(store: TraceStore) -> dict:
+    """The effectiveness block as the current code computes it.
+
+    iso_metrics.json is written once, during the session, so it keeps whatever
+    the code of the day decided: e5d6's still says "observed: failed at
+    order_summary_reached" — a car configurator judged against a checkout
+    ladder, fixed in 36010ba — while the current code finds no measurable
+    target. Recomputed whenever the session's trace is there (~17 ms); the
+    stored block only when there is nothing to compute from.
+    """
+    if store.read_action_trace():
+        return compute_iso_metrics(store).get("effectiveness") or {}
+    return (store.read_iso_metrics() or {}).get("effectiveness") or {}
+
+
+def effective_outcome(store: TraceStore) -> tuple[str, str]:
+    """A participant's task outcome and where it comes from — the one definition
+    the score, the report's objectives section, the Word file and the dashboard
+    all count.
+
+      "observed" — measured from the trace (session_goal_state)
+      "session"  — the harness ended the session: persona_abandoned, after
+                   several identical actions with no page change
+      "declared" — the model's verdict on the session ("unknown" if none)
+
+    They used to read different sources: the score used the measured outcome
+    while the objectives section tallied the model's verdicts, so e5d6 printed
+    "nieosiągnięty: 3/3, zmierzone" beside "osiągnięty 1 · częściowo 1 ·
+    nieosiągnięty 1"; and the dashboard ignored an abandonment entirely.
+    """
+    session = store.read_session_result() or {}
+    if str(session.get("ended_reason") or "") == "persona_abandoned":
+        return "persona_abandoned", "session"
+    eff = current_effectiveness(store)
+    if eff.get("outcome_source") == "observed" and eff.get("observed_outcome"):
+        return str(eff["observed_outcome"]), "observed"
+    refl = store.read_objective_reflection() or {}
+    return str(refl.get("outcome") or "unknown"), "declared"

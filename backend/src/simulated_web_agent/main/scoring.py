@@ -245,8 +245,13 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
             if isinstance(r, dict) and r.get("self_reported_only") and r.get("persona_dir")}
     held &= set((outcomes or {}).keys())
     held = {d for d in held if (outcome_sources or {}).get(d) != "observed"}
+    # Ended by the harness after identical actions with no page change — the
+    # stuck-loop signature attribution gates as our failure — so whether the
+    # site or the tool gave out cannot be told from the trace. Named for a human
+    # check, like an unresponsive control, not charged as a failed task.
+    abandoned = {d for d, src in (outcome_sources or {}).items() if src == "session"}
 
-    for extra in (_task_line(outcomes or {}, outcome_sources or {}, held),
+    for extra in (_task_line(outcomes or {}, outcome_sources or {}, held | abandoned),
                   *_accessibility_lines(stats),
                   _performance_line(pagespeed)):
         if extra:
@@ -276,6 +281,13 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
             "reason": "werdykt opiera się na wniosku wstrzymanym do weryfikacji — "
                       "liczenie go obciążyłoby ocenę tym samym niepotwierdzonym "
                       "twierdzeniem drugi raz",
+        })
+    if abandoned:
+        not_counted.append({
+            "label": f"Wynik zadania {len(abandoned)} uczestnika(ów), których sesja została przerwana",
+            "reason": "narzędzie przerwało sesję po kilku identycznych próbach bez zmiany "
+                      "strony — z zapisu nie wynika, czy zawiodła strona, czy narzędzie; "
+                      "do sprawdzenia ręcznie",
         })
     not_counted.append({
         "label": "Oceny pierwszego wrażenia i odpowiedzi w ankiecie",

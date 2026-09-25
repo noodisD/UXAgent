@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from . import run_storage
-from .iso_metrics import _numeric_survey_avg
+from .iso_metrics import _numeric_survey_avg, current_effectiveness, effective_outcome
 from .persona_matrix import build_persona_task_matrix
 # The report's own definitions. The dashboard used to average survey answers
 # its own way, so a placeholder "3" from a persona who never reached payment
@@ -173,13 +173,11 @@ def _effective_outcome(store) -> str:
     evidence-grounded verdict (§4.2, iso_metrics effectiveness) where the target
     was decidable, else the LLM's declared self-rating. One definition for the
     persona payload, the history counts and the run comparison."""
-    eff = _as_dict(_as_dict(store.read_iso_metrics()).get("effectiveness"))
-    # No reflection is no verdict. "partial" here counted a persona with no
-    # session and no reflection (hebe 2e58) as partially successful.
-    declared = (store.read_objective_reflection() or {}).get("outcome") or "unknown"
-    if eff.get("outcome_source") == "observed":
-        return eff.get("observed_outcome") or declared
-    return declared
+    # The report's own definition (iso_metrics.effective_outcome). An
+    # abandoned session used to show the model's "partial" here; it did not
+    # complete, so the dashboard shows it as not completed.
+    outcome, _source = effective_outcome(store)
+    return "failed" if outcome == "persona_abandoned" else outcome
 
 
 def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
@@ -205,8 +203,13 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
     # with list_runs() and _build_comparison(). A previous inline copy here
     # dropped its empty-observed_outcome fallback, so a persona's detail card
     # could disagree with its own history row.
+    # Effectiveness as the current code computes it, as effective_outcome does,
+    # so the source and rungs on the card match the outcome shown with them;
+    # satisfaction and efficiency pass through as stored.
     iso = _as_dict(store.read_iso_metrics())
-    eff = _as_dict(iso.get("effectiveness"))
+    eff = _as_dict(current_effectiveness(store))
+    if iso:
+        iso = {**iso, "effectiveness": eff}
     declared_outcome = reflection.get("outcome") or "unknown"
     outcome = _effective_outcome(store)
 
@@ -218,7 +221,7 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
         "demographics": demographics,
         "metaParts": [str(v) for v in demographics.values()],
         "outcome": outcome,
-        "outcomeSource": eff.get("outcome_source", "declared"),
+        "outcomeSource": effective_outcome(store)[1],
         "declaredOutcome": declared_outcome,
         "targetRung": eff.get("target_rung"),
         "reachedRung": eff.get("reached_rung"),
@@ -283,7 +286,7 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
             for h in heuristics
         ],
         "survey": _survey_rows(survey, q_prompts),
-        "iso": _dashboard_iso(store.read_iso_metrics(), survey),
+        "iso": _dashboard_iso(iso, survey),
         "biasAudit": store.read_bias_audit(),
         "cognitiveWalkthrough": store.read_cognitive_walkthrough(),
     }

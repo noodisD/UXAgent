@@ -81,8 +81,8 @@
                   <span
                     class="pt-src mono"
                     :class="{ measured: r.outcome_source === 'observed' }"
-                    :title="r.outcome_source === 'observed' ? t('rep.pt.measuredHint') : t('rep.pt.declaredHint')"
-                  >{{ r.outcome_source === 'observed' ? t('rep.pt.measured') : t('rep.pt.declared') }}</span>
+                    :title="r.outcome_source === 'observed' ? t('rep.pt.measuredHint') : r.outcome_source === 'session' ? t('rep.pt.sessionHint') : t('rep.pt.declaredHint')"
+                  >{{ r.outcome_source === 'observed' ? t('rep.pt.measured') : r.outcome_source === 'session' ? t('rep.pt.session') : t('rep.pt.declared') }}</span>
                   <span
                     v-if="r.disagreement"
                     class="pt-src mono disagree"

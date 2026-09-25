@@ -90,7 +90,7 @@ export type HeuristicFinding = FindingEvidence & {
   requiresRealUserValidation?: boolean
 }
 
-export type OutcomeSource = 'observed' | 'declared'
+export type OutcomeSource = 'observed' | 'declared' | 'session'
 
 export type IsoMetrics = {
   effectiveness: {

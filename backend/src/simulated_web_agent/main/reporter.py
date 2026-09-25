@@ -32,6 +32,7 @@ from .a11y_checks import a11y_topic, measure_names
 from .evidence import page_quote, pages_contain, rendering_artifact
 from .scoring import RULES as SCORING_RULES, breakdown_text, compute_ux_score
 from .attribution import restates_a_gated_finding
+from .iso_metrics import current_effectiveness, effective_outcome
 from .redaction import clean as _redact, mentions_harness_fault
 from .trace_store import TraceStore
 
@@ -749,6 +750,10 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             any(mentions_harness_fault(t) for t in refl_texts)
             or restates_a_gated_finding(refl_texts, own_findings)
         )
+        # What the score counts for this participant, and from where — so the
+        # objectives section shows the same outcome (iso_metrics.effective_outcome).
+        if store is not None:
+            entry["effective_outcome"], entry["outcome_source"] = effective_outcome(store)
         objective_reflections.append(entry)
 
     # Heuristic findings aggregation — annotate each finding with its persona
@@ -1425,6 +1430,8 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
     if sources and observed_n == 0:
         parts = [f"sukces: {c.get('success', 0)}/{n}", f"częściowo: {c.get('partial', 0)}/{n}",
                  f"porażka: {c.get('failed', 0)}/{n}"]
+        if c.get("persona_abandoned"):
+            parts.append(f"porzucono: {c['persona_abandoned']}/{n}")
         if c.get("unknown"):
             parts.append(f"wynik nieustalony: {c['unknown']}/{n}")
         return ("UKOŃCZENIE ZADANIA — DEKLAROWANE, nie zmierzone. Zapis sesji nie "
@@ -1514,20 +1521,12 @@ async def generate_aggregated_report(
     outcome_sources: dict[str, str] = {}
     reached_rungs: list[str] = []
     for s in stores:
-        reflection = s.read_objective_reflection() or {}
-        session = s.read_session_result() or {}
-        eff = (s.read_iso_metrics() or {}).get("effectiveness", {}) or {}
-        ended = str(session.get("ended_reason") or "")
-        observed = eff.get("outcome_source") == "observed"
-        if observed:
-            outcome = str(eff.get("observed_outcome") or "")
-        else:
-            outcome = str(reflection.get("outcome") or "")
-        outcomes[s.trace_dir.name] = (
-            ended if ended == "persona_abandoned" else outcome
-        )
-        outcome_sources[s.trace_dir.name] = "observed" if observed else "declared"
-        if observed:
+        # Current code, as effective_outcome computes it — not the stored file.
+        eff = current_effectiveness(s)
+        outcome, source = effective_outcome(s)
+        outcomes[s.trace_dir.name] = outcome
+        outcome_sources[s.trace_dir.name] = source
+        if eff.get("outcome_source") == "observed":
             reached_rungs.append(str(eff.get("reached_rung") or ""))
 
     # Questionnaire (from the run manifest) supplies real prompts + scales for
