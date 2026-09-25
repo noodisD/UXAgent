@@ -19,7 +19,7 @@ from typing import Any
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .a11y_checks import extract_a11y_candidates
-from .attribution import flag_harness_suspects
+from .attribution import flag_harness_suspects, session_blocked_by_bot_wall
 from .claim_verifier import run_claim_verification
 from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
@@ -224,6 +224,13 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
     # narrates and scores. Pasting the raw trees here built a 1.66M-char prompt
     # that failed near the context limit — see a11y_checks for the numbers.
     scan = extract_a11y_candidates(store)
+    # Nothing scanned is no measurement. The prompt maps no candidates to 5, so
+    # every session that saw nothing of the site — 4 that never loaded, 4 stuck
+    # on a Cloudflare page — was written up as 5/5 "strona jest dostępna", and
+    # the dashboard showed that in green. All 13 sessions that did see a site
+    # scored 1 or 2.
+    if not scan.get("steps_scanned") or session_blocked_by_bot_wall(store):
+        return {"error": "no_evidence"}
     # Step-indexed, not store.visited_urls(): that de-duplicates and drops the
     # step mapping, so the model had to guess which URL a cited step meant — and
     # it guessed wrong in prose, where resolve_all cannot correct it.
