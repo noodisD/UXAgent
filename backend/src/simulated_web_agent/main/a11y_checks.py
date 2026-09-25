@@ -217,21 +217,59 @@ def measure_names(store: TraceStore) -> dict:
     inside already-labelled links); the claim built from them was not. The share
     is what stops a handful of icons being reported as a systemic barrier.
     """
-    images = {"total": 0, "unnamed": 0}
-    controls = {"total": 0, "unnamed": 0}
-    for _step, text in _steps(store.read_a11y_snapshots()):
+    # Once per distinct page — the fullest snapshot of each URL, hash routes
+    # kept apart since each configurator step is its own view. Summed over
+    # every snapshot, a page revisited or stepped through was counted each
+    # time: "145 z 1603 obrazów" for a run whose pages held at most ~424.
+    pages: dict[str, dict] = {}
+    for step, text in _steps(store.read_a11y_snapshots()):
         if not isinstance(text, str):
             continue
+        page = {"images": {"total": 0, "unnamed": 0}, "controls": {"total": 0, "unnamed": 0}}
         for n in parse_aria_snapshot(text):
             named = bool(n.name.strip())
             if n.role == "img":
-                images["total"] += 1
-                images["unnamed"] += not named
+                page["images"]["total"] += 1
+                page["images"]["unnamed"] += not named
             elif n.role in _NAMED_CONTROLS:
-                controls["total"] += 1
-                controls["unnamed"] += not named
+                page["controls"]["total"] += 1
+                page["controls"]["unnamed"] += not named
+        try:
+            url = store.url_at_step(step) or f"step {step}"
+        except Exception:
+            url = f"step {step}"
+        if _page_size(page) > _page_size(pages.get(url)):
+            pages[url] = page
+    return summarise_pages(pages)
+
+
+def _page_size(page: dict | None) -> int:
+    return (page or {}).get("images", {}).get("total", 0) + (page or {}).get("controls", {}).get("total", 0)
+
+
+def summarise_pages(pages: dict[str, dict]) -> dict:
+    """Totals and shares over distinct pages, keeping the pages for merging."""
+    images = {"total": 0, "unnamed": 0}
+    controls = {"total": 0, "unnamed": 0}
+    for page in pages.values():
+        for bucket, key in ((images, "images"), (controls, "controls")):
+            bucket["total"] += page[key]["total"]
+            bucket["unnamed"] += page[key]["unnamed"]
     for bucket in (images, controls):
         bucket["share_unnamed"] = (
             round(bucket["unnamed"] / bucket["total"], 3) if bucket["total"] else None
         )
-    return {"images": images, "controls": controls}
+    return {"images": images, "controls": controls, "pages": pages}
+
+
+def merge_pages(results: list[dict]) -> dict:
+    """measure_names over several sessions: each page once, its fullest capture."""
+    merged: dict[str, dict] = {}
+    for r in results:
+        for url, page in (r.get("pages") or {}).items():
+            if _page_size(page) > _page_size(merged.get(url)):
+                merged[url] = page
+    out = summarise_pages(merged)
+    out.pop("pages")
+    out["pages_counted"] = len(merged)
+    return out

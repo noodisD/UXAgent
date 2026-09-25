@@ -28,7 +28,7 @@ from .severity import (
     heuristic_id as _heuristic_id,
     severity_rank,
 )
-from .a11y_checks import a11y_topic, measure_names
+from .a11y_checks import a11y_topic, measure_names, merge_pages
 from .evidence import page_quote, pages_contain, rendering_artifact
 from .scoring import RULES as SCORING_RULES, breakdown_text, compute_ux_score
 from .attribution import restates_a_gated_finding
@@ -1001,19 +1001,14 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # seen, and how many lacked a name. Summed across personas; the share is
     # what matters, and it is what _attach_issue_evidence checks a narrative
     # claim against.
-    a11y_measured = {"images": {"total": 0, "unnamed": 0},
-                     "controls": {"total": 0, "unnamed": 0}}
+    # Each distinct page once, across all participants (a11y_checks.merge_pages).
+    _measured = []
     for _st in (stores or []):
         try:
-            m = measure_names(_st)
+            _measured.append(measure_names(_st))
         except Exception:
             continue
-        for k in ("images", "controls"):
-            a11y_measured[k]["total"] += m[k]["total"]
-            a11y_measured[k]["unnamed"] += m[k]["unnamed"]
-    for bucket in a11y_measured.values():
-        bucket["share_unnamed"] = (round(bucket["unnamed"] / bucket["total"], 3)
-                                   if bucket["total"] else None)
+    a11y_measured = merge_pages(_measured)
 
     # Viewport — count sessions (not pages) with at least one overflow
     mobile_overflow = 0
