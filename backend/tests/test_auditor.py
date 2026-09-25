@@ -104,6 +104,8 @@ def _setup_store(store: TraceStore) -> None:
 
     actions = [{"description": "Clicked the cart button.", "action": "click"}]
     store.write_action_trace(actions)
+    # One scanned page, or the accessibility pass has nothing to score.
+    store.write_a11y_snapshot(0, '- button "Koszyk"')
 
 
 # ---------------------------------------------------------------------------

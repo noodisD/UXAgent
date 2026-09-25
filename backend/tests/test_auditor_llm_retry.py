@@ -37,6 +37,9 @@ def _store(tmp_path):
     store.write_action_trace([json.dumps({"action": "click", "target": "t",
                                           "description": "[step 0] klik"})])
     store.append_observation({"tabs": [{"url": "https://pepco.pl/"}]})
+    # One scanned page: with none, the accessibility pass records no_evidence
+    # without asking the model at all.
+    store.write_a11y_snapshot(0, '- button "Koszyk"')
     return store
 
 
