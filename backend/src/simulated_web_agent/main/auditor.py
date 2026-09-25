@@ -176,6 +176,18 @@ async def _run_first_impression(store: TraceStore) -> dict:
 
 
 async def _run_heuristic_evaluation(store: TraceStore) -> list:
+    findings, _error = await _heuristic_pass(store)
+    return findings
+
+
+async def _heuristic_pass(store: TraceStore) -> tuple[list, str | None]:
+    """The heuristic findings, and why the pass failed if it did.
+
+    A failure returned [] as well, which no reader could tell from "no
+    usability problems": the persona's report said "Znaleziono 0 potwierdzonych
+    problemów", and a run with one such persona silently lost its findings —
+    first impression and accessibility at least record {"error": …}.
+    """
     memories = store.read_memory_trace()
     reflections = [m["content"] for m in memories if m.get("kind") == "reflection"]
     action_trace = store.read_action_trace()
@@ -197,7 +209,7 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
 
     if not observations and not reflections and not actions:
         log.warning("[auditor] No memory data found in %s", store.trace_dir)
-        return []
+        return [], "no_evidence"
 
     site_context = store.read_basic_info().get("site_context", "") or ""
 
@@ -212,11 +224,11 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
         # every finding is dropped and the audit looks cleanly empty.
         return await _chat_json([{"role": "user", "content": prompt}],
                                 model="report", prefer=list,
-                                label="heuristic_evaluate")
-    except _UnusableReply:
+                                label="heuristic_evaluate"), None
+    except _UnusableReply as e:
         log.error("[auditor] heuristic_evaluate unusable for %s — no findings "
                   "will be reported for this persona", store.trace_dir)
-        return []
+        return [], str(e) or "unusable reply"
 
 
 async def _run_accessibility_summary(store: TraceStore) -> dict:
@@ -265,11 +277,19 @@ async def run_audit_analysis(store: TraceStore) -> dict:
     """
     log.info("[auditor] Starting audit for %s", store.trace_dir)
 
-    first_impression, heuristic_findings, accessibility_findings = await asyncio.gather(
+    first_impression, (heuristic_findings, heuristic_error), accessibility_findings = await asyncio.gather(
         _run_first_impression(store),
-        _run_heuristic_evaluation(store),
+        _heuristic_pass(store),
         _run_accessibility_summary(store),
     )
+    # Written every time, so a successful re-audit clears an old failure.
+    def _err(result):
+        return result.get("error") if isinstance(result, dict) else None
+    store.write_audit_status({
+        "heuristic_evaluation": heuristic_error,
+        "first_impression": _err(first_impression),
+        "accessibility": _err(accessibility_findings),
+    })
 
     # Ground every finding in trace evidence (screenshot, URL, observation
     # quote) and stamp verified/unverified — claims are never trusted as-is.

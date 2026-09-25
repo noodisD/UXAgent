@@ -132,6 +132,9 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         ("Do weryfikacji przez człowieka", (stats.get("heuristic") or {}).get(
             "severity_counts", {}).get("needs_verification", 0)),
     ])
+    from .reporter_html import audit_failures_text
+    if audit_failures_text(stats):
+        _add_caption(doc, audit_failures_text(stats))
     excluded = [e for e in (stats.get("excluded_sessions") or []) if isinstance(e, dict)]
     if excluded:
         total = int(stats.get("participant_count") or 0) + len(excluded)

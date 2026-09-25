@@ -464,7 +464,7 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
       <span class="val">{_fi_header(stats)}</span>
       <span class="lbl">Pierwsze wrażenie</span>
     </div>
-  </div>{_excluded_sessions_note(stats)}
+  </div>{_excluded_sessions_note(stats)}{_audit_failures_note(stats)}
 </div>"""
 
 
@@ -486,6 +486,21 @@ def _anything_observed(stats: dict) -> bool:
     return bool(heur.get("by_heuristic") or heur.get("excluded_by_heuristic")
                 or fi.get("avg_score") is not None
                 or ((stats.get("viewport") or {}).get("devices")))
+
+
+def audit_failures_text(stats: dict) -> str:
+    """Whose analyses failed, in one sentence — "" when none did."""
+    rows = [r for r in (stats.get("audit_failures") or []) if isinstance(r, dict)]
+    if not rows:
+        return ""
+    who = "; ".join(f"{r.get('persona') or '—'}: {', '.join(r.get('passes') or [])}" for r in rows)
+    return (f"Nie wszystkie analizy się powiodły — {who}. W tych częściach ustalenia "
+            "tych osób nie mogły trafić do raportu; brak problemów nie jest tu wynikiem.")
+
+
+def _audit_failures_note(stats: dict) -> str:
+    text = audit_failures_text(stats)
+    return f'<div class="header-note">{_esc(text)}</div>' if text else ""
 
 
 def _excluded_sessions_note(stats: dict) -> str:

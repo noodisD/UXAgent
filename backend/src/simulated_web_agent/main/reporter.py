@@ -1374,6 +1374,38 @@ def _format_root_causes(root_causes: list) -> str:
 _ADDED_RUNGS = {"cart_has_items", "order_summary_reached"}
 
 
+_AUDIT_PASS_PL = {
+    "heuristic_evaluation": "ocena heurystyczna",
+    "first_impression": "test pierwszego wrażenia",
+    "accessibility": "analiza dostępności",
+}
+
+
+def _audit_failures(stores: list) -> list[dict]:
+    """Participants for whom an audit pass failed, and which.
+
+    A failed heuristic pass wrote [], indistinguishable from "no problems", so a
+    persona's findings could vanish from the report with nothing to say so.
+    "no_evidence" is not a failure — there was nothing to judge — and is left
+    out. Sessions audited before audit_status.json existed still show their
+    first-impression and accessibility errors, which were always recorded.
+    """
+    out = []
+    for s in stores:
+        status = s.read_audit_status() or {}
+        if not status:
+            fi = s.read_first_impression() or {}
+            acc = s.read_accessibility_findings() or {}
+            status = {"first_impression": fi.get("error") if isinstance(fi, dict) else None,
+                      "accessibility": acc.get("error") if isinstance(acc, dict) else None}
+        failed = [_AUDIT_PASS_PL[k] for k in _AUDIT_PASS_PL
+                  if status.get(k) and status.get(k) != "no_evidence"]
+        if failed:
+            out.append({"persona": _persona_label(s.read_ux_report() or {}) or s.trace_dir.name,
+                        "persona_dir": s.trace_dir.name, "passes": failed})
+    return out
+
+
 def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
                                  sources: dict | None = None) -> str:
     """Task-completion summary for the aggregate narrator, labelled by source.
@@ -1515,6 +1547,7 @@ async def generate_aggregated_report(
 
     stats = aggregate_statistics(reports, outcomes=outcomes, q_meta=q_meta, stores=stores)
     stats["excluded_sessions"] = excluded_sessions
+    stats["audit_failures"] = _audit_failures(stores)
     n = stats["participant_count"]
 
     # Determine runs/ dir and read page speed (must happen before prompt build)
