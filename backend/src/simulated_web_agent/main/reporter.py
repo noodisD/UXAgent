@@ -524,12 +524,23 @@ def _survey_prompt(qid: str, meta: dict | None) -> str:
 # kontrolę przy podawaniu danych do płatności — śr. 3,00" on a car configurator
 # where no participant ever reached a payment step. One answered "N/A" to a 1–5
 # question, which aggregation then filed as an open-text answer.
+#
+# Only phrases that say "I could not judge". "neutral rating" and "did not
+# reach" were measured and left out: both also introduce real ratings ("a
+# neutral rating as a compromise", "I did not reach payment, but the costs were
+# clear — 4").
 _NOT_ASSESSABLE_MARKERS = (
     "cannot assess", "can't assess", "unable to assess", "impossible to assess",
     "not possible to assess", "no experience to form", "cannot form an opinion",
     "not applicable", "do not contain any information", "does not contain any information",
     "no information about", "nie mogę ocenić", "nie da się ocenić", "nie można ocenić",
     "nie dotyczy", "brak doświadczenia", "brak informacji",
+    # Missed by the list above, found by the dashboard parity check: three
+    # placeholder 3s still averaged in (2026-09-24 hyundai e6, e7; hebe q2).
+    "cannot evaluate", "can't evaluate", "unable to evaluate",
+    "cannot judge", "can't judge", "unable to judge", "no experience to judge",
+    "too short to assess", "too short to evaluate", "too short to judge",
+    "no task execution", "nie mogę tego ocenić", "nie jestem w stanie ocenić",
 )
 
 

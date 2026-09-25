@@ -24,6 +24,12 @@ from simulated_web_agent.main.reporter_html import _render_survey
     ("3", "I cannot assess feelings of control regarding payment data."),
     ("N/A", "The session did not reach any payment stage."),
     ("3", "Nie da się ocenić — sesja nie dotarła do płatności."),
+    # Archived placeholders the first list missed (2026-09-24 hyundai, hebe).
+    ("3", "I did not proceed to any payment pages, thus I cannot evaluate this aspect. "
+          "Therefore, I chose a neutral option."),
+    ("3", "My session was too short to assess this, so I chose a neutral option."),
+    ("3", "I never accessed the actual website content. Therefore, I cannot judge the clarity."),
+    ("3", "I had no experience to judge ease of task completion."),
 ])
 def test_placeholders_are_recognised(value, reason):
     assert _not_assessable(value, reason) is True
@@ -33,6 +39,11 @@ def test_placeholders_are_recognised(value, reason):
     ("3", "The total price was displayed, but delivery costs were not mentioned."),
     ("2", "Memories reveal difficulty comparing trims."),
     ("5", "Everything was clear."),
+    # Measured and deliberately not markers: both phrases also carry ratings.
+    ("3", "Navigation and form filling undermine reliability, leading to a neutral "
+          "rating as a compromise."),
+    ("4", "While I did not reach a final payment stage, the costs presented up to the "
+          "summary were transparent."),
 ])
 def test_real_ratings_are_kept(value, reason):
     """A 3 with a reason is a rating. Over-matching here would empty the survey."""
