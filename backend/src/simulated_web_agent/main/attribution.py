@@ -135,6 +135,30 @@ def session_blocked_by_bot_wall(store: TraceStore) -> bool:
     return len(bot_wall_steps(store)) == n_steps
 
 
+def why_site_unseen(store: TraceStore) -> str | None:
+    """Why this session observed nothing of the site, in Polish — None if it did.
+
+    Such a session is no participant: its "failed" task, its 5/5 accessibility
+    pass over nothing and its survey answers are about our tool. run.py used to
+    apply this only when every session missed the site; in a mixed run the dead
+    sessions counted everywhere (1 of 4 turned 1dcb's accessibility average from
+    1.0 to 2.0 and its score from 4.0 to 3.8, and charged a failed task for a
+    page nobody saw). hebe blocks only some sessions, so mixed runs are real.
+    """
+    try:
+        steps = int((store.read_session_result() or {}).get("steps_taken") or 0)
+    except (TypeError, ValueError):
+        steps = 0
+    if steps <= 0:
+        return "sesja nie wykonała żadnego kroku — strona się nie załadowała"
+    try:
+        if session_blocked_by_bot_wall(store):
+            return "cała sesja na ekranie weryfikacji antybotowej, nie na stronie"
+    except Exception:
+        pass
+    return None
+
+
 def harness_suspect_steps(store: TraceStore) -> set[int]:
     """Step indices whose action is a harness interaction failure.
 

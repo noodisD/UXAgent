@@ -370,15 +370,9 @@ async def run_async(
     # on its own bot protection.
     from . import attribution as _attr
 
-    def _observed_the_site(store) -> bool:
-        if int(((store.read_session_result() or {}).get("steps_taken") or 0)) <= 0:
-            return False
-        try:
-            return not _attr.session_blocked_by_bot_wall(store)
-        except Exception:
-            return True
-
-    observed = [s for s in stores if _observed_the_site(s)]
+    # The same test the reporter applies per session (attribution.why_site_unseen);
+    # here it decides whether any report is possible at all.
+    observed = [s for s in stores if _attr.why_site_unseen(s) is None]
     if stores and not observed:
         reasons = sorted({
             str((s.read_session_result() or {}).get("error")

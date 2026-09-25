@@ -135,6 +135,8 @@ body {
    label like "PROB. KRYTYCZNYCH" without wrapping mid-word — a flex row fit
    five and dropped the sixth onto a line by itself. Three columns give every
    label room and pair the severities on one row. */
+.header-note { position: relative; z-index: 1; margin-top: 18px; font-size: 12.5px; line-height: 1.5;
+  color: rgba(255,255,255,.78); border-left: 2px solid rgba(255,255,255,.35); padding-left: 10px; }
 .header-meta { display: grid; grid-template-columns: repeat(3, 1fr);
   gap: 20px 32px; margin-top: 26px; position: relative; z-index: 1; }
 @media (min-width: 900px) { .header-meta { grid-template-columns: repeat(6, 1fr); gap: 20px; } }
@@ -461,8 +463,19 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
       <span class="val">{(stats.get("first_impression") or {}).get("avg_score", "—")}/5</span>
       <span class="lbl">Pierwsze wrażenie</span>
     </div>
-  </div>
+  </div>{_excluded_sessions_note(stats)}
 </div>"""
+
+
+def _excluded_sessions_note(stats: dict) -> str:
+    """Who was left out of the count, and why — so a smaller n is explained."""
+    ex = [e for e in (stats.get("excluded_sessions") or []) if isinstance(e, dict)]
+    if not ex:
+        return ""
+    total = int(stats.get("participant_count") or 0) + len(ex)
+    who = "; ".join(f"{_esc(e.get('persona') or '—')}: {_esc(e.get('reason') or '')}" for e in ex)
+    return (f'<div class="header-note">Pominięto {len(ex)} z {total} sesji, które nie '
+            f'zobaczyły badanej strony, więc niczego o niej nie mówią — {who}.</div>')
 
 
 def _render_executive(narr: dict) -> str:

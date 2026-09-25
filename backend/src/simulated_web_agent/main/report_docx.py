@@ -131,6 +131,12 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         ("Do weryfikacji przez człowieka", (stats.get("heuristic") or {}).get(
             "severity_counts", {}).get("needs_verification", 0)),
     ])
+    excluded = [e for e in (stats.get("excluded_sessions") or []) if isinstance(e, dict)]
+    if excluded:
+        total = int(stats.get("participant_count") or 0) + len(excluded)
+        _add_caption(doc, f"Pominięto {len(excluded)} z {total} sesji, które nie zobaczyły "
+                          "badanej strony, więc niczego o niej nie mówią — " + "; ".join(
+                              f"{e.get('persona') or '—'}: {e.get('reason') or ''}" for e in excluded) + ".")
 
     # ── Summary ──────────────────────────────────────────────────────────
     if narr.get("executive_summary"):

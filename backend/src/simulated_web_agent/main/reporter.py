@@ -1427,6 +1427,29 @@ async def generate_aggregated_report(
     Load all per-agent reports, compute statistics, call large LLM for narrative,
     save runs/aggregated_report.json + .md.
     """
+    # Sessions that never saw the site are not participants (see
+    # attribution.why_site_unseen). Left out whenever another session did see
+    # it — and named in the report, so the smaller count is explained. When
+    # none did, run.py fails the run before getting here.
+    from .attribution import why_site_unseen
+
+    excluded_sessions: list[dict] = []
+    seen = []
+    for s in stores:
+        why = why_site_unseen(s)
+        if why:
+            excluded_sessions.append({
+                "persona": _persona_label(s.read_ux_report() or {}) or s.trace_dir.name,
+                "persona_dir": s.trace_dir.name, "reason": why})
+        else:
+            seen.append(s)
+    if seen and excluded_sessions:
+        log.info("[reporter] %d session(s) never saw the site; left out of the report",
+                 len(excluded_sessions))
+        stores = seen
+    else:
+        excluded_sessions = []
+
     reports = [s.read_ux_report() for s in stores]
     reports = [r for r in reports if r]
 
@@ -1484,6 +1507,7 @@ async def generate_aggregated_report(
         q_meta = None
 
     stats = aggregate_statistics(reports, outcomes=outcomes, q_meta=q_meta, stores=stores)
+    stats["excluded_sessions"] = excluded_sessions
     n = stats["participant_count"]
 
     # Determine runs/ dir and read page speed (must happen before prompt build)
