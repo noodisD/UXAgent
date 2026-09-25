@@ -340,6 +340,8 @@ class ElementHighlight:
                 await self.env.before_action_hook()
             else:
                 self.env.before_action_hook()
+        # Per step, so step() can tell whether this step still needs its evidence.
+        self.env._hook_ran = True
 
     async def __aenter__(self):
         # The before-action hook records the evidence for this step — both
@@ -462,6 +464,7 @@ class ElementHighlight:
             # Actions without a target (scroll, back, goto) still record evidence.
             if not hook_done:
                 await self._run_before_action_hook()
+                hook_done = True
 
             # Run this after the first snippet
             await self.page.evaluate(
@@ -513,7 +516,15 @@ class ElementHighlight:
 
         except Exception as e:
             self.logger.error(f"Failed to apply element highlight: {e}")
-            # Continue without highlighting rather than failing
+            # Continue without highlighting rather than failing — but not
+            # without evidence. A target in the DOM but hidden made the
+            # scroll-into-view raise before either hook call above, so the step
+            # kept no screenshot, scroll position or consent check.
+            if not hook_done:
+                try:
+                    await self._run_before_action_hook()
+                except Exception as hook_error:
+                    self.logger.warning(f"Evidence hook failed: {hook_error}")
 
         return self
 
@@ -1067,6 +1078,7 @@ class WebAgentEnv:
         """
         import json
 
+        self._hook_ran = False
         try:
             action_data = json.loads(action)
             action_name = action_data.get("action")
@@ -1083,6 +1095,7 @@ class WebAgentEnv:
                 press_enter = action_data.get("enter", False)
                 refusal = await self._personal_data_refusal(target, text)
                 if refusal:
+                    await self._ensure_step_evidence()
                     observation = await self.observation()
                     observation["error"] = refusal
                     return observation
@@ -1093,6 +1106,7 @@ class WebAgentEnv:
                 # per-field check: the focused element is inspected instead.
                 refusal = await self._personal_data_refusal(None, action_data["text"])
                 if refusal:
+                    await self._ensure_step_evidence()
                     observation = await self.observation()
                     observation["error"] = refusal
                     return observation
@@ -1118,6 +1132,7 @@ class WebAgentEnv:
             elif action_name == "goto_url":
                 refusal = self._off_site_refusal(action_data["url"])
                 if refusal:
+                    await self._ensure_step_evidence()
                     observation = await self.observation()
                     observation["error"] = refusal
                     return observation
@@ -1136,6 +1151,7 @@ class WebAgentEnv:
                 url = action_data.get("url")
                 refusal = self._off_site_refusal(url) if url else None
                 if refusal:
+                    await self._ensure_step_evidence()
                     observation = await self.observation()
                     observation["error"] = refusal
                     return observation
@@ -1172,19 +1188,39 @@ class WebAgentEnv:
 
         except json.JSONDecodeError as e:
             self.logger.error(f"Invalid JSON action format: {action}")
+            await self._ensure_step_evidence()
             observation = await self.observation()
             observation["error"] = f"Invalid JSON action format: {e}"
             return observation
         except KeyError as e:
             self.logger.error(f"Missing required parameter in action: {e}")
+            await self._ensure_step_evidence()
             observation = await self.observation()
             observation["error"] = f"Missing required parameter in action: {e}"
             return observation
         except Exception as e:
             self.logger.error(f"Error executing action: {action}, error: {e}")
+            await self._ensure_step_evidence()
             observation = await self.observation()
             observation["error"] = f"Error executing action: {e}"
             return observation
+
+    async def _ensure_step_evidence(self) -> None:
+        """Record this step's evidence if no action got as far as the hook.
+
+        A refused input, an off-site refusal, a malformed or unknown action
+        still happened at a step, and its finding — or its entry in the
+        verification list — needs the screen it happened on. Skipped when the
+        hook already ran: a failure after it must not overwrite the pre-action
+        screenshot with the page as the failure left it.
+        """
+        if getattr(self, "_hook_ran", True) or not self.before_action_hook:
+            return
+        try:
+            async with ElementHighlight(sleep=0):
+                pass
+        except Exception as e:
+            self.logger.warning(f"Could not record evidence for the step: {e}")
 
     # ===================================================================
     # ACTION METHODS
