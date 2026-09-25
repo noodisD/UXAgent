@@ -1604,3 +1604,34 @@ def save_html_report(agg: dict, runs_dir: Path) -> Path:
     out = Path(runs_dir) / "aggregated_report.html"
     out.write_text(html_str, encoding="utf-8")
     return out
+
+
+def refresh_html_report(run_dir: Path) -> Path | None:
+    """The run's HTML report as the current code renders it.
+
+    The file used to be written once, at aggregation, and served as it was: a
+    fix to the renderer never reached a run made before it, while the Word file
+    was built by current code on first download — so one run shipped two sets
+    of numbers (4 of 9 archived reports had different header counts). Rendering
+    takes ~10 ms, so it is redone from the JSON on every request. The file is
+    rewritten only when its content changed, which is what the PDF cache keys
+    on, so the PDF is re-rendered exactly when the report is different.
+    None when there is no report; the stored file alone when the JSON is gone.
+    """
+    import json
+
+    run_dir = Path(run_dir)
+    out = run_dir / "aggregated_report.html"
+    src = run_dir / "aggregated_report.json"
+    try:
+        agg = json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return out if out.is_file() else None
+    html_str = generate_html_report(agg)
+    try:
+        current = out.read_text(encoding="utf-8") if out.is_file() else None
+    except OSError:
+        current = None
+    if current != html_str:
+        out.write_text(html_str, encoding="utf-8")
+    return out

@@ -16,7 +16,7 @@ from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest
 
-from . import cancellation, report_docx, report_pdf, results_api, run_storage
+from . import cancellation, report_docx, report_pdf, reporter_html, results_api, run_storage
 from .persona import generate_audit_settings, generate_example_persona
 from .run import mark_run_status, new_run_id, read_manifest, run, site_slug
 
@@ -554,6 +554,9 @@ def run_report_pdf_endpoint(run_id: str):
     """
     run_dir = Path("runs") / run_id
     try:
+        # The HTML first, so the PDF is of the report as it renders today; its
+        # cache is keyed on the HTML file, which changes only with the content.
+        reporter_html.refresh_html_report(run_dir)
         pdf = report_pdf.ensure_report_pdf(run_dir)
     except Exception as e:
         log.exception("PDF render failed for %s: %s", run_id, e)
@@ -608,8 +611,9 @@ REPORT_CSP = ("default-src 'none'; script-src 'none'; style-src 'unsafe-inline';
 
 @app.get("/runs/<run_id>/report.html")
 def run_report_html_endpoint(run_id: str):
-    report = Path("runs") / run_id / "aggregated_report.html"
-    if not report.exists():
+    # Rendered by the current code, not the copy frozen at aggregation.
+    report = reporter_html.refresh_html_report(Path("runs") / run_id)
+    if report is None or not report.exists():
         return jsonify({"status": "error", "error": "report not found"}), 404
     # No caching: a re-rendered report must never be masked by a stale copy in
     # the browser (the report is regenerated whenever styling or data changes).

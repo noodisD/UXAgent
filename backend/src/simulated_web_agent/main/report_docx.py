@@ -429,10 +429,12 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
 
 
 def ensure_report_docx(run_dir: Path) -> Path | None:
-    """Build (or rebuild) the .docx for a run. None when there is no report.
+    """Build the .docx for a run from its JSON. None when there is no report.
 
-    Rebuilt whenever aggregated_report.json is newer than the document, mirroring
-    ensure_report_pdf — a re-rendered report must not be served stale.
+    Built on every request (0.1-0.3 s). It used to be cached until the JSON
+    changed, so a document built before a renderer fix was served for ever: the
+    2026-09-24 hyundai .docx still had no "Problemy drobne" row and its
+    heuristic list in the old place, while the HTML beside it had both.
     """
     import json
 
@@ -441,8 +443,6 @@ def ensure_report_docx(run_dir: Path) -> Path | None:
     if not src.is_file():
         return None
     out = run_dir / "aggregated_report.docx"
-    if out.is_file() and out.stat().st_mtime >= src.stat().st_mtime:
-        return out
     try:
         agg = json.loads(src.read_text(encoding="utf-8"))
     except Exception:
