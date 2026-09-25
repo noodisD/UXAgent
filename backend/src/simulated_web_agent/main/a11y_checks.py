@@ -185,10 +185,13 @@ def extract_a11y_candidates(store: TraceStore) -> dict:
 # Topics the narrative writes WCAG issues about, keyed so a narrative issue can
 # be joined back to the measured finding it came from. The a11y prompt fixes the
 # vocabulary, so a short keyword list is more reliable here than fuzzy matching.
-# Order matters: the first topic whose keyword appears wins.
+# Order matters: the first topic whose keyword appears wins. The vocabulary is
+# fixed only loosely: "Brak dostępnej nazwy dla kontrolki" matched nothing,
+# because the list had the words the other way round.
 _TOPIC_KEYWORDS = (
     ("alt_text", ("alternatyw", "alt text", "atrybut alt", "atrybutu alt")),
-    ("control_name", ("etykiet", "bez nazwy", "nazwy dostępnej", "accessible name")),
+    ("control_name", ("etykiet", "bez nazwy", "nazwy dostępnej", "dostępnej nazwy",
+                      "nazwy kontrol", "nazwy dla kontrol", "accessible name")),
     ("landmark", ("orientacyjn", "landmark")),
     ("small_text", ("czcionk", "12px", "12 px", "rozmiar tekstu")),
     ("contrast", ("kontrast",)),

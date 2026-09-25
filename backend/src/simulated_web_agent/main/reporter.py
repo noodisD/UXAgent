@@ -919,19 +919,32 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 continue
             category = str(f.get("category") or "").strip() or "Inne"
             detail = str(f.get("detail") or "").strip()
-            entry = a11y_by_category.setdefault(category, {
+            # Which measured check this is, so a WCAG issue in the narrative
+            # can be joined back to it — narrative issues carry no
+            # heuristic_id, so the heuristic join could never find them.
+            topic = a11y_topic(f"{category} {detail}")
+            # Keyed by that check where there is one, not by the wording. Each
+            # persona's pass names its category freely, so one unnamed combobox
+            # on the test-drive form came back as "Brak dostępnej nazwy dla
+            # kontrolki", "Brakujące etykiety kontrolek" and "Brak nazwy dla
+            # kontrolki": three barriers of one persona each, charged three
+            # times in the score, while the narrative rightly called it one
+            # issue seen by 3 of 3. 3 of the 8 archived runs with accessibility
+            # findings had such a split.
+            entry = a11y_by_category.setdefault(topic or category, {
                 "category": category, "severity": f.get("severity", "drobny"),
                 "detail": detail,
                 "recommendation": str(f.get("recommendation") or "").strip(),
                 "urls": [], "personas": set(),
-                # Which measured check this is, so a WCAG issue in the narrative
-                # can be joined back to it — narrative issues carry no
-                # heuristic_id, so the heuristic join could never find them.
-                "topic": a11y_topic(f"{category} {detail}"),
+                "topic": topic,
                 "examples": [], "verified": False,
             })
             if severity_rank(f.get("severity")) > severity_rank(entry["severity"]):
+                # The worst instance names the merged barrier and describes it.
                 entry["severity"] = f.get("severity", "drobny")
+                entry["category"], entry["detail"] = category, detail
+                entry["recommendation"] = (str(f.get("recommendation") or "").strip()
+                                           or entry["recommendation"])
             url = str(f.get("url") or "").strip()
             if url and url not in entry["urls"]:
                 entry["urls"].append(url)
