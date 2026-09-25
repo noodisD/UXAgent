@@ -550,14 +550,24 @@ async function revealAddedFrom(firstNew: number) {
   flashTimer = window.setTimeout(() => { addedFrom.value = null }, 1600)
 }
 
+// Ids must be unique: the report keys answers by id. 'q' + (length + 1) reused
+// one after any deletion but the last — delete q1, add one, and the new question
+// became a second q3 — filing one question's ratings under another's prompt.
+function freshId(prefix: string, taken: Set<string>): string {
+  let n = 1
+  while (taken.has(prefix + n)) n++
+  taken.add(prefix + n)
+  return prefix + n
+}
+const takenIds = () => new Set(questions.value.map(q => String(q.id)))
 function addOpen() {
   const at = questions.value.length
-  writeQuestions([...questions.value, { id: 'q' + (at + 1), type: 'short_text', prompt: 'New open-ended question' }])
+  writeQuestions([...questions.value, { id: freshId('q', takenIds()), type: 'short_text', prompt: 'New open-ended question' }])
   revealAddedFrom(at)
 }
 function addMC() {
   const at = questions.value.length
-  writeQuestions([...questions.value, { id: 'q' + (at + 1), type: 'multiple_choice', prompt: 'New multiple-choice question', options: ['Option 1', 'Option 2', 'Option 3'] }])
+  writeQuestions([...questions.value, { id: freshId('q', takenIds()), type: 'multiple_choice', prompt: 'New multiple-choice question', options: ['Option 1', 'Option 2', 'Option 3'] }])
   revealAddedFrom(at)
 }
 function removeQuestion(i: number) { const l = questions.value.slice(); l.splice(i, 1); writeQuestions(l) }
@@ -605,7 +615,14 @@ function insertSUS() {
   ]
   const base = questions.value.slice()
   const at = base.length
-  sus.forEach((p, i) => base.push({ id: 'sus' + (i + 1), type: 'multiple_choice', prompt: p, options: ['1', '2', '3', '4', '5'] }))
+  // Already there: a second copy would only duplicate every SUS item.
+  const present = base.findIndex(q => q.prompt === sus[0])
+  if (present >= 0 && sus.every(p => base.some(q => q.prompt === p))) {
+    revealAddedFrom(present)
+    return
+  }
+  const taken = takenIds()
+  sus.forEach(p => base.push({ id: freshId('sus', taken), type: 'multiple_choice', prompt: p, options: ['1', '2', '3', '4', '5'] }))
   writeQuestions(base)
   revealAddedFrom(at)
 }

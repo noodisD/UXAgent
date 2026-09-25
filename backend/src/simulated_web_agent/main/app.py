@@ -358,6 +358,16 @@ def run_endpoint():
         )
     if not str(payload.get("general_intent") or "").strip():
         raise BadRequest("general_intent must not be empty")
+    # The report keys survey answers by question id, so a repeated id files one
+    # question's ratings under another's prompt and drops the other's answers.
+    # The wizard could produce one (delete a question, add one), and so could
+    # any other client.
+    qn = payload.get("questionnaire")
+    ids = [str(q.get("id")) for q in ((qn or {}).get("questions") or [])
+           if isinstance(q, dict) and q.get("id") is not None] if isinstance(qn, dict) else []
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise BadRequest(f"questionnaire has repeated question ids: {', '.join(dupes)}")
 
     with _runs_lock:
         # Single-active-run model: the pipeline owns a browser fleet and the
