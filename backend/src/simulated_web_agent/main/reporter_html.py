@@ -135,6 +135,7 @@ body {
    label like "PROB. KRYTYCZNYCH" without wrapping mid-word — a flex row fit
    five and dropped the sixth onto a line by itself. Three columns give every
    label room and pair the severities on one row. */
+.vp-na { color: #6c757d; font-weight: 600; }
 .header-note { position: relative; z-index: 1; margin-top: 18px; font-size: 12.5px; line-height: 1.5;
   color: rgba(255,255,255,.78); border-left: 2px solid rgba(255,255,255,.35); padding-left: 10px; }
 .header-meta { display: grid; grid-template-columns: repeat(3, 1fr);
@@ -460,11 +461,31 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
       <span class="lbl">Prob. drobnych</span>
     </div>
     <div class="meta-item">
-      <span class="val">{(stats.get("first_impression") or {}).get("avg_score", "—")}/5</span>
+      <span class="val">{_fi_header(stats)}</span>
       <span class="lbl">Pierwsze wrażenie</span>
     </div>
   </div>{_excluded_sessions_note(stats)}
 </div>"""
+
+
+def _fi_header(stats: dict) -> str:
+    """The first-impression average, or "—": a present-but-null value printed "None/5"."""
+    v = (stats.get("first_impression") or {}).get("avg_score")
+    return f"{v}/5" if isinstance(v, (int, float)) else "—"
+
+
+def _anything_observed(stats: dict) -> bool:
+    """Did any session see the site at all? Absence of evidence is not a pass."""
+    ex = [e for e in (stats.get("excluded_sessions") or []) if isinstance(e, dict)]
+    n = int(stats.get("participant_count") or 0)
+    if n and len(ex) >= n:
+        return False
+    # Not the accessibility average: archived runs scored 5/5 over nothing.
+    fi = stats.get("first_impression") or {}
+    heur = stats.get("heuristic") or {}
+    return bool(heur.get("by_heuristic") or heur.get("excluded_by_heuristic")
+                or fi.get("avg_score") is not None
+                or ((stats.get("viewport") or {}).get("devices")))
 
 
 def _excluded_sessions_note(stats: dict) -> str:
@@ -846,16 +867,28 @@ def _render_responsiveness(stats: dict, narr: dict) -> str:
 
     mobile_label = "Brak overflowu" if mobile_ok else f"{vp.get('mobile_overflow_sessions', 0)}/{n} sesji z overflowem"
     tablet_label = f"{tablet_issues}/{n} sesji z overflowem" if tablet_issues else "Brak overflowu"
+    mobile_cls = "vp-ok" if mobile_ok else "vp-warn"
+    tablet_cls = "vp-ok" if not tablet_issues else "vp-warn"
+    # A zero overflow count on no scanned page is not a pass: both tmobile
+    # sessions never loaded, and the section still said "Brak overflowu" in
+    # green. Reports without the per-device list keep the old reading.
+    if "devices" in vp:
+        scanned = {d.get("viewport") for d in (vp.get("devices") or [])
+                   if isinstance(d, dict) and d.get("pages_scanned")}
+        if "mobile" not in scanned:
+            mobile_label, mobile_cls = "Nie zmierzono", "vp-na"
+        if "tablet" not in scanned:
+            tablet_label, tablet_cls = "Nie zmierzono", "vp-na"
 
     body = f"""
     <div class="viewport-grid">
       <div class="vp-card">
         <div class="vp-label">Mobile</div>
-        <div class="{'vp-ok' if mobile_ok else 'vp-warn'}">{mobile_label}</div>
+        <div class="{mobile_cls}">{mobile_label}</div>
       </div>
       <div class="vp-card">
         <div class="vp-label">Tablet</div>
-        <div class="{'vp-ok' if not tablet_issues else 'vp-warn'}">{tablet_label}</div>
+        <div class="{tablet_cls}">{tablet_label}</div>
       </div>
     </div>"""
     if assessment:
@@ -1120,7 +1153,10 @@ def _render_stats_table(stats: dict, narr: dict | None = None) -> str:
         row("Do weryfikacji przez człowieka", held) +
         row("Pierwsze wrażenie (śr.)", f"{fi_avg}/5" if fi_avg else "—") +
         row("Dostępność (śr.)", f"{a11y_avg}/5" if a11y_avg else "—") +
-        row("Overflow mobile", f"{vp.get('mobile_overflow_sessions',0)}/{n} sesji") +
+        row("Overflow mobile", f"{vp.get('mobile_overflow_sessions',0)}/{n} sesji"
+            if not ("devices" in vp and not any(isinstance(d, dict) and d.get("viewport") == "mobile"
+                                                 and d.get("pages_scanned") for d in vp.get("devices") or []))
+            else "nie zmierzono") +
         row("Overflow tablet", f"{vp.get('tablet_overflow_sessions',0)}/{n} sesji")
     )
     table = f"""
@@ -1350,6 +1386,9 @@ def _render_heuristic_legend(stats: dict) -> str:
     held_back = {int(k): v for k, v in
                  ((stats.get("heuristic") or {}).get("excluded_by_heuristic") or {}).items()
                  if str(k).lstrip("-").isdigit()}
+    # "No violation observed" needs something to have been observed: a run
+    # whose sessions never loaded printed ten green passes.
+    evaluated = _anything_observed(stats)
     rows = ""
     for h_id in sorted(HEURISTIC_NAMES):
         hit = by_h.get(h_id)
@@ -1367,6 +1406,8 @@ def _render_heuristic_legend(stats: dict) -> str:
             # list below says what, and what would settle it.
             verdict = ('<span style="color:#6c757d">brak potwierdzonych naruszeń</span>'
                        f'{pending_note}')
+        elif not evaluated:
+            verdict = '<span style="color:#6c757d">nie oceniono</span>'
         else:
             verdict = '<span style="color:#1f7a4d">nie stwierdzono naruszeń</span>'
         rows += (f'<tr><td class="hl-id">H{h_id}</td>'

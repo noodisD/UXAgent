@@ -164,6 +164,9 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     table.style = "Light Grid Accent 1"
     hdr = table.rows[0].cells
     hdr[0].text, hdr[1].text, hdr[2].text = "", "Heurystyka", "Wynik"
+    # Same rule as the HTML: nothing observed is not "no violation".
+    from .reporter_html import _anything_observed
+    observed = _anything_observed(stats)
     for h_id in sorted(HEURISTIC_NAMES):
         hit = by_h.get(h_id)
         pending = held_back.get(h_id, 0)
@@ -175,6 +178,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             cells[2].text = f"{hit.get('worst_severity', '')} · {hit.get('sessions_affected', '')}{note}"
         elif pending:
             cells[2].text = f"brak potwierdzonych naruszeń{note}"
+        elif not observed:
+            cells[2].text = "nie oceniono"
         else:
             cells[2].text = "nie stwierdzono naruszeń"
 
