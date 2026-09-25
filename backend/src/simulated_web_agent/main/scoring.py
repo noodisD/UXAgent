@@ -31,6 +31,8 @@ All weights live in RULES. Change them there; the report prints them.
 """
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 START = 5.0
 FLOOR = 1.0
 
@@ -252,7 +254,12 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
 
     total = round(sum(d["amount"] for d in deductions), 2)
     raw = START - total
-    score = round(max(FLOOR, min(START, raw)), 1)
+    # Half-up on the two decimals the breakdown prints. round() rounds halves
+    # to even, so "5.0 − 0.75 = 4.25, zaokrąglone 4.2" contradicted itself, and
+    # 0.75 is the commonest single deduction here (one critical issue at half
+    # reach, two declared failures of two).
+    clamped = max(FLOOR, min(START, raw))
+    score = float(Decimal(f"{clamped:.2f}").quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
 
     sev_counts = (stats.get("heuristic") or {}).get("severity_counts") or {}
     not_counted = []

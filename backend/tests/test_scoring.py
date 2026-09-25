@@ -197,3 +197,13 @@ def test_one_finding_has_one_severity_in_every_section():
         "measured": {"images": {"total": 1287, "unnamed": 133, "share_unnamed": 0.103}}}})
     assert ">drobny<" in html and ">poważny<" not in html
     assert "133 z 1287" in html
+
+
+def test_the_printed_arithmetic_rounds_the_way_a_reader_would():
+    """round() gave 4.25 → 4.2 beside "5.0 − 0.75 = 4.25"."""
+    from simulated_web_agent.main import scoring
+    stats = {"prioritization": [{"heuristic_id": 5, "heuristic_name": "Błędy", "severity": "krytyczny",
+                                 "personas_affected": 1, "participant_count": 2, "confidence": "high"}],
+             "heuristic": {}, "accessibility": {}}
+    res = scoring.compute_ux_score(stats)
+    assert res["raw"] == 4.25 and res["score"] == 4.3
