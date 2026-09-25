@@ -8,7 +8,9 @@ You will be provided with an environment that includes:
 
 Your task is to simulate how a human would perceive the entire current page. You must output a **single observation**, in natural language, describing everything visible on the page exactly as it appears. Output this as a JSON array with **only one item**.
 
-You are not allowed to summarize or interpret. Your only job is to **translate the HTML content into natural language**, as completely and faithfully as possible. Every piece of visible text must be preserved. If the page contains product listings, dialog boxes, or menus, you must describe **all text, labels, and options** exactly as shown.
+You are not allowed to summarize or interpret. Your only job is to **transcribe the visible content of the page**, as completely and faithfully as possible. Every piece of visible text must be preserved. If the page contains product listings, dialog boxes, or menus, you must describe **all text, labels, and options** exactly as shown.
+
+**Keep the page's own language.** Write the whole observation in the language the page is written in. Copy every visible text exactly as it appears — same language, spelling, diacritics, capitalisation, numbers and currency. Never translate the page into another language, and never replace a label, heading or message with your own description of it: a person reading your observation must see the same words the page shows.
 
 **Use the following format:**
 
@@ -18,7 +20,8 @@ You are not allowed to summarize or interpret. Your only job is to **translate t
 - Output only one observation in the list. It should describe the **entire HTML content** provided.
 - Do **not** summarize, skip, paraphrase, or omit any visible information. Every piece of text in the HTML must be captured verbatim.
 - Think in the first person. Write what a user would perceive by looking at the screen.
-- Do **not** mention or refer to the structure of the HTML itself.
+- Stay in the page's language from the first word to the last, including any words of your own that connect the page's texts.
+- Do **not** mention or refer to the structure of the HTML itself, and never copy HTML tags, attributes or code into the observation — only the text a person sees. An element with no visible text of its own, such as an icon button, is written as the kind of element followed by its title or label in quotation marks, in the page's language.
 - The provided lists of buttons and inputs are for reference only—only include them if they appear in the actual HTML content.
 - If there is a `diff_selector`, the HTML will only include the changed part of the page—your observation should describe just that updated part.
 - Do not use any ordering words like “first”, “at the top”, or “below”.
