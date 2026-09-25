@@ -2,7 +2,7 @@
 import { locale } from './i18n'
 
 export type Severity = 'critical' | 'serious' | 'minor'
-export type Outcome = 'success' | 'partial' | 'failed'
+export type Outcome = 'success' | 'partial' | 'failed' | 'unknown'
 
 export const SEV: Record<Severity, { label: string; pl: string; color: string; chipBg: string; chipFg: string }> = {
   critical: { label: 'Critical', pl: 'krytyczny', color: '#d83a34', chipBg: '#fdeceb', chipFg: '#c0322c' },
@@ -14,6 +14,7 @@ export const OUTCOME: Record<Outcome, { label: string; color: string; bg: string
   success: { label: 'Goal completed',       color: '#1f9d57', bg: '#e9f6ee' },
   partial: { label: 'Partially completed',  color: '#b5701a', bg: '#fbf2e3' },
   failed:  { label: 'Goal not met',         color: '#d83a34', bg: '#fdeceb' },
+  unknown: { label: 'Outcome unknown',      color: '#8a9099', bg: '#f1f2f4' },
 }
 
 export const SEV_ORDER: Record<Severity, number> = { critical: 0, serious: 1, minor: 2 }
@@ -49,8 +50,8 @@ const SEV_LABELS = {
   en: { critical: 'Critical', serious: 'Serious', minor: 'Minor' },
 }
 const OUTCOME_LABELS = {
-  pl: { success: 'Cel osiągnięty', partial: 'Częściowo osiągnięty', failed: 'Cel nieosiągnięty' },
-  en: { success: 'Goal completed', partial: 'Partially completed', failed: 'Goal not met' },
+  pl: { success: 'Cel osiągnięty', partial: 'Częściowo osiągnięty', failed: 'Cel nieosiągnięty', unknown: 'Wynik nieustalony' },
+  en: { success: 'Goal completed', partial: 'Partially completed', failed: 'Goal not met', unknown: 'Outcome unknown' },
 }
 
 // Locale-aware label getters (read the reactive locale, so templates re-render on switch).
@@ -84,7 +85,9 @@ export function pageSpeedColor(v: number): string {
 // coercion happens in exactly one place — counting the raw value while
 // displaying the normalised one is how ResultsScreen's totals stopped summing.
 export function outcomeOf(o: string | null | undefined): Outcome {
-  return (o === 'success' || o === 'partial' || o === 'failed') ? o : 'partial'
+  // No verdict is not a partial success: that fallback counted a persona with
+  // no session and no reflection as partially successful.
+  return (o === 'success' || o === 'partial' || o === 'failed') ? o : 'unknown'
 }
 
 /** Polish severity label (as the backend stores it) -> Severity key. */

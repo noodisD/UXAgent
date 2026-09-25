@@ -233,10 +233,16 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
             "basis": f"łączna kara za drobne problemy ograniczona do {RULES['minor_cap']:g}",
         })
 
-    # Participants whose verdict rests on a held-back finding.
+    # Participants whose verdict rests on a held-back finding. Only a declared
+    # verdict can: an outcome measured from the trace (session_goal_state) does
+    # not come from the model's words, whatever its reflection says. Applying
+    # the rule to measured outcomes printed "nieosiągnięty: 1/2 … zmierzone z
+    # zapisu sesji" for the lidl run, where both failures were measured and
+    # the rest of the report said 2/2.
     held = {r.get("persona_dir") for r in (stats.get("objective_reflections") or [])
             if isinstance(r, dict) and r.get("self_reported_only") and r.get("persona_dir")}
     held &= set((outcomes or {}).keys())
+    held = {d for d in held if (outcome_sources or {}).get(d) != "observed"}
 
     for extra in (_task_line(outcomes or {}, outcome_sources or {}, held),
                   *_accessibility_lines(stats),

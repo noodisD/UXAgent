@@ -384,8 +384,11 @@ def _coerce_reflection(data: Any, persona_name: str) -> dict:
     """Validate/normalize the LLM reflection payload into the dashboard shape."""
     d = data if isinstance(data, dict) else {}
     outcome = str(d.get("outcome", "")).strip().lower()
+    # "unknown", not a guess. This used to be "partial", which the score then
+    # charged as the model's verdict (0.75 × 0.5 per participant) and the
+    # report printed as "Cel osiągnięty częściowo", for a verdict nobody gave.
     if outcome not in _VALID_OUTCOMES:
-        outcome = "partial"
+        outcome = "unknown"
 
     def _str_list(v: Any) -> list[str]:
         if isinstance(v, list):
@@ -460,7 +463,7 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
     except Exception as exc:
         log.warning("[reflection] LLM call failed for %s: %s", store.trace_dir, exc)
         reflection = {
-            "outcome": "partial",
+            "outcome": "unknown",  # the call failed: no verdict, see _coerce_reflection
             "summary": "",
             "blockers": [],
             "wins": [],
@@ -1390,6 +1393,8 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
     if sources and observed_n == 0:
         parts = [f"sukces: {c.get('success', 0)}/{n}", f"częściowo: {c.get('partial', 0)}/{n}",
                  f"porażka: {c.get('failed', 0)}/{n}"]
+        if c.get("unknown"):
+            parts.append(f"wynik nieustalony: {c['unknown']}/{n}")
         return ("UKOŃCZENIE ZADANIA — DEKLAROWANE, nie zmierzone. Zapis sesji nie "
                 "pozwala automatycznie ocenić tego typu zadania, więc poniższe liczby "
                 "to werdykt modelu o przebiegu każdej sesji (ocena deklarowana), a nie "
@@ -1401,6 +1406,8 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
     parts = [f"sukces: {succ}/{n}", f"częściowo: {part}/{n}", f"porażka: {fail}/{n}"]
     if ab:
         parts.append(f"porzucono: {ab}/{n}")
+    if c.get("unknown"):
+        parts.append(f"wynik nieustalony: {c['unknown']}/{n}")
     line2 = ""
     if reached_rungs:
         m = len(reached_rungs)

@@ -1148,6 +1148,8 @@ _OUTCOME_PL = {
     "success": ("Cel osiągnięty", "#1f7a4d", "#e9f6ee"),
     "partial": ("Cel osiągnięty częściowo", "#8c5a12", "#fbf2e3"),
     "failed": ("Cel nieosiągnięty", "#b3352f", "#fdeceb"),
+    # No verdict: the reflection call failed or returned something else.
+    "unknown": ("Wynik nieustalony", "#5b6470", "#f1f2f4"),
 }
 
 
@@ -1169,7 +1171,7 @@ def _render_objectives(stats: dict) -> str:
 
     counts: dict[str, int] = {}
     for r in rows:
-        key = r.get("outcome") or "partial"
+        key = r.get("outcome") or "unknown"
         counts[key] = counts.get(key, 0) + 1
     tally = " · ".join(
         f'<span style="color:{_OUTCOME_PL.get(k, ("", "#444", ""))[1]};font-weight:700">'
@@ -1179,7 +1181,7 @@ def _render_objectives(stats: dict) -> str:
 
     cards = ""
     for r in rows:
-        label, fg, bg = _OUTCOME_PL.get(r.get("outcome") or "partial", ("—", "#444", "#f1f2f4"))
+        label, fg, bg = _OUTCOME_PL.get(r.get("outcome") or "unknown", ("—", "#444", "#f1f2f4"))
         blockers = "".join(f"<li>{_esc(b)}</li>" for b in (r.get("blockers") or [])[:4])
         wins = "".join(f"<li>{_esc(w)}</li>" for w in (r.get("wins") or [])[:4])
         fix = _esc(r.get("priority_fix") or "")

@@ -174,7 +174,9 @@ def _effective_outcome(store) -> str:
     was decidable, else the LLM's declared self-rating. One definition for the
     persona payload, the history counts and the run comparison."""
     eff = _as_dict(_as_dict(store.read_iso_metrics()).get("effectiveness"))
-    declared = (store.read_objective_reflection() or {}).get("outcome") or "partial"
+    # No reflection is no verdict. "partial" here counted a persona with no
+    # session and no reflection (hebe 2e58) as partially successful.
+    declared = (store.read_objective_reflection() or {}).get("outcome") or "unknown"
     if eff.get("outcome_source") == "observed":
         return eff.get("observed_outcome") or declared
     return declared
@@ -205,7 +207,7 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
     # could disagree with its own history row.
     iso = _as_dict(store.read_iso_metrics())
     eff = _as_dict(iso.get("effectiveness"))
-    declared_outcome = reflection.get("outcome") or "partial"
+    declared_outcome = reflection.get("outcome") or "unknown"
     outcome = _effective_outcome(store)
 
     return {

@@ -441,6 +441,7 @@ const n = computed(() => personas.value.length || 1)
 const succ = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'success').length)
 const part = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'partial').length)
 const fail = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'failed').length)
+const unk = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'unknown').length)
 
 // null when the persona has no first impression (the pass failed, or an older
 // run): averaged as 0 it pulled the run's card down as if the page had scored 0/5.
@@ -581,7 +582,8 @@ const verdict = computed(() => succ.value === n.value ? t('ov.verdict.all')
 const verdictBody = computed(() => t('ov.verdictBody', {
   succ: succ.value, n: n.value, part: part.value, fail: fail.value,
   crit: counts.value.critical, ser: counts.value.serious, min: counts.value.minor,
-}) + (counts.value.held ? t('ov.verdictHeld', { held: counts.value.held }) : ''))
+}) + (unk.value ? t('ov.verdictUnknown', { unk: unk.value }) : '')
+  + (counts.value.held ? t('ov.verdictHeld', { held: counts.value.held }) : ''))
 
 const detail = computed(() => personas.value[selPersona.value])
 const fiRows = computed(() => {

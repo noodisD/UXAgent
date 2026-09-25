@@ -35,6 +35,7 @@ _OUTCOME_LABEL = {
     "success": "Cel osiągnięty",
     "partial": "Cel osiągnięty częściowo",
     "failed": "Cel nieosiągnięty",
+    "unknown": "Wynik nieustalony",
 }
 
 _FI_DIM_LABELS = {

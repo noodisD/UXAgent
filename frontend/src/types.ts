@@ -53,7 +53,7 @@ export const FORM_KEY: InjectionKey<WizardForm> = Symbol('WizardForm')
 
 // ---- Results dashboard payloads (mirror backend results_api.py) ----
 
-export type Outcome = 'success' | 'partial' | 'failed'
+export type Outcome = 'success' | 'partial' | 'failed' | 'unknown'
 export type Severity = 'critical' | 'serious' | 'minor'
 
 export type ObjectiveReflection = {
