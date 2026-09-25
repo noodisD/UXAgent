@@ -14,15 +14,26 @@ Layout produced by run.py:
 from __future__ import annotations
 
 import json
+import logging
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from . import run_storage
+from .iso_metrics import _numeric_survey_avg
 from .persona_matrix import build_persona_task_matrix
+# The report's own definitions. The dashboard used to average survey answers
+# its own way, so a placeholder "3" from a persona who never reached payment
+# ("nie mogę ocenić") sat in the dashboard's averages after the report had
+# stopped counting it. Importing the predicate and the aggregation, rather than
+# copying them, is what keeps the two from drifting apart again.
+from .reporter import _not_assessable, aggregate_statistics
 from .run import read_manifest
 from .severity import SEVERITY_EN, excluded_from_report, severity_score
 from .trace_store import TraceStore, parse_action as _parse_action
+
+log = logging.getLogger(__name__)
 
 RUNS_ROOT = Path("runs")
 
@@ -84,20 +95,65 @@ def _persona_duration(trace_dir: Path) -> str | None:
 from .redaction import clean as _redact
 
 
+def _answer_not_assessable(a: dict) -> bool:
+    """reporter._not_assessable on one survey answer.
+
+    The fields aggregate_statistics reads (value, then reason or reasoning), so
+    a persona's row and the run's averages agree on each answer. The legacy
+    `answer` field stands in for a missing `value`, as it does for the row's
+    displayed answer; every archived answer has `value`.
+    """
+    return _not_assessable(a.get("value", a.get("answer", "")),
+                           a.get("reason") or a.get("reasoning"))
+
+
 def _survey_rows(survey: dict, q_prompts: dict[str, str]) -> list[dict]:
     rows: list[dict] = []
     for a in (survey or {}).get("answers", []) or []:
+        if not isinstance(a, dict):
+            continue
         qid = a.get("question_id", "")
         # The dashboard is a client-facing surface too. Survey answers are free
         # text from the persona and have quoted this tool's internal field names
         # verbatim ("last_action_error"); aggregate_statistics redacts its own
         # copy, and this is the other route to a reader.
-        rows.append(_redact({
+        row = _redact({
             "q": q_prompts.get(qid, a.get("prompt") or qid),
             "answer": str(a.get("value", a.get("answer", ""))),
             "reasoning": a.get("reason", a.get("reasoning", "")),
-        }))
+        })
+        # A placeholder, not a rating: the persona said it could not answer.
+        # Flagged per row so the persona card can say so and no client-side
+        # average can pick the placeholder up.
+        row["notAssessable"] = _answer_not_assessable(a)
+        rows.append(row)
     return rows
+
+
+def _dashboard_iso(iso: Any, survey: dict) -> Any:
+    """iso_metrics with not-assessable survey answers taken out of satisfaction.
+
+    iso_metrics averages every 1-5 answer into synthetic_score_1_5 and copies
+    the SEQ / confidence answers verbatim, placeholders included — the same "3"
+    the report no longer counts. Recomputed here with iso_metrics' own average
+    over the answers the report would keep; the stored file is not rewritten.
+    """
+    if not isinstance(iso, dict) or not isinstance(iso.get("satisfaction"), dict):
+        return iso
+    answers = [a for a in _as_list(_as_dict(survey).get("answers")) if isinstance(a, dict)]
+    placeholders = [a for a in answers if _answer_not_assessable(a)]
+    if not placeholders:
+        return iso
+    kept = {**_as_dict(survey), "answers": [a for a in answers if not _answer_not_assessable(a)]}
+    sat = dict(iso["satisfaction"])
+    sat["synthetic_score_1_5"] = _numeric_survey_avg(kept)
+    na_ids = {a.get("question_id") for a in placeholders}
+    if "synthetic_seq" in na_ids:
+        sat["synthetic_seq_1_7"] = None
+    if "synthetic_confidence" in na_ids:
+        sat["synthetic_confidence_1_7"] = None
+    sat["not_assessable"] = len(placeholders)
+    return {**iso, "satisfaction": sat}
 
 
 def _as_dict(v) -> dict:
@@ -224,7 +280,7 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
             for h in heuristics
         ],
         "survey": _survey_rows(survey, q_prompts),
-        "iso": store.read_iso_metrics(),
+        "iso": _dashboard_iso(store.read_iso_metrics(), survey),
         "biasAudit": store.read_bias_audit(),
         "cognitiveWalkthrough": store.read_cognitive_walkthrough(),
     }
@@ -250,6 +306,127 @@ def _first_persona_site_context(run_dir: Path) -> str:
     return ""
 
 
+def _questionnaire_questions(manifest: dict) -> list[dict]:
+    """The manifest's questionnaire questions. Read the way the reporter reads
+    them, which also accepts a questionnaire stored as a JSON string."""
+    qn = manifest.get("questionnaire")
+    if isinstance(qn, str):
+        try:
+            qn = json.loads(qn)
+        except ValueError:
+            qn = None
+    return [q for q in _as_list(_as_dict(qn).get("questions")) if isinstance(q, dict)]
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _score_breakdown(report: dict | None) -> dict | None:
+    """statistics.score_breakdown (scoring.compute_ux_score), or None.
+
+    None for runs made before scoring.py, and for a breakdown missing the
+    numbers the "Jak obliczono ocenę" table prints — the dashboard then shows
+    no breakdown rather than one with invented lines.
+    """
+    stats = _as_dict(_as_dict(report).get("statistics"))
+    b = _as_dict(stats.get("score_breakdown"))
+    if not all(_is_number(b.get(k)) for k in ("score", "start", "total_deduction", "raw")):
+        return None
+    return b
+
+
+def _score_value(v) -> float | None:
+    """A score fit to print, rounded as the report prints it, or None."""
+    if not _is_number(v) and not isinstance(v, str):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    # A NaN would also make the payload invalid JSON for the browser; zero or
+    # less is no score on a 1-5 scale (scoring.FLOOR is 1.0).
+    return round(f, 1) if math.isfinite(f) and f > 0 else None
+
+
+def _report_score(report: dict | None) -> float | None:
+    """The overall UX score exactly as the report shows it.
+
+    reporter.resolve_narrative's rule: statistics.score_breakdown.score whenever
+    the run has one — narrative.overall_ux_score is forced to it only when the
+    aggregate LLM call succeeded, so the breakdown is the one place it is always
+    right — else the score the run was delivered with. None when there is
+    neither, never 0.0: a zero read as "the worst possible site".
+
+    One deliberate difference: for a pre-scoring run whose aggregate LLM call
+    failed, the report's stats-only fallback narrative prints the
+    first-impression average as "Ocena UX". That is not a UX score, and the
+    dashboard does not render that fallback narrative either, so it shows "—".
+    (No archived run is in that state.)
+    """
+    stats = _as_dict(_as_dict(report).get("statistics"))
+    computed = _as_dict(stats.get("score_breakdown")).get("score")
+    if computed is not None:
+        return _score_value(computed)
+    narrative = _as_dict(_as_dict(report).get("narrative"))
+    if "error" in narrative:
+        return None
+    return _score_value(narrative.get("overall_ux_score"))
+
+
+def _recompute_survey(run_dir: Path, q_meta: list[dict]) -> dict | None:
+    """statistics.survey as the current reporter would build it for this run.
+
+    The same inputs (each persona's ux_report.json, the manifest's questions)
+    through the same function, aggregate_statistics — so the not-assessable
+    rule, the short-session exclusion and the question order are the report's
+    own, not a copy. It is pure and reads only the run's files (~50 ms on the
+    largest archived run). None when there is nothing to aggregate or the
+    aggregation fails; the survey tab then falls back to the per-persona rows,
+    which carry the same not-assessable flag.
+    """
+    stores = [TraceStore(d) for d in _persona_dirs(run_dir)]
+    reports = [r for r in (s.read_ux_report() for s in stores) if isinstance(r, dict) and r]
+    if not reports:
+        return None
+    try:
+        stats = aggregate_statistics(reports, q_meta=q_meta or None, stores=stores)
+    except Exception:
+        log.exception("[results_api] survey recompute failed for %s", run_dir.name)
+        return None
+    survey = _as_dict(_as_dict(stats).get("survey"))
+    return survey or None
+
+
+def _run_survey(run_dir: Path, report: dict | None, q_meta: list[dict]) -> dict | None:
+    """Run-level survey figures for the dashboard, not-assessable answers apart.
+
+    A report built since the not-assessable fix stores `survey.not_assessable`,
+    and its figures are used as they are — the dashboard then shows the same
+    numbers as that report. Every archived report predates the fix and averages
+    the placeholders in, so for those the figures are recomputed from the
+    session files by the report's own aggregation.
+    """
+    stored = _as_dict(_as_dict(_as_dict(report).get("statistics")).get("survey"))
+    if "not_assessable" in stored and isinstance(stored.get("questions"), list):
+        source, survey = "report", stored
+    else:
+        source, survey = "traces", _recompute_survey(run_dir, q_meta)
+    if survey is None:
+        return None
+    na = {str(k): int(v) for k, v in _as_dict(survey.get("not_assessable")).items()
+          if _is_number(v) and v > 0}
+    return {
+        "source": source,
+        "questions": [q for q in _as_list(survey.get("questions")) if isinstance(q, dict)],
+        "notAssessable": na,
+        "notAssessableTotal": sum(na.values()),
+        "surveysIncluded": survey.get("surveys_included"),
+        "excludedSurveys": [e for e in _as_list(survey.get("excluded_surveys"))
+                            if isinstance(e, dict)],
+    }
+
+
 def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
     # Opening a run this instance did not execute (or executed before a
     # restart) fetches it from the bucket first; a no-op when local or when no
@@ -260,12 +437,8 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
     if manifest is None:
         return None
 
-    questionnaire = manifest.get("questionnaire") or {}
-    q_prompts = {
-        q.get("id"): q.get("prompt", "")
-        for q in (questionnaire.get("questions") or [])
-        if q.get("id")
-    }
+    q_meta = _questionnaire_questions(manifest)
+    q_prompts = {q.get("id"): q.get("prompt", "") for q in q_meta if q.get("id")}
 
     personas = [build_persona(d, q_prompts) for d in _persona_dirs(run_dir)]
 
@@ -305,6 +478,14 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
         # §6.1 persona x task section. Derived from `personas` rather than
         # stored, so it is correct for old runs too.
         "personaTasks": build_persona_task_matrix(personas),
+        # The headline score and the arithmetic behind it, from the one place
+        # the report takes them (see _report_score). Both None for runs that
+        # predate what they need; the screens then print "—" and no breakdown.
+        "score": _report_score(report),
+        "scoreBreakdown": _score_breakdown(report),
+        # Survey averages and distributions without the not-assessable answers,
+        # which are counted separately (see _run_survey).
+        "survey": _run_survey(run_dir, report, q_meta),
     }
 
 
@@ -387,11 +568,9 @@ def _build_comparison(
 
     prev_report = _read_json(prev_dir / "aggregated_report.json", None)
 
-    def _score(rep):
-        try:
-            return float(((rep or {}).get("narrative") or {}).get("overall_ux_score"))
-        except (TypeError, ValueError):
-            return None
+    # The same score the history row and the report header show, so a trend
+    # never compares a number that neither run's report printed.
+    _score = _report_score
 
     def _sev_counts(rep):
         stats = (rep or {}).get("statistics") or {}
@@ -609,14 +788,14 @@ def latest_screenshot(run_id: str, persona_id: str, runs_root: Path = RUNS_ROOT)
     return max(shots, key=lambda p: p.stat().st_mtime)
 
 
-def _run_overall_score(run_dir: Path) -> float:
-    agg = _read_json(run_dir / "aggregated_report.json", {}) or {}
-    narrative = agg.get("narrative") or {}
-    score = narrative.get("overall_ux_score")
-    try:
-        return round(float(score), 1)
-    except (TypeError, ValueError):
-        return 0.0
+def _run_overall_score(run_dir: Path) -> float | None:
+    """The history row's score: the report's own (see _report_score).
+
+    It used to read narrative.overall_ux_score alone and print 0.0 when that
+    was missing, so a run whose aggregate LLM call failed showed a red 0.0 in
+    the history beside a report headed by its computed score.
+    """
+    return _report_score(_read_json(run_dir / "aggregated_report.json", None))
 
 
 def build_history_row(run_dir: Path) -> dict | None:
@@ -660,7 +839,7 @@ def build_history_row(run_dir: Path) -> dict | None:
         "partial": outcomes["partial"],
         "failed": outcomes["failed"],
         "critical": critical,
-        "score": _run_overall_score(run_dir) if complete else 0.0,
+        "score": _run_overall_score(run_dir) if complete else None,
         "failure": manifest.get("failure"),
     }
 

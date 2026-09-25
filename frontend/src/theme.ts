@@ -68,6 +68,13 @@ export function scoreColor(v: number): string {
   return v >= 4 ? '#1f9d57' : v >= 3 ? '#cf8420' : '#d83a34'
 }
 
+/** An overall UX score fit to print, or null for "no score". A real score is
+ *  1.0-5.0 (scoring.FLOOR is 1.0); 0 is what older backends wrote when a run
+ *  had none, and history rows already in the bucket index still carry it. */
+export function uxScore(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
 export function pageSpeedColor(v: number): string {
   return v >= 90 ? '#1f9d57' : v >= 50 ? '#cf8420' : '#d83a34'
 }

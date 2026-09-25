@@ -13,7 +13,8 @@
 
       <div class="tab-body">
         <!-- REPORT -->
-        <ReportView v-if="tab === 'report'" :report="data.report" :meta="data.meta" :persona-tasks="data.personaTasks" />
+        <ReportView v-if="tab === 'report'" :report="data.report" :meta="data.meta" :persona-tasks="data.personaTasks"
+                    :score="data.score" :score-breakdown="data.scoreBreakdown" />
 
         <!-- OVERVIEW -->
         <div v-else-if="tab === 'overview'" class="col">
@@ -210,6 +211,9 @@
                     <span class="iso-unit">{{ detail.iso.satisfaction.synthetic_seq_1_7 ? 'SEQ /7' : '/5' }}</span>
                   </div>
                   <div class="iso-sub">{{ t('pd.iso.frustration') }}: {{ detail.iso.satisfaction.frustration_signals }}</div>
+                  <div v-if="detail.iso.satisfaction.not_assessable" class="iso-sub" :title="t('survey.naHint')">
+                    {{ t('survey.naCount', { n: detail.iso.satisfaction.not_assessable }) }}
+                  </div>
                   <div class="iso-synth">{{ t('pd.iso.synthetic') }}</div>
                 </div>
               </div>
@@ -288,7 +292,11 @@
                   <div class="psurvey-head">
                     <span class="psurvey-num mono">{{ String(i + 1).padStart(2, '0') }}</span>
                     <span class="psurvey-q">{{ s.q }}</span>
-                    <span class="psurvey-answer mono">{{ s.answer }}</span>
+                    <!-- A placeholder is not a rating: say so, and keep the
+                         value the persona typed in the tooltip. -->
+                    <span v-if="s.notAssessable" class="psurvey-answer na mono"
+                          :title="t('survey.naHint') + (s.answer ? ' ' + t('survey.naRaw', { v: s.answer }) : '')">{{ t('survey.na') }}</span>
+                    <span v-else class="psurvey-answer mono">{{ s.answer }}</span>
                   </div>
                   <div v-if="s.reasoning" class="psurvey-reason">{{ s.reasoning }}</div>
                 </div>
@@ -339,14 +347,20 @@
 
         <!-- SURVEY -->
         <div v-else-if="tab === 'survey'" class="col">
+          <!-- Answers the participants said they could not give are counted
+               here, and in no average or distribution below. -->
+          <div v-if="surveyNaTotal > 0" class="survey-note" :title="t('survey.naHint')">{{ t('survey.naTotal', { n: surveyNaTotal }) }}</div>
+          <div v-if="surveyExcluded > 0" class="survey-note">{{ t('survey.excluded', { n: surveyExcluded }) }}</div>
           <div v-for="(q, qi) in surveyRows" :key="qi" class="ux-card">
             <div class="survey-q">
               <span class="q-num mono">{{ String(qi + 1).padStart(2, '0') }}</span>
               <span class="survey-prompt">{{ q.prompt }}</span>
-              <span v-if="q.isScale" class="survey-avg mono">{{ t('survey.avgN', { x: q.avg, m: q.max }) }}</span>
+              <span v-if="q.kind === 'scale'" class="survey-avg mono">{{ t('survey.avgN', { x: q.avg, m: q.max }) }}</span>
+              <span v-else-if="q.kind === 'na'" class="survey-tag mono">{{ t('survey.naKind') }}</span>
               <span v-else class="survey-tag mono">{{ t('survey.open') }}</span>
             </div>
-            <template v-if="q.isScale">
+            <div v-if="q.kind === 'na'" class="muted sm">{{ t('survey.naAll', { n: q.na }) }}</div>
+            <template v-else-if="q.kind === 'scale'">
               <div class="dist">
                 <div v-for="d in q.dist" :key="d.v" class="dist-bar-col">
                   <span class="dist-c mono">{{ d.count || '' }}</span>
@@ -359,11 +373,12 @@
                 <span>{{ q.min }} · {{ q.lowLabel }}</span>
                 <span>{{ q.highLabel }} · {{ q.max }}</span>
               </div>
-              <div class="scale-n mono">n = {{ q.n }}</div>
+              <div class="scale-n mono">n = {{ q.n }}<span v-if="q.na" :title="t('survey.naHint')"> · {{ t('survey.naCount', { n: q.na }) }}</span></div>
             </template>
             <div v-else class="col gap8">
               <div v-for="(a, ai) in q.answers" :key="ai" class="open-quote">„{{ a }}"</div>
               <div v-if="!q.answers.length" class="muted sm">—</div>
+              <div v-if="q.na" class="scale-n mono" :title="t('survey.naHint')">{{ t('survey.naCount', { n: q.na }) }}</div>
             </div>
             <div v-if="surveySummaries[q.id]" class="ai-summary">
               <div class="ai-badge mono">AI</div>
@@ -373,7 +388,7 @@
               </div>
             </div>
           </div>
-          <div v-if="surveyRows.length === 0" class="muted">{{ t('survey.empty') }}</div>
+          <div v-if="surveyRows.length === 0 && surveyExcluded === 0" class="muted">{{ t('survey.empty') }}</div>
         </div>
       </div>
     </template>
@@ -386,7 +401,7 @@ import { apiAssetUrl } from '../api'
 import { useResults } from '../composables/useResults'
 import { useApp } from '../composables/useApp'
 import { SEV, OUTCOME, SEV_ORDER, initials, scoreColor, pageSpeedColor, outcomeOf, sevLabel, outcomeLabel, heuristicName, type Severity } from '../theme'
-import type { HeuristicFinding, PersonaResult } from '../types'
+import type { HeuristicFinding, PersonaResult, RunSurvey, SurveyQuestionStat } from '../types'
 import ReportView from './ReportView.vue'
 import { useI18n } from '../i18n'
 
@@ -584,44 +599,67 @@ const filteredFindings = computed(() => sevFilter.value === 'all'
 type SurveyRow = {
   // Carried through so AI summaries can be joined by id rather than by position.
   id: string
-  prompt: string; isScale: boolean; min: number; max: number; n: number
+  // 'na': nobody could answer it (reporter's kind "not_assessable").
+  kind: 'scale' | 'open' | 'na'
+  prompt: string; min: number; max: number; n: number
+  // Answers to this question that were placeholders ("nie dotyczy",
+  // "nie mogę ocenić"). Already outside n, avg and dist — shown beside them.
+  na: number
   lowLabel: string; highLabel: string; avg: string; markerPct: number
   dist: { v: number; count: number; height: number }[]; answers: string[]
 }
 
-const surveyRows = computed<SurveyRow[]>(() => {
-  // Preferred: the backend's enriched, questionnaire-ordered survey stats
-  // (real prompts, correct per-question scale + anchors, response distribution,
-  // open answers) — the same source the static report uses.
-  const qs = (data.value as any)?.report?.statistics?.survey?.questions
-  if (Array.isArray(qs) && qs.length) {
-    return qs.map((q: any): SurveyRow => {
-      if (q.kind === 'scale') {
-        const cs = (q.distribution || []).map((d: any) => ({ v: d.value, count: d.count }))
-        const maxC = Math.max(...cs.map((d: any) => d.count), 1)
-        const lo = q.min ?? 1, hi = q.max ?? 5
-        const a = typeof q.avg === 'number' ? q.avg : null
-        return {
-          id: String(q.id ?? ''),
-          prompt: q.prompt, isScale: true, min: lo, max: hi, n: q.n ?? 0,
-          lowLabel: q.low_label ?? '', highLabel: q.high_label ?? '',
-          avg: a != null ? a.toFixed(2).replace('.', ',') : '—',
-          markerPct: (a != null && hi > lo) ? Math.round(((a - lo) / (hi - lo)) * 100) : 0,
-          dist: cs.map((d: any) => ({ v: d.v, count: d.count, height: Math.round((d.count / maxC) * 100) })),
-          answers: [],
-        }
-      }
-      return { id: String(q.id ?? ''), prompt: q.prompt, isScale: false, min: 1, max: 5, n: 0,
-               lowLabel: '', highLabel: '', avg: '—', markerPct: 0, dist: [],
-               answers: (q.answers || []) as string[] }
-    })
+// results_api._run_survey: the report's survey figures, with not-assessable
+// answers kept out of every average and distribution and counted per question.
+// undefined = a backend that predates it; null = nothing it could aggregate.
+const runSurvey = computed<RunSurvey | null | undefined>(() => data.value?.survey)
+
+function surveyRowFrom(q: SurveyQuestionStat, naById: Record<string, number>): SurveyRow {
+  const id = String(q.id ?? '')
+  // Scale questions carry their own count; open ones only appear in the map.
+  const na = typeof q.not_assessable === 'number' ? q.not_assessable : (naById[id] ?? 0)
+  const base = { id, prompt: q.prompt, na, min: 1, max: 5, n: 0, lowLabel: '', highLabel: '',
+                 avg: '—', markerPct: 0, dist: [] as SurveyRow['dist'], answers: [] as string[] }
+  if (q.kind === 'scale') {
+    const cs = (q.distribution || []).map(d => ({ v: d.value, count: d.count }))
+    const maxC = Math.max(...cs.map(d => d.count), 1)
+    const lo = q.min ?? 1, hi = q.max ?? 5
+    const a = typeof q.avg === 'number' ? q.avg : null
+    return {
+      ...base, kind: 'scale', min: lo, max: hi, n: q.n ?? 0,
+      lowLabel: q.low_label ?? '', highLabel: q.high_label ?? '',
+      avg: a != null ? a.toFixed(2).replace('.', ',') : '—',
+      markerPct: (a != null && hi > lo) ? Math.round(((a - lo) / (hi - lo)) * 100) : 0,
+      dist: cs.map(d => ({ v: d.v, count: d.count, height: Math.round((d.count / maxC) * 100) })),
+    }
   }
-  // Legacy fallback (runs generated before enriched survey stats): per-persona.
+  if (q.kind === 'not_assessable') return { ...base, kind: 'na' }
+  return { ...base, kind: 'open', answers: (q.answers || []) as string[] }
+}
+
+const surveyRows = computed<SurveyRow[]>(() => {
+  const rs = runSurvey.value
+  // Preferred: the backend's run-level figures — the same aggregation the
+  // report runs, placeholders excluded. Authoritative even when empty: an
+  // empty list means every survey was set aside (short sessions), and the
+  // per-persona fallback below would average those back in.
+  if (rs) return rs.questions.map(q => surveyRowFrom(q, rs.notAssessable || {}))
+  // Older backend: the stored report's enriched stats as they are.
+  if (rs === undefined) {
+    const qs = data.value?.report?.statistics?.survey?.questions
+    if (Array.isArray(qs) && qs.length) {
+      const naById = (data.value?.report?.statistics?.survey?.not_assessable ?? {}) as Record<string, number>
+      return (qs as SurveyQuestionStat[]).map(q => surveyRowFrom(q, naById))
+    }
+  }
+  // Legacy fallback: per persona, skipping the rows flagged not assessable.
   if (!personas.value.length) return []
   const qCount = personas.value[0].survey.length
   return Array.from({ length: qCount }, (_, qi): SurveyRow => {
     const prompt = personas.value[0].survey[qi]?.q ?? ''
-    const answers = personas.value.map(p => p.survey[qi]?.answer ?? '').filter(a => a !== '')
+    const cells = personas.value.map(p => p.survey[qi]).filter(s => s && s.answer !== '')
+    const na = cells.filter(s => s.notAssessable).length
+    const answers = cells.filter(s => !s.notAssessable).map(s => s.answer)
     const numeric = answers.length > 0 && answers.every(a => /^[1-5]$/.test(a))
     let dist: { v: number; count: number; height: number }[] = []
     let avg = '—', markerPct = 0
@@ -632,13 +670,21 @@ const surveyRows = computed<SurveyRow[]>(() => {
       const m = answers.reduce((s, a) => s + +a, 0) / answers.length
       avg = m.toFixed(2).replace('.', ','); markerPct = Math.round(((m - 1) / 4) * 100)
     }
+    const kind: SurveyRow['kind'] = numeric ? 'scale' : (answers.length === 0 && na > 0 ? 'na' : 'open')
     // Legacy rows have no id from the backend, so fall back to the positional
     // qN convention these runs used; summaries for them are dropped anyway.
-    return { id: `q${qi + 1}`, prompt, isScale: numeric, min: 1, max: 5, n: answers.length,
+    return { id: `q${qi + 1}`, kind, prompt, min: 1, max: 5, n: numeric ? answers.length : 0, na,
              lowLabel: t('survey.anchorLow'), highLabel: t('survey.anchorHigh'),
-             avg, markerPct, dist, answers: numeric ? [] : answers }
+             avg, markerPct, dist, answers: kind === 'open' ? answers : [] }
   })
 })
+
+// The report's own total (its survey.not_assessable, summed) when the backend
+// sent run-level figures; otherwise summed from the rows the cards show.
+const surveyNaTotal = computed(() => runSurvey.value
+  ? runSurvey.value.notAssessableTotal
+  : surveyRows.value.reduce((s, q) => s + q.na, 0))
+const surveyExcluded = computed(() => runSurvey.value?.excludedSurveys?.length ?? 0)
 
 const tabs = computed((): { key: TabKey; label: string; count: number | null }[] => [
   { key: 'overview', label: t('tab.overview'), count: null as number | null },
@@ -805,6 +851,9 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .psurvey-q { font-weight: 600; font-size: 13.5px; flex: 1; line-height: 1.45; }
 .psurvey-answer { font: 700 12.5px var(--mono); color: var(--ac); background: var(--accent-tint, #fdecec); padding: 4px 10px; border-radius: 6px; flex: none; }
 .psurvey-reason { margin-top: 8px; padding-left: 26px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+/* a placeholder answer ("nie dotyczy") — neutral, never styled as a rating */
+.psurvey-answer.na { color: var(--muted-2); background: var(--surface-3); font-weight: 600; cursor: help; }
+.survey-note { font-size: 12.5px; color: var(--muted); background: var(--surface-2, #f7f8fa); border: 1px solid var(--border-2, #eef0f3); border-radius: 8px; padding: 10px 13px; }
 
 .sev-chips { display: flex; gap: 8px; margin-bottom: 18px; }
 .chip { display: inline-flex; align-items: center; gap: 8px; padding: 9px 15px; border-radius: 8px; font: 600 13px var(--sans); cursor: pointer; background: #fff; color: var(--muted); border: 1px solid #e0e3e9; }

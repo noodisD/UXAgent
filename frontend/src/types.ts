@@ -108,13 +108,20 @@ export type IsoMetrics = {
   efficiency: { step_count: number | null; backtracks: number; loop_detected: boolean; reached_step_limit: boolean; optimal_path_delta: number | null }
   satisfaction: {
     source: string
+    /** Recomputed by results_api without the not-assessable answers. */
     synthetic_score_1_5: number | null
     synthetic_seq_1_7?: number | null
     synthetic_confidence_1_7?: number | null
+    /** How many of this persona's answers were placeholders ("nie dotyczy"). */
+    not_assessable?: number
     frustration_signals: number
     requires_real_user_validation: boolean
   }
 }
+
+/** One persona's survey answer. `notAssessable`: the persona said it could not
+ *  answer (reporter._not_assessable) — a placeholder, never a rating. */
+export type PersonaSurveyAnswer = { q: string; answer: string; reasoning: string; notAssessable?: boolean }
 
 export type BiasAudit = {
   flags: { target: string; issue_type: string; explanation: string }[]
@@ -151,7 +158,7 @@ export type PersonaResult = {
   firstImpression: { purpose: number | null; navigation: number | null; cta: number | null; hierarchy: number | null; trust: number | null }
   accessibility: { score: number | null; findings: AccessibilityFinding[] }
   heuristics: HeuristicFinding[]
-  survey: { q: string; answer: string; reasoning: string }[]
+  survey: PersonaSurveyAnswer[]
   iso?: IsoMetrics | null
   biasAudit?: BiasAudit | null
   cognitiveWalkthrough?: CognitiveWalkthroughStep[]
@@ -266,11 +273,76 @@ export type PriorityRow = {
   finding_count: number
 }
 
+/** One line of scoring.compute_ux_score's deductions. A negative amount is a
+ *  correction that gives points back (the cap on minor issues). */
+export type ScoreDeduction = {
+  kind: 'issue' | 'task' | 'accessibility' | 'performance' | 'adjustment' | string
+  label: string
+  amount: number
+  basis: string
+  severity?: string
+  heuristic_id?: number
+}
+
+/** statistics.score_breakdown — the arithmetic behind the overall score, as the
+ *  report prints it under "Jak obliczono ocenę". Absent for runs made before
+ *  scoring.py. */
+export type ScoreBreakdown = {
+  score: number
+  start: number
+  floor?: number
+  total_deduction: number
+  raw: number
+  floored?: boolean
+  deductions?: ScoreDeduction[]
+  not_counted?: { label: string; reason: string }[]
+  rules?: {
+    issue?: Record<string, number>
+    task?: Record<string, number>
+    [k: string]: unknown
+  }
+}
+
+/** One question of statistics.survey.questions (reporter._build_survey_questions). */
+export type SurveyQuestionStat = {
+  id: string
+  prompt: string
+  kind: 'scale' | 'open' | 'not_assessable'
+  min?: number
+  max?: number
+  low_label?: string
+  high_label?: string
+  avg?: number | null
+  n?: number
+  /** Participants who could not answer — kept out of avg and distribution. */
+  not_assessable?: number
+  distribution?: { value: number; count: number }[]
+  answers?: string[]
+}
+
+/** Run-level survey figures with the not-assessable answers counted apart
+ *  (results_api._run_survey). `source`: "report" = the stored report's own
+ *  figures; "traces" = recomputed by the report's aggregation for a report
+ *  built before the not-assessable rule existed. */
+export type RunSurvey = {
+  source: 'report' | 'traces'
+  questions: SurveyQuestionStat[]
+  notAssessable: Record<string, number>
+  notAssessableTotal: number
+  surveysIncluded?: number | null
+  excludedSurveys: { persona_dir?: string; steps_taken?: number | null; reason?: string }[]
+}
+
 export type RunDetail = {
   meta: RunMeta
   personas: PersonaResult[]
   report?: AggReport | null
   personaTasks?: PersonaTaskRow[]
+  comparison?: any
+  /** The overall UX score as the report shows it; null when the run has none. */
+  score?: number | null
+  scoreBreakdown?: ScoreBreakdown | null
+  survey?: RunSurvey | null
 }
 
 export type RunHistoryRow = {
@@ -283,6 +355,8 @@ export type RunHistoryRow = {
   partial: number
   failed: number
   critical: number
-  score: number
+  /** null when the run has no score. Rows uploaded to the bucket index by
+   *  older code carry 0.0 for the same case. */
+  score: number | null
   current?: boolean
 }

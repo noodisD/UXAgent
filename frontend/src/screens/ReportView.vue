@@ -16,8 +16,8 @@
       <section :id="anchor('summary')" class="sec">
         <div class="hero">
           <div class="hero-score">
-            <div class="hero-num mono" :style="{ color: scoreColor(narrative.overall_ux_score || 0) }">
-              {{ fmtScore(narrative.overall_ux_score) }}<span class="hero-of">/5</span>
+            <div class="hero-num mono" :style="{ color: overallScore !== null ? scoreColor(overallScore) : 'var(--faint)' }">
+              {{ fmtScore(overallScore) }}<span class="hero-of">/5</span>
             </div>
             <div class="hero-label mono">{{ t('rep.overallScore') }}</div>
           </div>
@@ -27,6 +27,13 @@
             <p v-if="narrative.score_rationale" class="prose muted-prose">{{ narrative.score_rationale }}</p>
           </div>
         </div>
+      </section>
+
+      <!-- how the score was computed — reporter_html._render_score_breakdown.
+           Runs made before scoring.py have no breakdown and show none. -->
+      <section v-if="breakdown" :id="anchor('score')" class="sec">
+        <h3 class="sec-title">{{ t('rep.sb.title') }}</h3>
+        <ScoreBreakdown :breakdown="breakdown" />
       </section>
 
       <!-- §6.1 scope: what produced these findings -->
@@ -248,10 +255,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { apiAssetUrl } from '../api'
-import { SEV, scoreColor, pageSpeedColor, sevLabel, sevOf, outcomeLabel, outcomeOf, OUTCOME } from '../theme'
+import { SEV, scoreColor, pageSpeedColor, sevLabel, sevOf, outcomeLabel, outcomeOf, OUTCOME, uxScore } from '../theme'
 import { useApp } from '../composables/useApp'
 import { useI18n } from '../i18n'
-import type { AggIssueExample, AggReport, PersonaTaskRow, PriorityRow, RunMeta } from '../types'
+import ScoreBreakdown from '../components/ScoreBreakdown.vue'
+import type { AggIssueExample, AggReport, PersonaTaskRow, PriorityRow, RunMeta, ScoreBreakdown as ScoreBreakdownT } from '../types'
 
 const { t } = useI18n()
 const { state: app } = useApp()
@@ -259,7 +267,21 @@ const props = defineProps<{
   report: AggReport | null | undefined
   meta?: RunMeta | null
   personaTasks?: PersonaTaskRow[]
+  /** results_api._report_score — the computed score when the run has a
+   *  breakdown, else the one it was delivered with. undefined = a backend that
+   *  predates the field, so fall back to the narrative's own. */
+  score?: number | null
+  scoreBreakdown?: ScoreBreakdownT | null
 }>()
+
+// The headline must be the number the breakdown below adds up to. It used to
+// be narrative.overall_ux_score, which the reporter forces to the computed
+// score only when the aggregate LLM call succeeds — a failed call left the
+// dashboard at "—" over a report headed by the computed score.
+const overallScore = computed<number | null>(() =>
+  props.score !== undefined ? uxScore(props.score) : uxScore(narrative.value?.overall_ux_score),
+)
+const breakdown = computed(() => props.scoreBreakdown ?? null)
 
 // §6.1 scope. Null for runs made before it was recorded — say so rather than
 // print a guess about which model produced the findings.
@@ -368,6 +390,8 @@ const diagnostics = computed(() => {
 // accessibility/assessments -> prioritization -> validation -> appendix.
 const sections = computed(() => [
   { id: 'summary', label: t('rep.toc.summary') },
+  // Only when there is a breakdown to jump to (legacy runs have none).
+  ...(breakdown.value ? [{ id: 'score', label: t('rep.toc.score') }] : []),
   { id: 'scope', label: t('rep.toc.scope') },
   { id: 'methodology', label: t('rep.toc.methodology') },
   { id: 'personas', label: t('rep.toc.personas') },
@@ -387,7 +411,7 @@ function scrollTo(id: string) {
   document.getElementById(anchor(id))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function fmtScore(v: number | undefined) { return typeof v === 'number' ? v.toFixed(1) : '—' }
+function fmtScore(v: number | null | undefined) { return typeof v === 'number' ? v.toFixed(1) : '—' }
 </script>
 
 <style scoped lang="scss">

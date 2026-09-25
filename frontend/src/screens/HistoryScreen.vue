@@ -24,7 +24,12 @@
           <span v-else class="failed" :class="{ neutral: r.status === 'cancelled' }">{{ statusLabel(r.status) }}</span>
         </div>
         <div><span v-if="r.status === 'complete'" class="crit mono" :style="{ color: r.critical > 0 ? '#d83a34' : '#1f9d57' }">{{ r.critical }}</span></div>
-        <div><span v-if="r.status === 'complete'" class="score mono" :style="{ color: scoreColor(r.score) }">{{ r.score.toFixed(1) }}</span></div>
+        <div>
+          <template v-if="r.status === 'complete'">
+            <span v-if="uxScore(r.score) !== null" class="score mono" :style="{ color: scoreColor(uxScore(r.score)!) }">{{ uxScore(r.score)!.toFixed(1) }}</span>
+            <span v-else class="score none mono" :title="t('hist.noScore')">—</span>
+          </template>
+        </div>
       </button>
     </div>
 
@@ -63,7 +68,9 @@
 import { onMounted, ref } from 'vue'
 import { useHistory } from '../composables/useHistory'
 import { useApp } from '../composables/useApp'
-import { scoreColor } from '../theme'
+// uxScore: the row's score is the report's own (results_api._report_score) and
+// null when the run has none — it used to print a red 0.0 for those.
+import { scoreColor, uxScore } from '../theme'
 import { useI18n } from '../i18n'
 import type { RunHistoryRow } from '../types'
 
@@ -135,6 +142,7 @@ function dots(r: RunHistoryRow): string[] {
 .failed.neutral { color: var(--muted-2); }
 .crit { font: 700 13px var(--mono); }
 .score { font: 700 15px var(--mono); }
+.score.none { color: var(--faint); cursor: help; }
 
 /* failed run modal */
 .modal-veil { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; }
