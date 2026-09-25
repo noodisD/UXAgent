@@ -80,6 +80,9 @@ def _gate_reason(finding: dict) -> str:
     if finding.get("unresponsive_control"):
         return ("element nie zareagował na automatyczne kliknięcia — nie wiadomo, "
                 "czy to wada strony, czy ograniczenie narzędzia")
+    if finding.get("quoted_not_on_page"):
+        return ("cytowany tekst pochodzi z automatycznego opisu strony, a nie ze "
+                "strony — żadna strona tej sesji go nie zawiera")
     if finding.get("harness_suspect"):
         return "prawdopodobna awaria narzędzia, nie strony"
     if finding.get("off_site"):
@@ -117,6 +120,11 @@ def _human_check(finding: dict) -> str:
                 "się zmienia. Jeśli nie — to rzeczywista wada strony.")
     if finding.get("off_site"):
         return "Dotyczy innej domeny niż badana — zwykle do pominięcia."
+    quotes = [q for q in (finding.get("quoted_not_on_page") or []) if q][:2]
+    if quotes:
+        cited = " i ".join(f"„{q}”" for q in quotes)
+        return (f"Sprawdź, czy strona rzeczywiście pokazuje {cited} — w zapisanych "
+                "stronach tego tekstu nie ma. Jeśli nie pokazuje, pomiń ustalenie.")
     if finding.get("harness_suspect"):
         return "Powtórz tę interakcję ręcznie i sprawdź, czy strona reaguje."
     if finding.get("claim_verdict") in ("unsupported", "partial"):

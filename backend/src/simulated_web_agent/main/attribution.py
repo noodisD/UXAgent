@@ -13,9 +13,11 @@ This module flags findings whose cited step coincides with a harness
 interaction failure, so they can be excluded from the headline severity counts
 and rendered as "needs verification" rather than shipped as confirmed defects.
 """
+import html as _html
 import logging
 import re
 
+from .evidence import _QUOTED, _visible_text
 from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger(__name__)
@@ -351,6 +353,77 @@ def _claims_content_absent(finding: dict) -> bool:
     return any(m in text for m in _ABSENCE_MARKERS)
 
 
+# Text a finding quotes that the persona was shown but the site never showed.
+#
+# The persona does not read the page: a model transcribes each page's HTML into
+# the observation it acts on, and that transcription drifts. In the 2026-09-25
+# hyundai replay it rendered the Polish menu in Spanish, and the report carried
+# a verified serious finding, "Serwis wyświetla treści w języku hiszpańskim",
+# quoting "Todos SUV Eléctrico Híbrido…" — words on no page of the session.
+# Two more of the same kind in the archive: "angielskie etykiety, takie jak
+# 'Close button' i 'Year of production'", and a search "showing 'No results'"
+# on a page that said "Brak wyników". perceive.txt now asks for the page's own
+# words, which makes this rare; this check catches what still gets through.
+#
+# The quote must be absent from every page of the session — visible text and
+# the attributes a person perceives as text — and present in the observation,
+# so the rule only ever blames the transcription it can prove was wrong.
+# Measured on the archive: 3 of 34 findings with quotes, all three the cases
+# above. Two near misses shaped it: "Zamknij" and "Pasek zadań" are real, as
+# title and aria-label; "Twój Hyundai TUCSONMODERN PLUS" is real too, with the
+# observation running two elements together, hence whitespace is ignored.
+_TEXT_ATTR_RE = re.compile(
+    r'\b(?:title|aria-label|alt|placeholder|value|aria-placeholder|label)\s*=\s*"([^"]*)"',
+    re.I)
+_TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)+\s*$")
+
+
+def _squeeze(text: str) -> str:
+    return re.sub(r"\s+", "", text or "").lower()
+
+
+def session_page_text(store: TraceStore) -> str:
+    """Everything the site showed a visitor over the session, whitespace removed."""
+    parts: list[str] = []
+    for sub in ("simp_html", "raw_html"):
+        for path in sorted((store.trace_dir / sub).glob("*.html")):
+            try:
+                markup = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            parts.append(_visible_text(markup))
+            parts.extend(_TEXT_ATTR_RE.findall(markup))
+    return _squeeze(_html.unescape(" ".join(parts)))
+
+
+def session_observation_text(store: TraceStore) -> str:
+    """What the persona was shown, over the session, whitespace removed."""
+    parts: list[str] = []
+    for path in sorted((store.trace_dir / "observation_trace").glob("observation_trace_*.txt")):
+        try:
+            parts.append(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return _squeeze(" ".join(parts))
+
+
+def quoted_only_in_observation(finding: dict, page_text: str, observation_text: str) -> list[str]:
+    """The finding's quotes that the persona saw and no page of the session had."""
+    if not page_text or not observation_text:
+        return []
+    text = " ".join(str(finding.get(k) or "") for k in ("evidence", "description", "issue"))
+    out = []
+    for q in _QUOTED.findall(text):
+        q = _TRAILING_ELLIPSIS_RE.sub("", q.strip()).strip(" .,:;")
+        # A URL or path is not page text; the site shows it in the address bar.
+        if len(q) < 4 or q.startswith(("/", "http", "www.")):
+            continue
+        key = _squeeze(q)
+        if key not in page_text and key in observation_text and q not in out:
+            out.append(q)
+    return out
+
+
 # Quoted element names inside a finding's evidence — 'Następny krok',
 # "Pokaż 10 produktów". Distinctive enough to match the same claim restated in
 # free text, short enough not to need fuzzy matching.
@@ -517,6 +590,8 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     # contradicted by the agent's own navigation.
     search_contradicted = _search_ran(store)
     retried = _retried_controls(store)
+    page_text = session_page_text(store)
+    observation_text = session_observation_text(store)
 
     def _is_suspect(f: dict) -> bool:
         step = f.get("step")
@@ -543,9 +618,12 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         if not isinstance(f, dict):
             continue
         control = _unresponsive_control(f, retried)
-        suspected = _is_suspect(f) or control is not None
+        misquoted = quoted_only_in_observation(f, page_text, observation_text)
+        suspected = _is_suspect(f) or control is not None or bool(misquoted)
         # Named so the report can say exactly what a person should click.
         f["unresponsive_control"] = control
+        # And which quoted words to look for on the page.
+        f["quoted_not_on_page"] = misquoted
         f["harness_suspect"] = suspected
         # Two keys, not one, and they are not synonyms even though this writer
         # sets both from the same bool:
