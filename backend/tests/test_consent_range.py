@@ -53,10 +53,7 @@ def test_the_hook_records_a_notice_that_went_away():
 
 def test_a_crashed_session_still_saves_its_consent_states():
     src = inspect.getsource(experiment)
-    start = src.index("
-    except Exception as exc:
-")  # the session-level handler
-    crash = src[start:src.index("
-    finally:", start)]
+    start = src.index("\n    except Exception as exc:\n")  # the session-level handler
+    crash = src[start:src.index("\n    finally:", start)]
     assert "write_session_result" in crash, "the session's own error path"
     assert "write_consent_states" in crash
