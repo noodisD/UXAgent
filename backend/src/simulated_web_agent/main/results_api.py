@@ -292,13 +292,19 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
     }
 
 
-def _pagespeed_perf(run_dir: Path) -> int | None:
+def _pagespeed_perf(run_dir: Path) -> tuple[int | None, str | None]:
+    """The PageSpeed score the tile shows, and for which device.
+
+    Mobile first, the one the score counts (scoring._performance_line). It used
+    to prefer desktop, so the tile showed 38/100 for a run whose score had set
+    PageSpeed aside because the mobile measurement failed.
+    """
     ps = _read_json(run_dir / "pagespeed.json", {}) or {}
-    for key in ("desktop", "mobile"):
+    for key in ("mobile", "desktop"):
         score = (ps.get(key) or {}).get("performance_score")
         if score is not None:
-            return score
-    return None
+            return score, key
+    return None, None
 
 
 def _first_persona_site_context(run_dir: Path) -> str:
@@ -471,6 +477,7 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
 
     personas = [build_persona(d, q_prompts) for d in _persona_dirs(run_dir)]
 
+    ps_score, ps_device = _pagespeed_perf(run_dir)
     meta = {
         "site": manifest.get("site", ""),
         "startUrl": manifest.get("start_url", ""),
@@ -489,7 +496,8 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
         # so fall back to reading it off the first persona when absent.
         "siteContext": manifest.get("site_context") or _first_persona_site_context(run_dir),
         "pagespeed": {
-            "performance": _pagespeed_perf(run_dir),
+            "performance": ps_score,
+            "device": ps_device,
             "accessibility": None,
             "bestPractices": None,
             "seo": None,

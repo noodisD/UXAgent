@@ -493,7 +493,7 @@ const scoreCards = computed(() => [
   { label: t('ov.card.findings'), value: String(counts.value.total), unit: '',
     sub: counts.value.held ? t('ov.card.findings.held', { crit: counts.value.critical, held: counts.value.held }) : t('ov.card.findings.sub', { crit: counts.value.critical }),
     color: '#1c2024' },
-  { label: t('ov.card.pagespeed'), value: psPerf.value === null ? '—' : String(psPerf.value), unit: psPerf.value === null ? '' : '/100', sub: t('ov.card.pagespeed.sub'), color: psColor.value },
+  { label: t('ov.card.pagespeed'), value: psPerf.value === null ? '—' : String(psPerf.value), unit: psPerf.value === null ? '' : '/100', sub: t('ov.card.pagespeed.sub') + (meta.value?.pagespeed?.device ? ' · ' + meta.value.pagespeed.device : ''), color: psColor.value },
 ])
 
 const sevBars = computed(() => {

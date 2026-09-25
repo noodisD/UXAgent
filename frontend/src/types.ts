@@ -173,7 +173,9 @@ export type RunMeta = {
   personaCount: number
   maxSteps: number | null
   status: string
-  pagespeed: { performance: number | null; accessibility: number | null; bestPractices: number | null; seo: number | null }
+  pagespeed: { performance: number | null; accessibility: number | null; bestPractices: number | null; seo: number | null
+    /** Which device `performance` is for: mobile first, as the score counts it. */
+    device?: 'mobile' | 'desktop' | null }
   scope?: RunScope | null
   /** Declared site purpose the judgements were calibrated against. */
   siteContext?: string | null

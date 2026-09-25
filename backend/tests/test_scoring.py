@@ -207,3 +207,12 @@ def test_the_printed_arithmetic_rounds_the_way_a_reader_would():
              "heuristic": {}, "accessibility": {}}
     res = scoring.compute_ux_score(stats)
     assert res["raw"] == 4.25 and res["score"] == 4.3
+
+
+def test_a_failed_mobile_measurement_says_the_desktop_one_is_not_counted():
+    """"Pomiar nie powiódł się" sat beside a measured desktop card (38/100)."""
+    from simulated_web_agent.main import scoring
+    ps = {"mobile": {"error": "The read operation timed out"}, "desktop": {"performance_score": 38}}
+    res = scoring.compute_ux_score({"heuristic": {}}, pagespeed=ps)
+    reason = [n for n in res["not_counted"] if n["label"] == "Wydajność strony"][0]["reason"]
+    assert "mobilny" in reason and "38/100" in reason and "tylko wynik mobilny" in reason

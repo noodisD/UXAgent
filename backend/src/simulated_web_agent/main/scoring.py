@@ -295,10 +295,13 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
                   "jej do oceny liczyłoby tę samą opinię dwa razy",
     })
     if not _performance_line(pagespeed) and ((pagespeed or {}).get("mobile") or {}).get("error"):
-        not_counted.append({
-            "label": "Wydajność strony",
-            "reason": "pomiar PageSpeed nie powiódł się — błąd pomiaru nie jest wadą strony",
-        })
+        # "Failed" alone sat beside a measured desktop card in three runs.
+        desktop = ((pagespeed or {}).get("desktop") or {}).get("performance_score")
+        reason = "pomiar mobilny PageSpeed nie powiódł się — błąd pomiaru nie jest wadą strony"
+        if isinstance(desktop, (int, float)):
+            reason += (f"; wynik desktopowy ({desktop:g}/100) jest pokazany w raporcie, "
+                       "ale ocena liczy tylko wynik mobilny")
+        not_counted.append({"label": "Wydajność strony", "reason": reason})
 
     return {
         "score": score,
