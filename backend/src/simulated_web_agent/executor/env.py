@@ -1236,7 +1236,9 @@ class WebAgentEnv:
             await env.mouse_click(200, 100)
         """
 
-        await self.page.mouse.click(x = at_x, y = at_y)
+        # For the evidence hook; see scroll().
+        async with ElementHighlight(sleep=0.3):
+            await self.page.mouse.click(x = at_x, y = at_y)
 
         self.logger.info(f"Performed a raw click at [{at_x}, {at_y}]")
 
@@ -1379,7 +1381,9 @@ class WebAgentEnv:
         Example:
             await env.raw_type("Best star wars movies")
         """
-        await self.page.keyboard.type(text, delay=50)
+        # For the evidence hook; see scroll().
+        async with ElementHighlight(sleep=0.3):
+            await self.page.keyboard.type(text, delay=50)
 
         self.logger.info(f"Typed '{text}' into the page as raw keyboard input")
 
@@ -1401,8 +1405,14 @@ class WebAgentEnv:
             "right": "ArrowRight",
         }[direction]
 
-        for _ in range(amount*3): # one mouse scroll event ~= 3 arrow keys
-            await self.page.keyboard.press(scroll_button, delay=50)
+        # Inside ElementHighlight for the evidence hook, like every other action:
+        # scroll bypassed it, so none of the 71 scroll steps archived by
+        # 2026-09-24 had a screenshot, a scroll position or a consent check, and
+        # a session whose first action was a scroll had no frame for the
+        # first-impression pass to judge.
+        async with ElementHighlight(sleep=0.3):
+            for _ in range(amount*3): # one mouse scroll event ~= 3 arrow keys
+                await self.page.keyboard.press(scroll_button, delay=50)
 
         self.logger.info(f"Scrolled the page {direction} by {amount} times")
 
