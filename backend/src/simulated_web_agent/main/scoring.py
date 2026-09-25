@@ -59,6 +59,24 @@ _SEVERITY_PL = {"krytyczny": "krytyczny", "poważny": "poważny", "drobny": "dro
 _CONFIDENCE_PL = {"high": "wysoka", "medium": "średnia", "low": "niska"}
 
 
+def accessibility_severity(finding: dict, images: dict | None) -> tuple[str, str]:
+    """The severity every format shows for an accessibility finding, and the
+    measurement behind a demotion ("" when there is none).
+
+    One place, because three renderers applied the rule separately and one of
+    them did not: the Word file printed alt text "poważny" where the HTML, the
+    PDF and the score all said "drobny" for 9-10% of images unnamed.
+    """
+    sev = (finding or {}).get("severity") or "drobny"
+    images = images or {}
+    share = images.get("share_unnamed")
+    if ((finding or {}).get("topic") == "alt_text" and isinstance(share, (int, float))
+            and share < RULES["alt_text_systemic_share"]):
+        return "drobny", (f"Zmierzono: {images.get('unnamed')} z {images.get('total')} "
+                          f"obrazów bez tekstu alternatywnego ({round(100 * share)}%).")
+    return sev, ""
+
+
 def _reach(affected: int, participants: int) -> tuple[float, float]:
     share = (affected / participants) if participants else 1.0
     share = max(0.0, min(1.0, share))
@@ -159,13 +177,11 @@ def _accessibility_lines(stats: dict) -> list[dict]:
     for f in a11y.get("findings") or []:
         if not isinstance(f, dict) or not f.get("verified"):
             continue
-        sev = f.get("severity") or "drobny"
+        sev, measured = accessibility_severity(f, images)
         note = ""
-        if (f.get("topic") == "alt_text" and share is not None
-                and share < RULES["alt_text_systemic_share"]):
-            sev, note = "drobny", (f"; zmierzono {images.get('unnamed')} z "
-                                   f"{images.get('total')} obrazów bez opisu "
-                                   f"({round(100 * share)}%) — liczone jako drobny")
+        if measured:
+            note = (f"; zmierzono {images.get('unnamed')} z {images.get('total')} "
+                    f"obrazów bez opisu ({round(100 * share)}%) — liczone jako drobny")
         base = RULES["accessibility"].get(sev, RULES["accessibility"]["drobny"])
         lines.append({
             "kind": "accessibility",

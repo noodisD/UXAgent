@@ -1418,27 +1418,20 @@ def _render_accessibility_detail(stats: dict) -> str:
     The section rendered a single number; the pass produces categorised
     findings with the page they were seen on and a recommendation.
     """
-    from .reporter import _ALT_TEXT_SYSTEMIC_SHARE
+    from .scoring import accessibility_severity
 
     a11y = stats.get("accessibility") or {}
     findings = a11y.get("findings") or []
     if not findings:
         return ""
     images = (a11y.get("measured") or {}).get("images") or {}
-    share = images.get("share_unnamed")
     rows = ""
     for f in findings[:12]:
-        sev = f.get("severity", "drobny")
-        measured = ""
         # The same rule the issue cards and the score apply. The review found
         # alt text "poważny" here and "drobny" in the issue list — one finding,
         # two severities, depending on where the reader looked.
-        if (f.get("topic") == "alt_text" and share is not None
-                and share < _ALT_TEXT_SYSTEMIC_SHARE):
-            sev = "drobny"
-            measured = (f'<div class="measured">Zmierzono: {images.get("unnamed")} z '
-                        f'{images.get("total")} obrazów bez tekstu alternatywnego '
-                        f'({round(100 * share)}%).</div>')
+        sev, measured_text = accessibility_severity(f, images)
+        measured = f'<div class="measured">{_esc(measured_text)}</div>' if measured_text else ""
         bg, fg, border = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
         where = ", ".join(f.get("urls") or [])[:160]
         who = ", ".join(f.get("personas") or [])

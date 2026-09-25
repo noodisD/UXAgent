@@ -367,11 +367,19 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         doc.add_heading("Dostępność", level=1)
         if acc.get("avg_score") is not None:
             doc.add_paragraph(f"Średnia ocena dostępności: {acc['avg_score']}/5")
+        from .scoring import accessibility_severity
+
+        images = (acc.get("measured") or {}).get("images") or {}
         for f in (acc.get("findings") or [])[:12]:
             doc.add_heading(f.get("category", ""), level=2)
-            _add_caption(doc, str(f.get("severity", "")))
+            # The HTML's severity, not the raw one: this file printed alt text
+            # "poważny" where the HTML, the PDF and the score said "drobny".
+            sev, measured = accessibility_severity(f, images)
+            _add_caption(doc, sev)
             if f.get("detail"):
                 doc.add_paragraph(str(f["detail"]))
+            if measured:
+                doc.add_paragraph(measured)
             if f.get("recommendation"):
                 p = doc.add_paragraph()
                 p.add_run("Rekomendacja: ").bold = True

@@ -30,7 +30,7 @@ from .severity import (
 )
 from .a11y_checks import a11y_topic, measure_names
 from .evidence import page_quote, pages_contain, rendering_artifact
-from .scoring import breakdown_text, compute_ux_score
+from .scoring import RULES as SCORING_RULES, breakdown_text, compute_ux_score
 from .attribution import restates_a_gated_finding
 from .redaction import clean as _redact, mentions_harness_fault
 from .trace_store import TraceStore
@@ -1727,8 +1727,9 @@ def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
 # inside links that already carried their text — while every car was named by
 # its model, and the report still called missing alt text a serious problem
 # "on 13 of 13 pages". Applied to alt text only: for controls a single unnamed
-# submit button on a booking form is a genuine barrier at any share.
-_ALT_TEXT_SYSTEMIC_SHARE = 0.2
+# submit button on a booking form is a genuine barrier at any share. The
+# scoring rule is the one definition; this name stays for the narrative check.
+_ALT_TEXT_SYSTEMIC_SHARE = SCORING_RULES["alt_text_systemic_share"]
 
 
 def _is_wcag_issue(issue: dict) -> bool:
