@@ -1406,6 +1406,12 @@ def _audit_failures(stores: list) -> list[dict]:
     return out
 
 
+def _group_counts(stats: dict) -> Counter:
+    """Confirmed issue groups by worst severity (the prioritization rows)."""
+    return Counter(r.get("severity") for r in (stats.get("prioritization") or [])
+                   if isinstance(r, dict))
+
+
 def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
                                  sources: dict | None = None) -> str:
     """Task-completion summary for the aggregate narrator, labelled by source.
@@ -1605,9 +1611,13 @@ async def generate_aggregated_report(
         scroll_summary=scroll_text,
         link_summary=link_text,
         form_summary=form_text,
-        critical_count=sc.get("krytyczny", 0),
-        serious_count=sc.get("poważny", 0),
-        minor_count=sc.get("drobny", 0),
+        # One per confirmed heuristic group or root cause, at its worst
+        # severity — the unit the cards and the score count, and what the
+        # prompt says these numbers are. severity_counts counts findings: H1
+        # filed by two personas was "Serious: 2" above one serious row.
+        critical_count=_group_counts(stats).get("krytyczny", 0),
+        serious_count=_group_counts(stats).get("poważny", 0),
+        minor_count=_group_counts(stats).get("drobny", 0),
         top_issues=top_issues,
         survey_summary=survey_summary,
         computed_score=f"{score_result['score']:.1f}",
@@ -2130,9 +2140,13 @@ def _render_aggregated_md(agg: dict) -> str:
     # Statistics table
     h(2, "Statystyki zbiorcze")
     heur = stats.get("heuristic", {})
-    sc = heur.get("severity_counts", {})
-    p(f"Łączna liczba problemów: **{heur.get('total_findings', 0)}** "
-      f"({sc.get('krytyczny', 0)} kryt. / {sc.get('poważny', 0)} poważnych / {sc.get('drobny', 0)} drobnych)")
+    # The issues listed above, as the HTML header counts them; the findings
+    # behind them are a different unit and are named as such.
+    from .reporter_html import _issue_counts
+    ic = _issue_counts(narr)
+    p(f"Łączna liczba problemów: **{ic['total']}** "
+      f"({ic['critical']} kryt. / {ic['serious']} poważnych / {ic['minor']} drobnych), "
+      f"z {heur.get('total_findings', 0)} potwierdzonych zgłoszeń uczestników")
 
     fi_avg = (stats.get("first_impression") or {}).get("avg_score")
     if fi_avg is not None:
