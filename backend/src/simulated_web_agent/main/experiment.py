@@ -325,6 +325,14 @@ _CONSENT_PRESENT_JS = """
 """
 
 
+def _consent_unresolved(states: dict) -> bool:
+    """Is the most recent recorded consent state a notice left on screen?"""
+    if not states:
+        return False
+    last = states[max(states)]
+    return bool(isinstance(last, dict) and last.get("attempted") and not last.get("dismissed"))
+
+
 async def consent_present(page) -> bool:
     """Is an acceptance control for a consent notice currently on screen?
 
@@ -616,6 +624,12 @@ async def _run_for_persona_and_intent(
         if await consent_present(env.page):
             state = await dismiss_cookie_banners(env.page)
             consent_states[steps_taken] = state
+        elif _consent_unresolved(consent_states):
+            # The notice that could not be dismissed is no longer on screen —
+            # the persona accepted it, or navigation removed it. Recorded so
+            # attribution can stop treating later steps as blocked.
+            consent_states[steps_taken] = {"attempted": False, "dismissed": False,
+                                           "present": False, "selector": None}
         await env.page.screenshot(path=store.screenshot_path(steps_taken, full_page=True), full_page=True)
         await env.page.screenshot(path=store.screenshot_path(steps_taken))
         scroll_data = await env.page.evaluate(
@@ -930,6 +944,13 @@ async def _run_for_persona_and_intent(
                 # attempted, hiding the one word that explained why it failed.
                 "error": _exception_summary(exc)[:500],
             })
+        except Exception:
+            pass
+        # Also on this path: written only at a normal end, a session that
+        # crashed under a consent overlay it could not dismiss left no record
+        # of it, so its findings passed the consent gate.
+        try:
+            store.write_consent_states(consent_states)
         except Exception:
             pass
     finally:

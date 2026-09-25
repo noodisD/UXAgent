@@ -203,10 +203,23 @@ def harness_suspect_steps(store: TraceStore) -> set[int]:
         unresolved = store.unresolved_consent_steps()
     except Exception:
         unresolved = set()
+    # From the blocked step to the first later one recorded as dismissed or
+    # gone — that step included, since the persona perceives the aftermath
+    # there. It used to run to the end regardless, so one failed dismissal, or
+    # a banner the persona then accepted itself, gated every later finding.
+    # With no such record (every archived session: "gone" was never written)
+    # it still runs to the end: consent_present does not recognise every
+    # notice the landing dismissal tries, so a missing record is no proof the
+    # notice went away.
     if unresolved:
+        states = store.read_consent_states() or {}
         n_steps = len(actions)
         for start in sorted(unresolved):
-            suspect.update(range(start, n_steps))
+            end = next((k for k in sorted(states)
+                        if k > start and isinstance(states[k], dict)
+                        and (states[k].get("dismissed") or states[k].get("present") is False)),
+                       None)
+            suspect.update(range(start, n_steps if end is None else min(end + 1, n_steps)))
 
     # (6) Bot-detection challenge pages. Anything the auditor concludes from a
     # screen that exists because we are automated is about us, not the site.
