@@ -394,9 +394,15 @@ class TraceStore:
                     # window.scrollY stays 0 whatever the participant does. This
                     # used to divide by max(…, 1) and report 0%, which reads as
                     # "measured: nobody scrolled". It is "not measurable".
+                    # "No taller" means less than a tenth of a window taller:
+                    # the configurator's panel routes are 912-922 px in a 900 px
+                    # window, so a 22 px nudge read as "100%" and resting at the
+                    # top as "0% … rzadko przewijali". 81 of 183 archived
+                    # readings were on such pages.
                     room = page_height - viewport_height
+                    min_room = max(5.0, 0.1 * viewport_height)
                     depth_pct = (round(min(100.0, scroll_top / room * 100), 1)
-                                 if room > 5 else None)
+                                 if room >= min_room else None)
                 except (json.JSONDecodeError, ValueError):
                     # Legacy format: plain number
                     scroll_top = float(text)

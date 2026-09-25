@@ -44,6 +44,15 @@ def test_a_page_that_cannot_scroll_is_not_measurable_rather_than_zero(tmp_path):
     assert summary["steps_measured"] == 0
 
 
+def test_a_page_a_few_pixels_taller_than_the_window_is_not_measurable(tmp_path):
+    """The configurator's panel routes: 912-922 px in a 900 px window. A 22 px
+    nudge read as "100%", resting at the top as "0% — rzadko przewijali"."""
+    store = _session(tmp_path, [(0, 3000, 900), (22, 922, 900), (0, 912, 900)])
+    summary = run_scroll_analysis(store)
+    assert summary["max_depth_pct"] is None
+    assert summary["steps_unmeasurable"] == 2
+
+
 def test_ordinary_scrolling_is_measured_as_before(tmp_path):
     store = _session(tmp_path, [(0, 3000, 900), (1050, 3000, 900), (2100, 3000, 900)])
     summary = run_scroll_analysis(store)
