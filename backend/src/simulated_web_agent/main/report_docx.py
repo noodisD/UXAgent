@@ -158,7 +158,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     doc.add_heading("Heurystyki Nielsena — zakres oceny", level=1)
     doc.add_paragraph(
         "Ocena opiera się na dziesięciu heurystykach użyteczności Nielsena. "
-        "Każdy problem w raporcie jest przypisany do jednej z nich (H1–H10)."
+        "Każdy problem użyteczności w raporcie jest przypisany do jednej z nich (H1–H10); "
+        "bariery dostępności i wydajności są opisane osobno."
     )
     table = doc.add_table(rows=1, cols=3)
     table.style = "Light Grid Accent 1"
@@ -300,12 +301,17 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
 
     # ── Held for a human ─────────────────────────────────────────────────
     held_items = (stats.get("heuristic") or {}).get("needs_verification_items") or []
-    if held_items:
+    from .reporter_html import _unconfirmed_note
+    unconfirmed = _unconfirmed_note(narr)
+    if held_items or unconfirmed:
         doc.add_heading("Do weryfikacji przez człowieka", level=1)
-        doc.add_paragraph(
-            f"{len(held_items)} wniosków nie trafiło do ocen i liczników, bo zapis sesji "
-            "nie pozwala ich potwierdzić. Nie znaczy to, że są fałszywe — każdy wymaga "
-            "krótkiej weryfikacji, opisanej poniżej.")
+        if held_items:
+            doc.add_paragraph(
+                f"{len(held_items)} wniosków nie trafiło do ocen i liczników, bo zapis sesji "
+                "nie pozwala ich potwierdzić. Nie znaczy to, że są fałszywe — każdy wymaga "
+                "krótkiej weryfikacji, opisanej poniżej.")
+        if unconfirmed:
+            doc.add_paragraph(unconfirmed)
         for it in held_items:
             h_id = it.get("heuristic_id")
             title = (f"H{h_id}: {it.get('heuristic_name', '')}" if isinstance(h_id, int) and h_id

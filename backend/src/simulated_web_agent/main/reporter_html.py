@@ -597,6 +597,8 @@ def _render_issues_group(title: str, issues: list) -> str:
                 f'{measured["images_total"]} obrazów bez tekstu alternatywnego '
                 f'({pct}%).</div>'
             )
+        elif measured.get("basis"):
+            measured_html = f'<div class="measured">Zmierzono: {_esc(measured["basis"])}.</div>'
         demotion_html = ""
         reason = issue.get("demotion_reason")
         if reason:
@@ -1331,7 +1333,18 @@ def _render_score_breakdown(stats: dict) -> str:
     return _section("Jak obliczono ocenę", body)
 
 
-def _render_verification_list(stats: dict) -> str:
+def _unconfirmed_note(narr: dict | None) -> str:
+    """The narrator's issues that no confirmed finding supports, named, not counted."""
+    items = [i for i in ((narr or {}).get("unconfirmed_issues") or []) if isinstance(i, dict)]
+    if not items:
+        return ""
+    names = "; ".join(f"H{i.get('heuristic_id')}: {i.get('heuristic_name', '')}" for i in items)
+    return (f"Pominięto też {len(items)} problem(y) z podsumowania, dla których żadne "
+            f"ustalenie nie zostało potwierdzone — {names}. Ich źródłowe wnioski są "
+            "na liście poniżej albo nie przeszły weryfikacji.")
+
+
+def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
     """Findings the verification gate held back, each with what would settle it.
 
     They used to be a count. A specialist cannot act on a count — she can act on
@@ -1341,7 +1354,8 @@ def _render_verification_list(stats: dict) -> str:
     not the same as false.
     """
     items = (stats.get("heuristic") or {}).get("needs_verification_items") or []
-    if not items:
+    note = _unconfirmed_note(narr)
+    if not items and not note:
         return ""
     cards = ""
     for it in items:
@@ -1364,8 +1378,11 @@ def _render_verification_list(stats: dict) -> str:
     intro = (f"{len(items)} wniosków nie trafiło do ocen i liczników, bo zapis sesji "
              "nie pozwala ich potwierdzić. Nie znaczy to, że są fałszywe — każdy "
              "wymaga krótkiej weryfikacji przez człowieka, opisanej poniżej.")
-    return _section("Do weryfikacji przez człowieka",
-                    f'<p class="sb-rules">{_esc(intro)}</p>{cards}')
+    if not items:
+        intro = ""
+    note_html = f'<p class="sb-rules">{_esc(note)}</p>' if note else ""
+    intro_html = f'<p class="sb-rules">{_esc(intro)}</p>' if intro else ""
+    return _section("Do weryfikacji przez człowieka", f'{intro_html}{note_html}{cards}')
 
 
 def _render_heuristic_legend(stats: dict) -> str:
@@ -1417,8 +1434,9 @@ def _render_heuristic_legend(stats: dict) -> str:
     intro = (
         "Ocena opiera się na dziesięciu heurystykach użyteczności Nielsena — "
         "uznanym zestawie reguł, według których ocenia się interfejsy. Każdy "
-        "problem w raporcie jest przypisany do jednej z nich i oznaczony jako "
-        "H1–H10. Poniżej pełna lista wraz z wynikiem dla badanego serwisu."
+        "problem użyteczności w raporcie jest przypisany do jednej z nich i "
+        "oznaczony jako H1–H10; bariery dostępności i wydajności są opisane "
+        "osobno. Poniżej pełna lista wraz z wynikiem dla badanego serwisu."
     )
     return _section(
         "Heurystyki Nielsena — zakres oceny",
@@ -1603,7 +1621,7 @@ def generate_html_report(agg: dict) -> str:
         # The key to "H1", "H3" — without it the issues below name a system the
         # reader has never been shown.
         _render_all_issues(narr) +
-        _render_verification_list(stats) +
+        _render_verification_list(stats, narr) +
         _render_recommendations(narr) +
         _render_pagespeed(ps) +
         _render_scroll_depth(scroll) +

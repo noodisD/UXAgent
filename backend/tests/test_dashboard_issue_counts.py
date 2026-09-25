@@ -13,7 +13,9 @@ REPORT = {
                   "critical_issues": [], "serious_issues": [],
                   "minor_issues": [{"heuristic_id": 8, "heuristic_name": "Design", "examples": []},
                                    {"heuristic_id": 4, "heuristic_name": "Spójność", "examples": []}]},
-    "statistics": {"heuristic": {"severity_counts": {"drobny": 2, "needs_verification": 6}}},
+    "statistics": {"heuristic": {"severity_counts": {"drobny": 2, "needs_verification": 6},
+                                 "by_heuristic": [{"heuristic_id": 8, "verified": True},
+                                                  {"heuristic_id": 4, "verified": True}]}},
 }
 
 

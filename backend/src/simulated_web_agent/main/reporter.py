@@ -1707,15 +1707,20 @@ def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
         if topic and topic not in by_topic:
             by_topic[topic] = entry
     images = (a11y.get("measured") or {}).get("images") or {}
+    perf_line = next((d for d in (stats.get("score_breakdown") or {}).get("deductions") or []
+                      if isinstance(d, dict) and d.get("kind") == "performance"), None)
 
     demoted: list = []
+    unconfirmed: list = []
     for key in ("critical_issues", "serious_issues", "minor_issues"):
         kept = []
         for issue in narrative.get(key) or []:
             if not isinstance(issue, dict):
                 kept.append(issue)
                 continue
-            group = by_h.get(issue.get("heuristic_id"))
+            # Normalised: the model writes the id as 1, "1" or null.
+            h_num = _heuristic_id(issue)
+            group = by_h.get(h_num) if h_num else by_h.get(issue.get("heuristic_id"))
             if group:
                 issue["examples"] = group.get("examples", [])
                 issue["verified"] = bool(group.get("verified"))
@@ -1735,6 +1740,26 @@ def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
                         "images_unnamed": images["unnamed"],
                         "share_unnamed": images.get("share_unnamed"),
                     }
+            elif h_num:
+                # A usability issue under a heuristic with no confirmed finding.
+                # The prompt tells the model such issues are discarded, and the
+                # methodology note tells the client unconfirmed conclusions were
+                # excluded — yet they were kept, unverified, and counted: in the
+                # 2026-09-17 hyundai run the only critical and the only serious
+                # issue were of this kind (header 1/1/4 over confirmed 0/0/2).
+                # Their underlying findings are already in the verification list;
+                # the issue itself is recorded and named there, not counted.
+                issue["examples"] = []
+                issue["verified"] = False
+                unconfirmed.append({**issue, "held_from": key})
+                continue
+            elif perf_line and _is_performance_issue(issue):
+                # A PageSpeed issue is proven by the measurement, not the trace;
+                # it was badged NIEZWERYFIKOWANE beside the score line deducting
+                # for the same number.
+                issue["examples"] = []
+                issue["verified"] = True
+                issue["measured"] = {"basis": perf_line.get("basis", "")}
             else:
                 issue["examples"] = []
                 issue["verified"] = False
@@ -1751,6 +1776,14 @@ def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
         narrative[key] = kept
     if demoted:
         narrative["minor_issues"] = (narrative.get("minor_issues") or []) + demoted
+    narrative["unconfirmed_issues"] = unconfirmed
+
+
+def _is_performance_issue(issue: dict) -> bool:
+    if _heuristic_id(issue):
+        return False
+    text = " ".join(str(issue.get(k) or "") for k in ("heuristic_name", "impact")).lower()
+    return "pagespeed" in text or "wydajno" in text
 
 
 # Below this share of unnamed images, "the images lack alt text" is not a
@@ -1764,7 +1797,11 @@ _ALT_TEXT_SYSTEMIC_SHARE = SCORING_RULES["alt_text_systemic_share"]
 
 
 def _is_wcag_issue(issue: dict) -> bool:
-    if issue.get("heuristic_id") is not None:
+    # Any id that is not a Nielsen heuristic 1-10, not only null: the prompt
+    # never says what an accessibility issue's id is, and in the 2026-09-25
+    # replay the model wrote "A11Y-1" — so the conversion-form barrier the scan
+    # had verified was badged NIEZWERYFIKOWANE, with its evidence left behind.
+    if _heuristic_id(issue):
         return False
     name = str(issue.get("heuristic_name") or "").lower()
     return "wcag" in name or "dostępn" in name
