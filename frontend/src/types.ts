@@ -343,6 +343,9 @@ export type RunDetail = {
   score?: number | null
   scoreBreakdown?: ScoreBreakdown | null
   survey?: RunSurvey | null
+  /** The issue counts the report itself prints, and how many it holds for a
+   *  human (results_api._report_issue_counts). null when there is no report. */
+  issueCounts?: { critical: number; serious: number; minor: number; total: number; needs_verification: number } | null
 }
 
 export type RunHistoryRow = {

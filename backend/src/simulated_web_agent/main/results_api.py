@@ -13,6 +13,7 @@ Layout produced by run.py:
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
@@ -427,6 +428,29 @@ def _run_survey(run_dir: Path, report: dict | None, q_meta: list[dict]) -> dict 
     }
 
 
+def _report_issue_counts(report: dict | None) -> dict | None:
+    """The issue counts the report itself prints, and how many it holds back.
+
+    The dashboard counted every per-persona finding, including those the gates
+    held back, so its overview said "Analiza wykazała 0/4/4" above a report
+    listing 0/0/2 (2026-09-24 hyundai; 8 of 9 archived runs disagreed). These
+    are the report's own numbers: its narrative resolved exactly as the HTML
+    and Word renderers resolve it — WCAG demotions included — then counted as
+    the header counts it. None when the run has no report.
+    """
+    if not isinstance(report, dict) or not (report.get("narrative") or report.get("statistics")):
+        return None
+    from .reporter import resolve_narrative
+    from .reporter_html import _issue_counts
+
+    # resolve_narrative writes into the narrative; the payload keeps the stored one.
+    counts = _issue_counts(resolve_narrative(copy.deepcopy(report)))
+    sc = _as_dict(_as_dict(_as_dict(report.get("statistics")).get("heuristic")).get("severity_counts"))
+    held = sc.get("needs_verification")
+    counts["needs_verification"] = int(held) if _is_number(held) else 0
+    return counts
+
+
 def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
     # Opening a run this instance did not execute (or executed before a
     # restart) fetches it from the bucket first; a no-op when local or when no
@@ -482,6 +506,8 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
         # the report takes them (see _report_score). Both None for runs that
         # predate what they need; the screens then print "—" and no breakdown.
         "score": _report_score(report),
+        # The report's own issue counts, for the overview (see _report_issue_counts).
+        "issueCounts": _report_issue_counts(report),
         "scoreBreakdown": _score_breakdown(report),
         # Survey averages and distributions without the not-assessable answers,
         # which are counted separately (see _run_survey).
@@ -589,10 +615,16 @@ def _build_comparison(
     now_ok, now_all = sum(1 for p in personas if p.get("outcome") == "success"), len(personas)
     prev_ok, prev_all = _successes(prev_dir)
 
-    now_crit = now_sc.get("krytyczny", 0)
-    prev_crit = prev_sc.get("krytyczny", 0)
-    now_total = sum(now_sc.values()) if now_sc else 0
-    prev_total = sum(prev_sc.values()) if prev_sc else 0
+    # What each report printed. severity_counts also holds needs_verification,
+    # so summing it made 2 confirmed issues against 2 read "8 vs 7 → worse".
+    def _crit_total(rep, sc):
+        c = _report_issue_counts(rep)
+        if c is not None:
+            return c["critical"], c["total"]
+        return sc.get("krytyczny", 0), sum(sc.get(k, 0) for k in ("krytyczny", "poważny", "drobny"))
+
+    now_crit, now_total = _crit_total(report, now_sc)
+    prev_crit, prev_total = _crit_total(prev_report, prev_sc)
 
     metrics = [
         {"label": "Overall score", "now": now_score if now_score is not None else "—",
@@ -825,6 +857,13 @@ def build_history_row(run_dir: Path) -> dict | None:
             # so these two views cannot drift apart.
             if h.get("severity") == "krytyczny" and not excluded_from_report(h):
                 critical += 1
+
+    # The report's own critical count where there is a report: counting
+    # confirmed per-persona findings still counted one defect once per persona
+    # who filed it, against a report that lists it once.
+    report_counts = _report_issue_counts(_read_json(run_dir / "aggregated_report.json", None))
+    if report_counts is not None:
+        critical = report_counts["critical"]
 
     status = manifest.get("status", "done")
     complete = status == "done"

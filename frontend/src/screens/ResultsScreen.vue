@@ -442,10 +442,13 @@ const succ = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 
 const part = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'partial').length)
 const fail = computed(() => personas.value.filter(p => outcomeOf(p.outcome) === 'failed').length)
 
-function fiAvg(p: PersonaResult): number {
+// null when the persona has no first impression (the pass failed, or an older
+// run): averaged as 0 it pulled the run's card down as if the page had scored 0/5.
+function fiAvg(p: PersonaResult): number | null {
   const vals = Object.values(p.firstImpression).filter((v): v is number => typeof v === 'number')
-  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
 }
+const mean = (vals: number[]) => vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
 
 // Why a finding is held back from the confirmed report (drives the chip). One
 // of the three gates: off-site page, claim unsupported by the trace, or a
@@ -456,20 +459,24 @@ function exclusionOf(h: any): 'offSite' | 'unsupported' | 'harness' | null {
   if (h?.harnessSuspect) return 'harness'
   return null
 }
-const avgFI = computed(() => personas.value.length ? personas.value.reduce((a, p) => a + fiAvg(p), 0) / n.value : 0)
-const avgA11y = computed(() => {
-  const vals = personas.value.map(p => p.accessibility.score).filter((v): v is number => typeof v === 'number')
-  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
-})
+const avgFI = computed(() => mean(personas.value.map(fiAvg).filter((v): v is number => v !== null)))
+const avgA11y = computed(() => mean(personas.value.map(p => p.accessibility.score).filter((v): v is number => typeof v === 'number')))
 
+// The report's own counts when there is a report (results_api._report_issue_counts):
+// counting every per-persona finding here said "Analiza wykazała 0/4/4" above
+// a report listing 0/0/2, the rest held back for a human. Without a report,
+// confirmed findings only, and the held ones counted apart.
 const counts = computed(() => {
-  let critical = 0, serious = 0, minor = 0
+  const rc = data.value?.issueCounts
+  if (rc) return { critical: rc.critical, serious: rc.serious, minor: rc.minor, total: rc.total, held: rc.needs_verification }
+  let critical = 0, serious = 0, minor = 0, held = 0
   personas.value.forEach(p => p.heuristics.forEach(h => {
-    if (h.severity === 'critical') critical++
+    if (exclusionOf(h)) held++
+    else if (h.severity === 'critical') critical++
     else if (h.severity === 'serious') serious++
     else minor++
   }))
-  return { critical, serious, minor, total: critical + serious + minor }
+  return { critical, serious, minor, total: critical + serious + minor, held }
 })
 
 const critCount = (p: PersonaResult) => p.heuristics.filter(h => h.severity === 'critical').length
@@ -480,9 +487,11 @@ const psColor = computed(() => psPerf.value !== null ? pageSpeedColor(psPerf.val
 const scoreCards = computed(() => [
   { label: t('ov.card.success'), value: `${succ.value}/${n.value}`, unit: '', sub: t('ov.card.success.sub', { part: part.value, fail: fail.value }),
     color: succ.value === n.value ? '#1f9d57' : fail.value > 0 ? '#d83a34' : '#cf8420' },
-  { label: t('ov.card.firstImpression'), value: avgFI.value.toFixed(1), unit: '/5', sub: t('ov.card.fi.sub'), color: scoreColor(avgFI.value) },
-  { label: t('ov.card.accessibility'), value: avgA11y.value.toFixed(1), unit: '/5', sub: t('ov.card.a11y.sub'), color: scoreColor(avgA11y.value) },
-  { label: t('ov.card.findings'), value: String(counts.value.total), unit: '', sub: t('ov.card.findings.sub', { crit: counts.value.critical }), color: '#1c2024' },
+  { label: t('ov.card.firstImpression'), value: avgFI.value === null ? '—' : avgFI.value.toFixed(1), unit: avgFI.value === null ? '' : '/5', sub: t('ov.card.fi.sub'), color: avgFI.value === null ? '#aeb4bd' : scoreColor(avgFI.value) },
+  { label: t('ov.card.accessibility'), value: avgA11y.value === null ? '—' : avgA11y.value.toFixed(1), unit: avgA11y.value === null ? '' : '/5', sub: t('ov.card.a11y.sub'), color: avgA11y.value === null ? '#aeb4bd' : scoreColor(avgA11y.value) },
+  { label: t('ov.card.findings'), value: String(counts.value.total), unit: '',
+    sub: counts.value.held ? t('ov.card.findings.held', { crit: counts.value.critical, held: counts.value.held }) : t('ov.card.findings.sub', { crit: counts.value.critical }),
+    color: '#1c2024' },
   { label: t('ov.card.pagespeed'), value: psPerf.value === null ? '—' : String(psPerf.value), unit: psPerf.value === null ? '' : '/100', sub: t('ov.card.pagespeed.sub'), color: psColor.value },
 ])
 
@@ -562,7 +571,8 @@ function exportCSV() {
   // browser has read the blob. One tick is enough for the navigation to start.
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
-const topFixes = computed(() => flatFindings.value.slice(0, 4).map(h => ({
+// Confirmed findings only: a held one is not a fix the report recommends.
+const topFixes = computed(() => flatFindings.value.filter(h => !exclusionOf(h)).slice(0, 4).map(h => ({
   label: sevLabel(h.severity), chipBg: SEV[h.severity].chipBg, chipFg: SEV[h.severity].chipFg, text: h.recommendation,
 })))
 
@@ -571,7 +581,7 @@ const verdict = computed(() => succ.value === n.value ? t('ov.verdict.all')
 const verdictBody = computed(() => t('ov.verdictBody', {
   succ: succ.value, n: n.value, part: part.value, fail: fail.value,
   crit: counts.value.critical, ser: counts.value.serious, min: counts.value.minor,
-}))
+}) + (counts.value.held ? t('ov.verdictHeld', { held: counts.value.held }) : ''))
 
 const detail = computed(() => personas.value[selPersona.value])
 const fiRows = computed(() => {
