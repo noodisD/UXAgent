@@ -601,6 +601,11 @@ def run_report_docx_endpoint(run_id: str):
     return resp
 
 
+# Inline styles and same-origin screenshots are all the report uses.
+REPORT_CSP = ("default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; "
+              "img-src 'self' data:; base-uri 'none'; form-action 'none'")
+
+
 @app.get("/runs/<run_id>/report.html")
 def run_report_html_endpoint(run_id: str):
     report = Path("runs") / run_id / "aggregated_report.html"
@@ -610,6 +615,11 @@ def run_report_html_endpoint(run_id: str):
     # the browser (the report is regenerated whenever styling or data changes).
     resp = send_file(report.resolve())
     resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    # The report quotes the site under test and the model's output, and it is
+    # opened on this origin with the API key in its URL (apiAssetUrl). It needs
+    # no script at all, so none may run: whatever text slips past escaping
+    # cannot read the key or call the API.
+    resp.headers["Content-Security-Policy"] = REPORT_CSP
     return resp
 
 

@@ -1778,8 +1778,27 @@ def resolve_narrative(agg: dict) -> dict:
     computed = (stats.get("score_breakdown") or {}).get("score")
     if computed is not None:
         narr["overall_ux_score"] = computed
+    _normalise_issue_severity(narr)
     _attach_issue_evidence(narr, stats)
     return narr
+
+
+_LIST_SEVERITY = {"critical_issues": "krytyczny", "serious_issues": "poważny",
+                  "minor_issues": "drobny"}
+
+
+def _normalise_issue_severity(narr: dict) -> None:
+    """Every issue's severity is one of the three labels.
+
+    It is the aggregate model's JSON and was never checked: an int crashed the
+    HTML and PDF build, a list raised in the issue card, and an unknown string
+    was printed as a label. The list an issue sits in is the model's own
+    severity call, so that is what a value outside the three falls back to.
+    """
+    for key, default in _LIST_SEVERITY.items():
+        for issue in narr.get(key) or []:
+            if isinstance(issue, dict) and issue.get("severity") not in _LIST_SEVERITY.values():
+                issue["severity"] = default
 
 
 def _narrative_from_stats(stats: dict) -> dict:

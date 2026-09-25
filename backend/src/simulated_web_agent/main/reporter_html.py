@@ -72,8 +72,12 @@ def _score_bar(score: float | None, max_score: float = 5.0) -> str:
 
 
 def _severity_chip(sev: str) -> str:
+    # The severity is the aggregate model's JSON, never type- or value-checked:
+    # an int crashed the whole HTML and PDF build, and an unknown string was
+    # printed raw, markup included.
+    sev = sev if isinstance(sev, str) else str(sev or "")
     bg, fg, _ = SEVERITY_COLORS.get(sev, ("#e2e3e5", "#383d41", "#6c757d"))
-    label = SEVERITY_LABELS.get(sev, sev.upper())
+    label = SEVERITY_LABELS.get(sev) or _esc(sev.upper())
     return f'<span class="chip" style="background:{bg};color:{fg};">{label}</span>'
 
 
@@ -855,7 +859,8 @@ def _render_recommendations(narr: dict) -> str:
         area = _esc(rec.get("area", ""))
         action = _esc(rec.get("action", ""))
         impact = _esc(rec.get("expected_impact", ""))
-        priority = rec.get("priority", "")
+        # Model output like the rest of the item, so escaped like it.
+        priority = _esc(rec.get("priority", ""))
         items += f"""
         <div class="rec-item">
           <div class="rec-num">{priority}</div>
