@@ -26,7 +26,7 @@ checked; only the abstain path still rests on the LLM, and it says so.
 """
 from __future__ import annotations
 
-from .attribution import harness_suspect_steps
+from .attribution import _FALLBACK_MARKERS, harness_suspect_steps
 from .trace_store import parse_action as _parse_action
 from .session_goal_state import observed_outcome
 from .site_scope import target_url_for
@@ -66,6 +66,33 @@ def _numeric_survey_avg(survey: dict) -> float | None:
     return round(sum(vals) / len(vals), 2) if vals else None
 
 
+_INJECTED_BACK_MARKERS = _FALLBACK_MARKERS + ("zamknięta regułami badania",)
+
+
+def _desc_has(action: dict, markers) -> bool:
+    desc = str((action or {}).get("description") or "").lower()
+    return any(m in desc for m in markers)
+
+
+def _injected_back(action: dict) -> bool:
+    return (action or {}).get("action") == "back" and _desc_has(action, _INJECTED_BACK_MARKERS)
+
+
+def _has_stuck_run(actions: list, length: int = 3) -> bool:
+    """Were `length` consecutive actions identical (scroll and refresh included)?"""
+    run, prev = 0, None
+    for a in actions:
+        if not isinstance(a, dict):
+            run, prev = 0, None
+            continue
+        key = (a.get("action"), a.get("target"), a.get("amount"), a.get("direction"))
+        run = run + 1 if key == prev else 1
+        prev = key
+        if run >= length:
+            return True
+    return False
+
+
 def compute_iso_metrics(store: TraceStore) -> dict:
     """Return effectiveness / efficiency / satisfaction signals for one run."""
     session = store.read_session_result() or {}
@@ -99,8 +126,15 @@ def compute_iso_metrics(store: TraceStore) -> dict:
     step_count = session.get("steps_taken")
     if step_count is None:
         step_count = len(actions)
-    backtracks = sum(1 for a in actions if a.get("action") == "back")
-    loop_detected = len(suspect) > 0
+    # The persona's own backs: the harness injects backs of its own (loop
+    # escape, circuit breaker, refused-path exit), which were counted too.
+    backtracks = sum(1 for a in actions if a.get("action") == "back" and not _injected_back(a))
+    # A loop is a loop: three identical actions in a row, or one of our own
+    # loop escapes. It used to be "any harness-suspect step", so a single
+    # "Element 'IONIQ 5' not found" marked an ordinary configurator session
+    # as looping (2 of 14 flagged sessions had no repeat of any kind).
+    loop_detected = _has_stuck_run(actions) or any(
+        a.get("action") == "back" and _desc_has(a, _FALLBACK_MARKERS) for a in actions)
     reached_step_limit = ended_reason == "max_steps"
 
     # --- satisfaction (SYNTHETIC self-report — never a real-user metric) ---
