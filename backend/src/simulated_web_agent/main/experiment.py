@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import time
 import traceback
 import uuid
@@ -15,7 +16,7 @@ from omegaconf import DictConfig
 from ..agent import context, gpt
 from ..agent.memory import Thought
 from . import cancellation
-from ..executor.env import WebAgentEnv
+from ..executor.env import INPUT_REFUSAL_PREFIX, SCOPE_REFUSAL_PREFIX, WebAgentEnv
 from ..config import load_cfg
 from .abort import abandon_threshold
 from .model import AgentPolicy  # noqa
@@ -323,6 +324,11 @@ _CONSENT_PRESENT_JS = """
   return false;
 }
 """
+
+
+def _page_signature(obs: dict) -> str:
+    """The page's content, without the parser's focus marker, for "did it change"."""
+    return re.sub(r'\s*parser-is-focused="true"', "", str((obs or {}).get("html") or ""))
 
 
 def _consent_unresolved(states: dict) -> bool:
@@ -715,6 +721,10 @@ async def _run_for_persona_and_intent(
         repeat_count = 0
         click_counts: Counter = Counter()
         fail_counts: Counter = Counter()
+        # Action keys the audit's own rules refused (no personal data, stay
+        # on the site). Blocked like any repeated failure, but not described
+        # to the persona as the site's fault.
+        refused_keys: set = set()
         abandon_at = abandon_threshold(store.read_persona_card())
         abandoned = False
         deadline = time.monotonic() + persona_budget_seconds()
@@ -751,6 +761,7 @@ async def _run_for_persona_and_intent(
             }
 
             url_before = _current_url(obs)
+            html_before = _page_signature(obs)
             # Safety net: a single step's LLM call (perceive/plan/act) can still
             # fail after gpt.py's repair+retries — a transient upstream error, or
             # JSON that even repair can't salvage. That must not kill the whole
@@ -799,7 +810,28 @@ async def _run_for_persona_and_intent(
             # already failed twice at execution (element unclickable, invalid
             # URL), retrying is hopeless — block it and force a new route.
             intended_key = _action_key(action)
-            if fail_counts[intended_key] >= 2:
+            if fail_counts[intended_key] >= 2 and intended_key in refused_keys:
+                # Refused by the audit's rules, not failed by the site. It used
+                # to get the "that element is broken — a UX finding worth
+                # noting" thought below, and a back whose wording attribution
+                # reads as a harness failure, so a policy working as designed
+                # became a site defect and gated the step's own findings.
+                log.warning("Blocking an action the audit refused %d times: %s",
+                            fail_counts[intended_key], intended_key)
+                await policy.agent.memory.add_memory_piece(
+                    Thought(
+                        "This path is closed by the rules of this study (no personal "
+                        "data, stay on the site under test), not by the site — it is "
+                        "not a problem with the site. I will not try it again and will "
+                        "continue the task another way.",
+                        policy.agent.memory,
+                    )
+                )
+                action = json.dumps({
+                    "action": "back",
+                    "description": "Ta ścieżka jest zamknięta regułami badania — wracam i kontynuuję zadanie.",
+                })
+            elif fail_counts[intended_key] >= 2:
                 log.warning(
                     "Blocking action that failed %d times: %s",
                     fail_counts[intended_key], intended_key,
@@ -851,6 +883,8 @@ async def _run_for_persona_and_intent(
             # own advisory messages into obs["error"].
             if obs.get("error"):
                 fail_counts[_action_key(action)] += 1
+                if str(obs["error"]).startswith((INPUT_REFUSAL_PREFIX, SCOPE_REFUSAL_PREFIX)):
+                    refused_keys.add(_action_key(action))
 
             # Repeat-action guard: same action + page unchanged = the agent is
             # looping. Warn it via memory; escalate via the error channel it
@@ -863,7 +897,12 @@ async def _run_for_persona_and_intent(
                 # end next step, it still registers as a consecutive no-progress
                 # step rather than starting over.
                 pass
-            elif action_key == prev_action_key and _current_url(obs) == url_before:
+            # "The page did not change" needs the page, not only its address: on
+            # the configurator's #/exterior/colours every "next" advanced the
+            # colour slider (Slide 1 -> 4 of 8) on one URL, and the persona was
+            # told three times that nothing had happened.
+            elif (action_key == prev_action_key and _current_url(obs) == url_before
+                  and _page_signature(obs) == html_before):
                 repeat_count += 1
                 warning = (
                     "I already tried exactly this action and the page did not change. "
