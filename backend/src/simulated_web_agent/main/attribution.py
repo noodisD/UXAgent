@@ -159,7 +159,7 @@ def why_site_unseen(store: TraceStore) -> str | None:
     return None
 
 
-def harness_suspect_steps(store: TraceStore) -> set[int]:
+def harness_suspect_steps(store: TraceStore, progress_runs: bool = True) -> set[int]:
     """Step indices whose action is a harness interaction failure.
 
     Four signatures, all deterministic:
@@ -238,8 +238,19 @@ def harness_suspect_steps(store: TraceStore) -> set[int]:
             if i - 1 >= 0:
                 suspect.add(i - 1)
 
-    # Consecutive runs of the same (action, target).
-    run_start = 0
+    # Consecutive runs of the same (action, target). With progress_runs=False,
+    # a run whose page changed after every click is left out (see
+    # progress_run_steps): only the wording of what it holds back differs.
+    for start, end, _target in _repeat_runs(actions):
+        if progress_runs or not _page_changed_throughout(store, start, end):
+            suspect.update(range(start, end))
+
+    return suspect
+
+
+def _repeat_runs(actions: list) -> list[tuple[int, int, str]]:
+    """(start, end, target) of every run of >= _REPEAT_THRESHOLD identical clicks."""
+    runs, run_start = [], 0
     for i in range(1, len(actions) + 1):
         prev = actions[i - 1]
         same = (
@@ -250,12 +261,57 @@ def harness_suspect_steps(store: TraceStore) -> set[int]:
         )
         if same:
             continue
-        run_len = i - run_start
-        if run_len >= _REPEAT_THRESHOLD and prev.get("target"):
-            suspect.update(range(run_start, i))
+        if i - run_start >= _REPEAT_THRESHOLD and prev.get("target"):
+            runs.append((run_start, i, str(prev.get("target"))))
         run_start = i
+    return runs
 
-    return suspect
+
+def _step_text(store: TraceStore, step: int) -> str | None:
+    path = store.trace_dir / "simp_html" / f"simp_html_{step}.html"
+    try:
+        return _visible_text(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return None
+
+
+def _page_changed_throughout(store: TraceStore, start: int, end: int) -> bool:
+    """Did the page's visible text change after every action of the run?"""
+    texts = [_step_text(store, k) for k in range(start, end + 1)]
+    if any(t is None for t in texts):
+        return False  # cannot show progress, so it is not assumed
+    return all(a != b for a, b in zip(texts, texts[1:]))
+
+
+def progress_run_steps(store: TraceStore) -> dict[int, str]:
+    """Steps of repeated clicks that changed the page every time -> the control.
+
+    The repeat rule reads three identical clicks as a stuck loop. On the
+    configurator's colour step, "next" moved the exterior-view gallery on
+    every click (Slide 1 -> 4 of 8) and "Następny krok" advanced the wizard:
+    nothing was stuck. Findings there are still held — one of the three in the
+    archive was false, one debatable — but not as a failure of this tool.
+    """
+    actions = [_parse_action(a) or {} for a in (store.read_action_trace() or [])]
+    out: dict[int, str] = {}
+    for start, end, target in _repeat_runs(actions):
+        if _page_changed_throughout(store, start, end):
+            label = _on_screen_label(store, start, target) or target
+            out.update({i: label for i in range(start, end)})
+    return out
+
+
+def _on_screen_label(store: TraceStore, step: int, semantic_id: str) -> str:
+    """The text the page shows on the element, not its parser id ("next" -> "Next")."""
+    path = store.trace_dir / "simp_html" / f"simp_html_{step}.html"
+    try:
+        markup = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    m = re.search(r'<(\w+)[^>]*parser-semantic-id="' + re.escape(semantic_id) + r'"[^>]*>(.*?)</\1>',
+                  markup, re.S)
+    text = _visible_text(m.group(2)) if m else ""
+    return text if 0 < len(text) <= 60 else ""
 
 
 # Phrases a finding uses to claim the product search itself failed. If the
@@ -629,8 +685,14 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     retried = _retried_controls(store)
     page_text = session_page_text(store)
     observation_text = session_observation_text(store)
+    # Repeated clicks that changed the page every time. Still held, but a
+    # finding held only because of them says so instead of blaming the tool.
+    progress = progress_run_steps(store)
+    if progress:
+        strict = harness_suspect_steps(store, progress_runs=False)
+        strict_targets = _suspect_targets(store, strict)
 
-    def _is_suspect(f: dict) -> bool:
+    def _is_suspect(f: dict, suspect=suspect, targets=targets) -> bool:
         step = f.get("step")
         try:
             step = int(step)
@@ -662,6 +724,18 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         # And which quoted words to look for on the page.
         f["quoted_not_on_page"] = misquoted
         f["harness_suspect"] = suspected
+        # The control whose repeated clicks worked, when that is the only reason.
+        f["repeated_with_progress"] = None
+        if suspected and progress and control is None and not misquoted \
+                and not _is_suspect(f, strict, strict_targets):
+            try:
+                f["repeated_with_progress"] = progress.get(int(f.get("step")))
+            except (TypeError, ValueError):
+                pass
+            if not f["repeated_with_progress"]:
+                text = f"{f.get('evidence', '')} {f.get('recommendation', '')}"
+                f["repeated_with_progress"] = next(
+                    (t for t in set(progress.values()) if t.lower() in text.lower()), None)
         # Two keys, not one, and they are not synonyms even though this writer
         # sets both from the same bool:
         #   harness_suspect      — we caused it, so it is probably not a defect.

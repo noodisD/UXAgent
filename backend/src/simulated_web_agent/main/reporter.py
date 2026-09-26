@@ -84,6 +84,10 @@ def _gate_reason(finding: dict) -> str:
     if finding.get("quoted_not_on_page"):
         return ("cytowany tekst pochodzi z automatycznego opisu strony, a nie ze "
                 "strony — żadna strona tej sesji go nie zawiera")
+    if finding.get("repeated_with_progress"):
+        return ("powtórzone kliknięcie za każdym razem zmieniało stronę — to nie "
+                "awaria narzędzia; wstrzymane, bo zapis nie rozstrzyga, czy opisane "
+                "zachowanie jest wadą strony")
     if finding.get("harness_suspect"):
         return "prawdopodobna awaria narzędzia, nie strony"
     if finding.get("off_site"):
@@ -95,13 +99,13 @@ def _gate_reason(finding: dict) -> str:
     return ""
 
 
-def _control_label(finding: dict) -> str:
+def _control_label(finding: dict, key: str = "unresponsive_control") -> str:
     """The on-screen name of the control a finding is about, for a human to find.
 
     The parser id ("executive_my27_od_14") is not what anybody sees, so prefer
     the label the finding quotes ('EXECUTIVE MY27') when it matches the control.
     """
-    control = str(finding.get("unresponsive_control") or "")
+    control = str(finding.get(key) or "")
     if not control:
         return ""
     words = [w for w in control.split("_") if w and not w.isdigit()]
@@ -121,6 +125,12 @@ def _human_check(finding: dict) -> str:
                 "się zmienia. Jeśli nie — to rzeczywista wada strony.")
     if finding.get("off_site"):
         return "Dotyczy innej domeny niż badana — zwykle do pominięcia."
+    # Already the label the page shows (attribution reads it from the page).
+    progressed = str(finding.get("repeated_with_progress") or "").strip()
+    if progressed:
+        return (f"Kliknij „{progressed}” kilka razy w zwykłej przeglądarce i sprawdź, "
+                "czy strona zachowuje się tak, jak opisano. Strona reagowała na każde "
+                "kliknięcie, więc rozstrzyga opis, a nie działanie przycisku.")
     quotes = [q for q in (finding.get("quoted_not_on_page") or []) if q][:2]
     if quotes:
         cited = " i ".join(f"„{q}”" for q in quotes)
