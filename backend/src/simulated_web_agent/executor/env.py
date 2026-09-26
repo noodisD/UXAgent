@@ -500,15 +500,25 @@ class ElementHighlight:
                 outerDiv.style.width = tWidth + 'px';
                 outerDiv.style.height = tHeight + 'px';
 
-                // Return a promise that resolves when transition ends
+                // Resolve when the transition ends — or is cancelled, or after
+                // 2.5 s regardless. A site whose CSS disables transitions
+                // (`*{transition:none !important}` beats the inline style)
+                // never fires transitionend, and every targeted action then
+                // hung for good: the session's time budget is only checked
+                // between steps.
                 return new Promise(resolve => {
-                    const handler = (e) => {
-                        if (e.target === outerDiv) {
-                            outerDiv.removeEventListener('transitionend', handler);
-                            resolve();
-                        }
+                    let done = false;
+                    const finish = () => {
+                        if (done) return;
+                        done = true;
+                        outerDiv.removeEventListener('transitionend', handler);
+                        outerDiv.removeEventListener('transitioncancel', handler);
+                        resolve();
                     };
+                    const handler = (e) => { if (e.target === outerDiv) finish(); };
                     outerDiv.addEventListener('transitionend', handler);
+                    outerDiv.addEventListener('transitioncancel', handler);
+                    setTimeout(finish, 2500);
                 });
             }
             """
@@ -578,6 +588,24 @@ class ElementHighlight:
             return
         sleep_time = self.pause(duration)
         await asyncio.sleep(sleep_time)
+
+
+_NAMED_KEYS = {
+    "enter", "tab", "escape", "esc", "backspace", "delete", "space", "home", "end",
+    "pageup", "pagedown", "arrowup", "arrowdown", "arrowleft", "arrowright",
+    "shift", "control", "alt", "meta",
+}
+
+
+def _types_a_character(key: str) -> bool:
+    """Would pressing `key` type text? A single character does; Enter does not.
+
+    Combinations (Control+A) type nothing either; a bare character does.
+    """
+    k = str(key or "").strip()
+    if not k or "+" in k and len(k) > 1:
+        return False
+    return len(k) == 1 or k.lower() not in _NAMED_KEYS and not k.lower().startswith("f")
 
 
 class WebAgentEnv:
@@ -912,6 +940,11 @@ class WebAgentEnv:
 
     async def close_tab(self, tab_id: int) -> None:
         """Close a tab by ID"""
+        # The only tab: closing it left self.page closed, and the next
+        # observation raised inside step()'s own error handler, ending the
+        # session. Raised here instead, which step() reports as a step error.
+        if len(self.context.pages) <= 1:
+            raise ValueError("close_tab refused: this is the only open tab")
         async with ElementHighlight(sleep=0.3):
             if 0 <= tab_id < len(self.context.pages):
                 page = self.context.pages[tab_id]
@@ -1006,6 +1039,14 @@ class WebAgentEnv:
         from ..main.site_scope import registrable_domain
 
         target = resolve_url(str(url), self.page.url if self.page else "")
+        # file://, chrome:// and the like have no domain, so they used to pass
+        # as "not off-site": a goto_url to a local file loaded it into the
+        # observation and the archived trace.
+        if not target.lower().startswith(("http://", "https://")):
+            return (f"{SCOPE_REFUSAL_PREFIX} {target.split(':', 1)[0]}: addresses are "
+                    f"outside the site under test ({self._allowed_domain}). The "
+                    f"navigation was not performed. Continue the task on "
+                    f"{self._allowed_domain}.")
         found = registrable_domain(target)
         if not found or found == self._allowed_domain:
             return None
@@ -1014,6 +1055,29 @@ class WebAgentEnv:
             f"({self._allowed_domain}). The navigation was not performed. "
             f"Continue the task on {self._allowed_domain}."
         )
+
+    def _guard_new_tabs(self) -> None:
+        """Close tabs the page opens on another site, as soon as they load."""
+        context = getattr(self, "context", None)
+        if context is None or getattr(self, "_tab_guard_for", None) is context:
+            return
+        self._tab_guard_for = context
+
+        async def on_page(page):
+            if not getattr(self, "_allowed_domain", ""):
+                return
+            from ..main.site_scope import registrable_domain
+
+            with contextlib.suppress(Exception):
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            url = page.url or ""
+            if url.startswith("http") and registrable_domain(url) != self._allowed_domain:
+                self._closed_popup = registrable_domain(url)
+                with contextlib.suppress(Exception):
+                    await page.close()
+
+        with contextlib.suppress(Exception):
+            context.on("page", lambda page: asyncio.ensure_future(on_page(page)))
 
     async def _return_to_site_if_left(self) -> str | None:
         """Undo a navigation that left the site, and say so. None if on-site.
@@ -1024,6 +1088,32 @@ class WebAgentEnv:
         if not getattr(self, "_allowed_domain", "") or not self.page:
             return None
         from ..main.site_scope import registrable_domain
+
+        # A tab the page opened itself (target=_blank, window.open) on another
+        # site: the active page never left, so nothing below saw it, and the
+        # tab stayed in every later observation — and in visited_urls, which
+        # the link check and the viewport scan then loaded as the client's.
+        # The listener (_guard_new_tabs) closes such tabs as they load; a tab
+        # it closed since the last step is reported here, and any it has not
+        # reached yet is closed now.
+        popup = getattr(self, "_closed_popup", None)
+        self._closed_popup = None
+        for other in list(getattr(getattr(self, "context", None), "pages", None) or []):
+            if other is self.page:
+                continue
+            with contextlib.suppress(Exception):
+                await other.wait_for_load_state("domcontentloaded", timeout=3000)
+            url = other.url or ""
+            off = (url.startswith("http") and registrable_domain(url) != self._allowed_domain)
+            if off:
+                popup = registrable_domain(url)
+                with contextlib.suppress(Exception):
+                    await other.close()
+        if popup:
+            self.logger.info("[scope] closed a tab the page opened on %s", popup)
+            return (f"{SCOPE_REFUSAL_PREFIX} that opened {popup} in a new tab, outside "
+                    f"the site under test ({self._allowed_domain}). The tab was closed. "
+                    f"Continue the task on {self._allowed_domain}.")
 
         current = self.page.url or ""
         if not current.startswith("http"):
@@ -1079,6 +1169,7 @@ class WebAgentEnv:
         import json
 
         self._hook_ran = False
+        self._guard_new_tabs()
         try:
             action_data = json.loads(action)
             action_name = action_data.get("action")
@@ -1127,6 +1218,16 @@ class WebAgentEnv:
             elif action_name == "key_press":
                 key = action_data["key"]
                 target = action_data.get("target")
+                # A character key types that character: nine "6" presses put a
+                # phone number into a tel field the type action refuses. Named
+                # keys (Enter, Tab, arrows…) type nothing and pass.
+                if _types_a_character(key):
+                    refusal = await self._personal_data_refusal(target, key)
+                    if refusal:
+                        await self._ensure_step_evidence()
+                        observation = await self.observation()
+                        observation["error"] = refusal
+                        return observation
                 await self.key_press(key, target)
 
             elif action_name == "goto_url":
@@ -1535,7 +1636,10 @@ class WebAgentEnv:
                 element = self.page.locator(selector)
                 # Short timeout scroll - fail fast on hallucinated elements
                 await element.scroll_into_view_if_needed(timeout=500)
-                await element.press(key, force=True)
+                # No `force`: Locator.press does not take one, so every targeted
+                # key_press raised TypeError before pressing anything — and the
+                # persona read it as the site not reacting to Enter.
+                await element.press(key)
                 self.logger.info(f"Pressed '{key}' on element: {semantic_id}")
             else:
                 await self.page.keyboard.press(key)
