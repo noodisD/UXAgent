@@ -2,10 +2,11 @@
 Link checker — verifies <a href> links found on each visited page.
 
 For each unique URL visited during an agent session, opens a Playwright
-browser, collects all on-page anchors, then probes them with JS fetch()
-HEAD requests.  Links returning non-2xx/3xx status codes (after redirects)
-are flagged as broken — except the ones that mean the server refused this
-client rather than the link being dead (see _REFUSED_US_STATUSES).
+browser, collects all on-page anchors, then probes them with Playwright's
+request client (HEAD, GET where HEAD is refused). Links returning non-2xx/3xx
+status codes (after redirects) are flagged as broken — except the ones that
+mean the server refused this client rather than the link being dead (see
+_REFUSED_US_STATUSES). A link whose server did not answer is "unchecked".
 
 Limits: first 5 visited URLs × first 40 links each, to keep scan fast.
 
@@ -30,7 +31,7 @@ _FETCH_TIMEOUT_MS = 8_000
 _NAV_TIMEOUT_MS = 15_000
 
 # HTTP statuses that are NOT considered broken
-_OK_STATUSES = {0, 200, 201, 204, 301, 302, 303, 304, 307, 308}
+_OK_STATUSES = {200, 201, 204, 301, 302, 303, 304, 307, 308}
 
 # ...and statuses that mean the server refused *us*, not that the link is dead.
 # The hyundai re-run reported the client's own homepage as a broken link, and
@@ -43,28 +44,32 @@ _OK_STATUSES = {0, 200, 201, 204, 301, 302, 303, 304, 307, 308}
 #   405     — the server dislikes our request method, not the URL
 #   429     — we asked too often
 #
-# Genuinely broken still is: 404, 410, any 5xx, and connection failures.
+# Genuinely broken still is: 404, 410, any 5xx, and a domain that does not
+# resolve. A timeout or a refused connection is "could not check", reported as
+# such — never counted as a working link, which is what status 0 used to mean.
 _REFUSED_US_STATUSES = {401, 403, 405, 429}
+
+# Exception texts that mean the host does not exist — dead for any visitor.
+_NO_SUCH_HOST = ("err_name_not_resolved", "getaddrinfo", "enotfound", "name or service not known",
+                 "nodename nor servname")
+
+
+def classify(status: int | None, error: str | None = None) -> str:
+    """'ok', 'broken', 'refused' (the server turned us away) or 'unchecked'."""
+    if status is None or status == 0:
+        low = str(error or "").lower()
+        return "broken" if any(m in low for m in _NO_SUCH_HOST) else "unchecked"
+    if status in _OK_STATUSES or 200 <= status < 400:
+        return "ok"
+    if status in _REFUSED_US_STATUSES:
+        return "refused"
+    return "broken"
+
 
 _COLLECT_HREFS_JS = """
 () => Array.from(document.querySelectorAll('a[href]'))
     .map(a => a.href)
     .filter(h => h.startsWith('http'))
-"""
-
-_FETCH_JS = """
-async (url) => {
-    try {
-        const r = await fetch(url, {
-            method: 'HEAD',
-            redirect: 'follow',
-            signal: AbortSignal.timeout(""" + str(_FETCH_TIMEOUT_MS) + """),
-        });
-        return { status: r.status, ok: r.ok };
-    } catch (e) {
-        return { status: 0, ok: false, error: String(e) };
-    }
-}
 """
 
 
@@ -100,25 +105,38 @@ async def _check_links_on_page(page, url: str) -> dict[str, Any]:
         finding["checked_urls"] = unique
         broken: list[dict] = []
         errors: list[dict] = []
+        unchecked: list[dict] = []
 
+        # Playwright's request client, not fetch() inside the page: a page's
+        # fetch of another origin is blocked by CORS and came back as status 0
+        # — counted as a working link, like every timeout and refused
+        # connection. The client is not subject to CORS, so cross-origin links
+        # (45 in the archive: facebook, youtube, privacy.hyundai.com) get a
+        # real status too.
+        request = page.context.request
         for href in unique:
+            status, error = None, None
             try:
-                resp: dict = await page.evaluate(_FETCH_JS, href)
-                status = resp.get("status", 0)
-                ok = resp.get("ok", False)
-                if not ok and status not in _OK_STATUSES                         and status not in _REFUSED_US_STATUSES:
-                    broken.append(
-                        {
-                            "url": href,
-                            "status": status,
-                            "error": resp.get("error"),
-                        }
-                    )
+                resp = await request.head(href, timeout=_FETCH_TIMEOUT_MS, max_redirects=5)
+                status = resp.status
+                if status == 405:  # some servers refuse HEAD; ask the way a browser does
+                    resp = await request.get(href, timeout=_FETCH_TIMEOUT_MS, max_redirects=5)
+                    status = resp.status
             except Exception as exc:
-                errors.append({"url": href, "error": str(exc)})
+                error = str(exc)
+            verdict = classify(status, error)
+            if verdict == "broken":
+                broken.append({"url": href, "status": status or 0, "error": error})
+            elif verdict == "unchecked":
+                unchecked.append({"url": href, "error": (error or "")[:200]})
 
         finding["broken"] = broken
         finding["check_errors"] = errors
+        # Links that could not be checked: not working, not broken — unknown.
+        finding["unchecked"] = unchecked
+        finding["checked_urls"] = [u for u in unique
+                                   if u not in {x["url"] for x in unchecked}]
+        finding["links_checked"] = len(finding["checked_urls"])
 
     except Exception as exc:
         finding["error"] = str(exc)

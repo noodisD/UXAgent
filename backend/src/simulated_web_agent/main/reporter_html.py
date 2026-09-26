@@ -1096,6 +1096,13 @@ def _render_scroll_depth(scroll: dict | None) -> str:
     return _section("Głębokość przewijania", body)
 
 
+def unchecked_links_text(links: dict) -> str:
+    n = int((links or {}).get("unchecked_links") or 0)
+    return (f"Nie udało się sprawdzić {n} linków — serwer nie odpowiedział na czas "
+            "lub odrzucił połączenie. Nie liczymy ich ani jako działających, ani "
+            "jako uszkodzonych.") if n else ""
+
+
 def _render_broken_links(links: dict | None) -> str:
     if not links:
         return ""
@@ -1122,6 +1129,8 @@ def _render_broken_links(links: dict | None) -> str:
     body = f"""
     <p style="font-size:13px;color:#6c757d;margin-bottom:12px;">Sprawdzono {total} linków na odwiedzonych stronach.</p>
     {status_html}"""
+    if links.get("unchecked_links"):
+        body += f'<p class="sb-rules">{_esc(unchecked_links_text(links))}</p>' 
     return _section("Uszkodzone linki", body)
 
 

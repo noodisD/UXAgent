@@ -155,6 +155,7 @@ def _add_measurement_sections(doc, agg: dict) -> None:
         doc.add_heading("Uszkodzone linki", level=1)
         broken = links.get("broken_urls") or []
         doc.add_paragraph(f"Sprawdzono {links['total_links_checked']} linków na odwiedzonych stronach.")
+        from .reporter_html import unchecked_links_text
         if not broken:
             doc.add_paragraph("Nie wykryto uszkodzonych linków.")
         else:
@@ -164,6 +165,8 @@ def _add_measurement_sections(doc, agg: dict) -> None:
                 doc.add_paragraph(str(u), style="List Bullet")
             if len(broken) > 10:
                 _add_caption(doc, f"…i {len(broken) - 10} więcej")
+        if unchecked_links_text(links):
+            _add_caption(doc, unchecked_links_text(links))
 
     forms = agg.get("forms") or {}
     if forms and forms.get("sessions_engaged_form") is not None:

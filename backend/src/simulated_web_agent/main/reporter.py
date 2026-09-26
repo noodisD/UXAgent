@@ -1263,6 +1263,7 @@ def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
     sessions_with_broken = 0
     checked_urls: set[str] = set()
     per_page_count: dict[str, int] = {}
+    unchecked: set[str] = set()
 
     for store in stores:
         findings = store.read_link_findings()
@@ -1280,6 +1281,7 @@ def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
                 page = str(page_result.get("url") or "")
                 per_page_count[page] = max(per_page_count.get(page, 0),
                                            int(page_result.get("links_checked") or 0))
+            unchecked.update(u.get("url", "") for u in page_result.get("unchecked") or [])
             for b in page_result.get("broken") or []:
                 url = b.get("url", "")
                 session_broken.add(url)
@@ -1294,6 +1296,9 @@ def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
         "unique_broken_urls": len(all_broken),
         "sessions_with_broken_links": sessions_with_broken,
         "broken_urls": all_broken[:20],
+        # Links whose server did not answer the check (timeout, refused
+        # connection) — neither working nor broken.
+        "unchecked_links": len(unchecked - checked_urls),
     }
 
     if not total_checked:
