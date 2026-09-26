@@ -57,3 +57,32 @@ def test_a_crashed_session_still_saves_its_consent_states():
     crash = src[start:src.index("\n    finally:", start)]
     assert "write_session_result" in crash, "the session's own error path"
     assert "write_consent_states" in crash
+
+
+async def _page(html):
+    from playwright.async_api import async_playwright
+    pw = await async_playwright().start()
+    browser = await pw.chromium.launch(headless=True)
+    page = await browser.new_page()
+    await page.set_content(html)
+    return pw, browser, page
+
+
+async def test_a_stuck_notice_consent_present_does_not_know_is_not_recorded_gone():
+    """The Polish IAB TCF button is on the dismissal's list, not consent_present's."""
+    pw, browser, page = await _page(
+        '<div class="fc-dialog"><button mode="primary" aria-label="Zgadzam się na przetwarzanie danych">'
+        'Akceptuję</button></div>')
+    try:
+        assert not await experiment.consent_present(page), "the mismatch this guards against"
+        assert await experiment.consent_candidate_visible(page)
+    finally:
+        await browser.close(); await pw.stop()
+
+
+async def test_a_hidden_cmp_button_is_not_a_notice():
+    pw, browser, page = await _page('<button id="onetrust-accept-btn-handler" style="display:none">OK</button>')
+    try:
+        assert not await experiment.consent_candidate_visible(page)
+    finally:
+        await browser.close(); await pw.stop()

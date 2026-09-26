@@ -331,6 +331,20 @@ def _page_signature(obs: dict) -> str:
     return re.sub(r'\s*parser-is-focused="true"', "", str((obs or {}).get("html") or ""))
 
 
+async def consent_candidate_visible(page) -> bool:
+    """Is any control dismiss_cookie_banners would try visible on screen?"""
+    selectors = list(_CMP_SELECTORS) + [
+        f"{c} >> button:text-is('{label}')" for c in _CONSENT_CONTAINERS for label in _CONSENT_LABELS]
+    for sel in selectors:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() and await loc.is_visible():
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _consent_unresolved(states: dict) -> bool:
     """Is the most recent recorded consent state a notice left on screen?"""
     if not states:
@@ -630,10 +644,14 @@ async def _run_for_persona_and_intent(
         if await consent_present(env.page):
             state = await dismiss_cookie_banners(env.page)
             consent_states[steps_taken] = state
-        elif _consent_unresolved(consent_states):
+        elif _consent_unresolved(consent_states) and not await consent_candidate_visible(env.page):
             # The notice that could not be dismissed is no longer on screen —
             # the persona accepted it, or navigation removed it. Recorded so
-            # attribution can stop treating later steps as blocked.
+            # attribution can stop treating later steps as blocked. Judged by
+            # the dismissal's own candidates, not consent_present: that does
+            # not know every notice the dismissal tries (the Polish IAB TCF
+            # button, for one), and a stuck TCF notice was recorded "gone" at
+            # once, un-gating the very steps it blocked.
             consent_states[steps_taken] = {"attempted": False, "dismissed": False,
                                            "present": False, "selector": None}
         await env.page.screenshot(path=store.screenshot_path(steps_taken, full_page=True), full_page=True)
@@ -899,8 +917,8 @@ async def _run_for_persona_and_intent(
                 pass
             # "The page did not change" needs the page, not only its address: on
             # the configurator's #/exterior/colours every "next" advanced the
-            # colour slider (Slide 1 -> 4 of 8) on one URL, and the persona was
-            # told three times that nothing had happened.
+            # exterior-view gallery (Slide 1 -> 4 of 8) on one URL, and the
+            # persona was told three times that nothing had happened.
             elif (action_key == prev_action_key and _current_url(obs) == url_before
                   and _page_signature(obs) == html_before):
                 repeat_count += 1

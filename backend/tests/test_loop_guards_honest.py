@@ -1,8 +1,9 @@
 """The loop guards tell the persona what actually happened.
 
 - "The page did not change" was decided from the URL alone: on the hyundai
-  configurator every "next" advanced the colour slider (Slide 1 -> 4 of 8) on
-  one hash URL, and the persona was told three times nothing had happened.
+  configurator's colour step every "next" advanced the exterior-view gallery
+  (Slide 1 -> 4 of 8) on one hash URL, and the persona was told three times
+  nothing had happened. (The colour itself is chosen with separate arrows.)
 - A path the audit's own rules refused (personal data, off-site) counted as a
   failure; after two, the persona was told "that element or route is broken —
   a UX finding worth noting", and the injected back carried the wording
