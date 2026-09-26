@@ -99,6 +99,118 @@ def _issues(narr: dict) -> list[tuple[str, list]]:
     ]
 
 
+def _add_measurement_sections(doc, agg: dict) -> None:
+    """PageSpeed, scroll depth, links and forms — the HTML's measurement sections.
+
+    The Word file had none of them, although its docstring promised the same
+    document as the HTML: a client editing the .docx never saw the PageSpeed
+    result or the form funnel. Same fields, same wording (shared constants).
+    """
+    from .reporter_html import (FORM_FUNNEL_NOTE, PAGESPEED_LABELS, SCROLL_LOW_NOTE,
+                                SCROLL_UNMEASURABLE, _SCROLL_METHOD, pagespeed_error_text,
+                                scroll_coverage_text)
+
+    ps = agg.get("pagespeed") or {}
+    if ps and not ps.get("skipped") and not ps.get("error"):
+        doc.add_heading("Szybkość strony (PageSpeed Insights)", level=1)
+        rows = []
+        for strategy in ("mobile", "desktop"):
+            data = ps.get(strategy) or {}
+            if data.get("error"):
+                rows.append((strategy.capitalize(), pagespeed_error_text(data)))
+                continue
+            if data.get("performance_score") is None:
+                continue
+            parts = [f"{data['performance_score']}/100 "
+                     f"({PAGESPEED_LABELS.get(data.get('performance_label', ''), '—')})"]
+            for name, key in (("LCP", "lcp"), ("FCP", "fcp"), ("Speed Index", "speed_index"),
+                              ("TBT", "tbt"), ("CLS", "cls")):
+                shown = (data.get(key) or {}).get("display")
+                if shown:
+                    parts.append(f"{name} {shown}")
+            rows.append((strategy.capitalize(), " · ".join(parts)))
+        _add_kv_table(doc, rows)
+        if ps.get("url"):
+            _add_caption(doc, f"Źródło: Google PageSpeed Insights · {ps['url']}")
+
+    scroll = agg.get("scroll") or {}
+    if scroll:
+        avg = scroll.get("avg_max_depth_pct")
+        unmeasurable = int(scroll.get("steps_unmeasurable") or 0)
+        if avg is not None or unmeasurable:
+            doc.add_heading("Głębokość przewijania", level=1)
+            if avg is None:
+                doc.add_paragraph(SCROLL_UNMEASURABLE)
+            else:
+                doc.add_paragraph(
+                    f"Średnia maksymalna głębokość przewijania: {avg}% (zakres "
+                    f"{scroll.get('min_max_depth_pct', '—')}–{scroll.get('max_max_depth_pct', '—')}%, "
+                    f"{scroll.get('sessions_with_depth_pct', '—')} sesji)")
+                if avg < 30:
+                    doc.add_paragraph(SCROLL_LOW_NOTE)
+            _add_caption(doc, f"{scroll_coverage_text(scroll)} {_SCROLL_METHOD}".strip())
+
+    links = agg.get("links") or {}
+    if links.get("total_links_checked"):
+        doc.add_heading("Uszkodzone linki", level=1)
+        broken = links.get("broken_urls") or []
+        doc.add_paragraph(f"Sprawdzono {links['total_links_checked']} linków na odwiedzonych stronach.")
+        if not broken:
+            doc.add_paragraph("Nie wykryto uszkodzonych linków.")
+        else:
+            doc.add_paragraph(f"{len(broken)} uszkodzony(ch) link(ów) w "
+                              f"{links.get('sessions_with_broken_links', 0)} sesjach:")
+            for u in broken[:10]:
+                doc.add_paragraph(str(u), style="List Bullet")
+            if len(broken) > 10:
+                _add_caption(doc, f"…i {len(broken) - 10} więcej")
+
+    forms = agg.get("forms") or {}
+    if forms and forms.get("sessions_engaged_form") is not None:
+        doc.add_heading("Lejek formularzy", level=1)
+        n = forms.get("total_sessions", 0)
+        _add_kv_table(doc, [
+            ("Wszyscy uczestnicy", f"{n}/{n}"),
+            ("Wpisali coś w pole (także wyszukiwarkę)", f"{forms.get('sessions_engaged_form', 0)}/{n}"),
+            ("Wysłali formularz", f"{forms.get('sessions_submitted_form', 0)}/{n}"),
+        ])
+        if forms.get("avg_fields_filled") is not None:
+            doc.add_paragraph(f"Średnio {forms['avg_fields_filled']} pól na sesję.")
+        _add_caption(doc, FORM_FUNNEL_NOTE)
+
+
+def _add_survey_section(doc, stats: dict, summaries: dict) -> None:
+    """The survey, question by question, as the HTML shows it."""
+    questions = [q for q in ((stats.get("survey") or {}).get("questions") or [])
+                 if isinstance(q, dict)]
+    if not questions:
+        return
+    doc.add_heading("Wyniki ankiety", level=1)
+    for q in questions:
+        p = doc.add_paragraph()
+        p.add_run(str(q.get("prompt") or q.get("id") or "")).bold = True
+        kind = q.get("kind")
+        na = int(q.get("not_assessable") or 0)
+        if kind == "open":
+            for a in (q.get("answers") or [])[:8]:
+                doc.add_paragraph(f"„{a}”", style="List Bullet")
+        elif kind == "not_assessable":
+            _add_caption(doc, f"Brak ocen — żaden uczestnik nie mógł odpowiedzieć ({na}): "
+                              "pytanie dotyczy etapu, do którego sesje nie dotarły.")
+        else:
+            dist = ", ".join(f"{d.get('value')}: {d.get('count')}"
+                             for d in (q.get("distribution") or []) if d.get("count"))
+            line = f"śr. {q.get('avg')} (n={q.get('n', 0)}, skala {q.get('min', 1)}–{q.get('max', 5)})"
+            if dist:
+                line += f" · rozkład {dist}"
+            if na:
+                line += f" · {na} bez oceny (pytanie nie dotyczyło przebiegu sesji)"
+            doc.add_paragraph(line)
+        why = summaries.get(q.get("id"))
+        if why:
+            _add_caption(doc, f"Dlaczego tak odpowiadali: {why}")
+
+
 def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     """Write the aggregated report to `out_path` as .docx and return the path."""
     from docx import Document
@@ -221,7 +333,11 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     reflections = stats.get("objective_reflections") or []
     if reflections:
         doc.add_heading("Realizacja zadania", level=1)
-        from .reporter_html import _SOURCE_PL, objective_outcome
+        from .reporter_html import (OBJECTIVES_NOTE, SELF_REPORTED_CAVEAT, _SOURCE_PL,
+                                    objective_outcome)
+        # The HTML's standing caveat: these are the participants' own accounts,
+        # never checked against the trace. Without it the blockers read as fact.
+        _add_caption(doc, OBJECTIVES_NOTE)
         for r in reflections:
             outcome = objective_outcome(r)
             doc.add_heading(
@@ -234,6 +350,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 src += f"; model ocenił: {_OUTCOME_LABEL.get(declared, declared).lower()}"
             if src:
                 _add_caption(doc, src)
+            if r.get("self_reported_only"):
+                _add_caption(doc, SELF_REPORTED_CAVEAT)
             if r.get("objective"):
                 _add_caption(doc, f"Cel: {r['objective']}")
             if r.get("summary"):
@@ -355,6 +473,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 action += f"\nOczekiwany efekt: {r['expected_impact']}"
             cells[2].text = action
 
+    _add_measurement_sections(doc, agg)
+
     # ── First impression ─────────────────────────────────────────────────
     fi = stats.get("first_impression") or {}
     if fi.get("avg_score") is not None or fi.get("dimension_avgs"):
@@ -370,6 +490,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 for key, label in _FI_DIM_LABELS.items()
                 if (fi.get("dimension_avgs") or {}).get(key) is not None]
         _add_kv_table(doc, [(l, f"{v}/5") for l, v in dims])
+        if narr.get("first_impression_assessment"):
+            doc.add_paragraph(str(narr["first_impression_assessment"]))
 
         reasons = fi.get("dimension_reasons") or {}
         if reasons:
@@ -390,12 +512,16 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                         fix.add_run("Propozycja zmiany: ").bold = True
                         fix.add_run(str(i["change"]))
 
+    _add_survey_section(doc, stats, agg.get("survey_summaries") or {})
+
     # ── Accessibility ────────────────────────────────────────────────────
     acc = stats.get("accessibility") or {}
     if acc.get("avg_score") is not None or acc.get("findings"):
         doc.add_heading("Dostępność", level=1)
         if acc.get("avg_score") is not None:
             doc.add_paragraph(f"Średnia ocena dostępności: {acc['avg_score']}/5")
+        if narr.get("accessibility_assessment"):
+            doc.add_paragraph(str(narr["accessibility_assessment"]))
         from .scoring import accessibility_severity
 
         images = (acc.get("measured") or {}).get("images") or {}
@@ -413,6 +539,15 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 p = doc.add_paragraph()
                 p.add_run("Rekomendacja: ").bold = True
                 p.add_run(str(f["recommendation"]))
+
+    # ── Responsiveness ───────────────────────────────────────────────────
+    from .reporter_html import stats_table_rows
+    rows = dict(stats_table_rows(stats, narr))
+    doc.add_heading("Responsywność", level=1)
+    _add_kv_table(doc, [("Mobile — przewijanie poziome", rows["Overflow mobile"]),
+                        ("Tablet — przewijanie poziome", rows["Overflow tablet"])])
+    if narr.get("responsiveness_assessment"):
+        doc.add_paragraph(str(narr["responsiveness_assessment"]))
 
     # ── Devices ──────────────────────────────────────────────────────────
     devices = (stats.get("viewport") or {}).get("devices") or []
@@ -438,6 +573,10 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                      "Pomiar techniczny dla każdej szerokości ekranu osobno. "
                      "Przejście przez serwis odbyło się "
                      f"{_session_device_phrase(stats)}.")
+
+    # ── Statistics ───────────────────────────────────────────────────────
+    doc.add_heading("Statystyki zbiorcze", level=1)
+    _add_kv_table(doc, stats_table_rows(stats, narr))
 
     # ── Methodology ──────────────────────────────────────────────────────
     if narr.get("methodology_note"):

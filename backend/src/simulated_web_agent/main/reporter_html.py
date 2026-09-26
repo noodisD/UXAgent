@@ -937,6 +937,18 @@ def _render_recommendations(narr: dict) -> str:
     return _section("Priorytetowe rekomendacje", f'<div class="rec-list">{items}</div>')
 
 
+def pagespeed_error_text(data: dict) -> str:
+    """A PageSpeed call that failed, in plain Polish — shared by HTML and Word."""
+    err = str((data or {}).get("error") or "").lower()
+    why = ("usługa Google PageSpeed nie odpowiedziała w czasie"
+           if "timed out" in err or "timeout" in err
+           else "usługa Google PageSpeed zwróciła błąd")
+    return f"Pomiar nie powiódł się — {why}. To błąd pomiaru, nie wada strony; warto go powtórzyć."
+
+
+PAGESPEED_LABELS = {"good": "Dobry", "needs_improvement": "Do poprawy", "poor": "Słaby"}
+
+
 def _render_pagespeed(ps: dict | None) -> str:
     if not ps or ps.get("skipped") or ps.get("error"):
         return ""
@@ -960,15 +972,10 @@ def _render_pagespeed(ps: dict | None) -> str:
             # red — "Błąd: The read operation timed out" — which reads as a
             # fault on the site, in English, in a Polish client document. It is
             # a measurement that did not complete.
-            err = str(data.get("error") or "").lower()
-            why = ("usługa Google PageSpeed nie odpowiedziała w czasie"
-                   if "timed out" in err or "timeout" in err
-                   else "usługa Google PageSpeed zwróciła błąd")
             return f"""
             <div class="ps-card">
               <div class="ps-device">{strategy.capitalize()}</div>
-              <div style="color:#6c757d;font-size:13px;">Pomiar nie powiódł się — {why}.
-                To błąd pomiaru, nie wada strony; warto go powtórzyć.</div>
+              <div style="color:#6c757d;font-size:13px;">{_esc(pagespeed_error_text(data))}</div>
             </div>"""
 
         score = data.get("performance_score")
@@ -1019,6 +1026,26 @@ _SCROLL_METHOD = (
 )
 
 
+def scroll_coverage_text(scroll: dict) -> str:
+    """How many steps the scroll figure rests on — shared by HTML and Word."""
+    measured = int((scroll or {}).get("steps_measured") or 0)
+    unmeasurable = int((scroll or {}).get("steps_unmeasurable") or 0)
+    if not (measured or unmeasurable):
+        return ""
+    text = (f"Zmierzono na {measured} z {measured + unmeasurable} kroków. "
+            if unmeasurable else f"Zmierzono na {measured} krokach. ")
+    if unmeasurable:
+        text += ("Na pozostałych strona przewija się wewnątrz własnych "
+                 "paneli (jak konfigurator), czego ta metoda nie widzi.")
+    return text
+
+
+SCROLL_LOW_NOTE = ("Uczestnicy badania rzadko przewijali poniżej 30% strony. Warto "
+                   "sprawdzić, czy ważne treści nie leżą zbyt nisko.")
+SCROLL_UNMEASURABLE = ("Nie do zmierzenia na tej stronie — strona nie przewija się jako "
+                       "całość, a treść przesuwa się wewnątrz paneli.")
+
+
 def _render_scroll_depth(scroll: dict | None) -> str:
     """Scroll depth, with the answer to "how does the AI know?" on the page.
 
@@ -1032,22 +1059,14 @@ def _render_scroll_depth(scroll: dict | None) -> str:
     if not scroll:
         return ""
     avg = scroll.get("avg_max_depth_pct")
-    measured = int(scroll.get("steps_measured") or 0)
     unmeasurable = int(scroll.get("steps_unmeasurable") or 0)
-    coverage = ""
-    if measured or unmeasurable:
-        coverage = (f"Zmierzono na {measured} z {measured + unmeasurable} kroków. "
-                    if unmeasurable else f"Zmierzono na {measured} krokach. ")
-        if unmeasurable:
-            coverage += ("Na pozostałych strona przewija się wewnątrz własnych "
-                         "paneli (jak konfigurator), czego ta metoda nie widzi.")
+    coverage = scroll_coverage_text(scroll)
     method = f'<p class="sb-rules">{_esc(coverage)} {_esc(_SCROLL_METHOD)}</p>'
     if avg is None:
         if not unmeasurable:
             return ""
         return _section("Głębokość przewijania", (
-            '<p style="font-size:14px;">Nie do zmierzenia na tej stronie — strona '
-            'nie przewija się jako całość, a treść przesuwa się wewnątrz paneli.</p>'
+            f'<p style="font-size:14px;">{_esc(SCROLL_UNMEASURABLE)}</p>'
             + method))
     lo = scroll.get("min_max_depth_pct", "—")
     hi = scroll.get("max_max_depth_pct", "—")
@@ -1058,8 +1077,7 @@ def _render_scroll_depth(scroll: dict | None) -> str:
     if pct < 30:
         # Participant behaviour, not a site verdict — worded as such.
         warning = ('<p style="margin-top:10px;color:#6b6f76;font-size:13px;">'
-                   'Uczestnicy badania rzadko przewijali poniżej 30% strony. Warto '
-                   'sprawdzić, czy ważne treści nie leżą zbyt nisko.</p>')
+                   f'{_esc(SCROLL_LOW_NOTE)}</p>')
     body = f"""
     <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:14px;">
       <div>
@@ -1107,6 +1125,12 @@ def _render_broken_links(links: dict | None) -> str:
     return _section("Uszkodzone linki", body)
 
 
+FORM_FUNNEL_NOTE = ("Wysłanie liczy się tylko wtedy, gdy po wpisaniu danych kliknięto "
+                    "przycisk, który rzeczywiście wysyła formularz — nie link ani przycisk "
+                    "nawigacji. Audyt nigdy nie wpisuje danych osobowych, więc formularzy "
+                    "kontaktowych, rezerwacji i zamówień z założenia nie wysyła.")
+
+
 def _render_form_funnel(forms: dict | None) -> str:
     if not forms:
         return ""
@@ -1141,11 +1165,38 @@ def _render_form_funnel(forms: dict | None) -> str:
     # "Dotarli do akcji submit 1/3" was a link click counted as a submission.
     # Say how submission is judged — and that personal-data forms are never
     # sent by design, or a 0 here reads as the site failing.
-    body += ('<p class="sb-rules">Wysłanie liczy się tylko wtedy, gdy po wpisaniu danych '
-             'kliknięto przycisk, który rzeczywiście wysyła formularz — nie link ani '
-             'przycisk nawigacji. Audyt nigdy nie wpisuje danych osobowych, więc '
-             'formularzy kontaktowych, rezerwacji i zamówień z założenia nie wysyła.</p>')
+    body += f'<p class="sb-rules">{_esc(FORM_FUNNEL_NOTE)}</p>' 
     return _section("Lejek formularzy", body)
+
+
+def stats_table_rows(stats: dict, narr: dict | None = None) -> list[tuple[str, str]]:
+    """The "Statystyki zbiorcze" rows — one list for the HTML and the Word file."""
+    n = stats.get("participant_count", 0)
+    sc = (stats.get("heuristic") or {}).get("severity_counts") or {}
+    fi_avg = (stats.get("first_impression") or {}).get("avg_score")
+    a11y_avg = (stats.get("accessibility") or {}).get("avg_score")
+    vp = stats.get("viewport") or {}
+    counts = _issue_counts(narr)
+    scanned = {d.get("viewport") for d in (vp.get("devices") or [])
+               if isinstance(d, dict) and d.get("pages_scanned")}
+
+    def overflow(device: str, key: str) -> str:
+        if "devices" in vp and device not in scanned:
+            return "nie zmierzono"
+        return f"{vp.get(key, 0)}/{n} sesji"
+
+    return [
+        ("Uczestnicy", str(n)),
+        ("Łącznie problemów", str(counts["total"])),
+        ("Problemy krytyczne", str(counts["critical"])),
+        ("Problemy poważne", str(counts["serious"])),
+        ("Problemy drobne", str(counts["minor"])),
+        ("Do weryfikacji przez człowieka", str(int(sc.get("needs_verification") or 0))),
+        ("Pierwsze wrażenie (śr.)", f"{fi_avg}/5" if fi_avg else "—"),
+        ("Dostępność (śr.)", f"{a11y_avg}/5" if a11y_avg else "—"),
+        ("Overflow mobile", overflow("mobile", "mobile_overflow_sessions")),
+        ("Overflow tablet", overflow("tablet", "tablet_overflow_sessions")),
+    ]
 
 
 def _render_stats_table(stats: dict, narr: dict | None = None) -> str:
@@ -1160,23 +1211,10 @@ def _render_stats_table(stats: dict, narr: dict | None = None) -> str:
         style = f' style="color:{color};font-weight:700;"' if color else ""
         return f"<tr><td>{_esc(label)}</td><td{style}>{_esc(value)}</td></tr>"
 
-    counts = _issue_counts(narr)
-    held = int(sc.get("needs_verification") or 0)
-    rows = (
-        row("Uczestnicy", n) +
-        row("Łącznie problemów", counts["total"]) +
-        row("Problemy krytyczne", counts["critical"], "#E60000") +
-        row("Problemy poważne", counts["serious"], "#856404") +
-        row("Problemy drobne", counts["minor"], "#0c5460") +
-        row("Do weryfikacji przez człowieka", held) +
-        row("Pierwsze wrażenie (śr.)", f"{fi_avg}/5" if fi_avg else "—") +
-        row("Dostępność (śr.)", f"{a11y_avg}/5" if a11y_avg else "—") +
-        row("Overflow mobile", f"{vp.get('mobile_overflow_sessions',0)}/{n} sesji"
-            if not ("devices" in vp and not any(isinstance(d, dict) and d.get("viewport") == "mobile"
-                                                 and d.get("pages_scanned") for d in vp.get("devices") or []))
-            else "nie zmierzono") +
-        row("Overflow tablet", f"{vp.get('tablet_overflow_sessions',0)}/{n} sesji")
-    )
+    colors = {"Problemy krytyczne": "#E60000", "Problemy poważne": "#856404",
+              "Problemy drobne": "#0c5460"}
+    rows = "".join(row(label, value, colors.get(label))
+                   for label, value in stats_table_rows(stats, narr))
     table = f"""
     <table style="width:100%;border-collapse:collapse;font-size:13px;">
       <colgroup><col style="width:55%"><col style="width:45%"></colgroup>
@@ -1217,6 +1255,15 @@ _SOURCE_PL = {
 def objective_outcome(r: dict) -> str:
     """The outcome the score counts for this participant, else the model's verdict."""
     return r.get("effective_outcome") or r.get("outcome") or "unknown"
+
+
+SELF_REPORTED_CAVEAT = ("⚠ Relacja uczestnika, niezweryfikowana względem zapisu sesji — "
+                        "część opisanych trudności może wynikać z ograniczeń narzędzia, "
+                        "a nie z serwisu.")
+OBJECTIVES_NOTE = ("Poniższe relacje pochodzą od uczestników badania i opisują ich "
+                   "własne odczucia z sesji. W odróżnieniu od sekcji „Problemy\" nie są "
+                   "automatycznie weryfikowane względem zapisu sesji — część opisanych "
+                   "trudności może wynikać z ograniczeń narzędzia, a nie z serwisu.")
 
 
 def _render_objectives(stats: dict) -> str:
@@ -1261,12 +1308,8 @@ def _render_objectives(stats: dict) -> str:
         # trace. When it names our machinery or repeats a claim the gate threw
         # out, rendering it as plain fact is how a suppressed finding still
         # reaches the client — which is exactly what both re-run reports did.
-        unverified = (
-            '<div class="obj-caveat">⚠ Relacja uczestnika, niezweryfikowana '
-            'względem zapisu sesji — część opisanych trudności może wynikać z '
-            'ograniczeń narzędzia, a nie z serwisu.</div>'
-            if r.get("self_reported_only") else ""
-        )
+        unverified = (f'<div class="obj-caveat">{_esc(SELF_REPORTED_CAVEAT)}</div>'
+                      if r.get("self_reported_only") else "")
         cards += f"""
         <div class="obj-card">
           <div class="obj-head">
@@ -1293,13 +1336,7 @@ def _render_objectives(stats: dict) -> str:
     # hyundai run all four of one persona's blockers did exactly that. Detecting
     # which ones proved unreliable (see attribution.restates_a_gated_finding),
     # but saying plainly what this section IS costs nothing and is always true.
-    note = (
-        '<p class="obj-note">Poniższe relacje pochodzą od uczestników badania '
-        'i opisują ich własne odczucia z sesji. W odróżnieniu od sekcji '
-        '„Problemy" nie są automatycznie weryfikowane względem zapisu sesji — '
-        'część opisanych trudności może wynikać z ograniczeń narzędzia, '
-        'a nie z serwisu.</p>'
-    )
+    note = f'<p class="obj-note">{_esc(OBJECTIVES_NOTE)}</p>' 
     return _section("Realizacja zadania",
                      f'{note}<div class="obj-tally">{tally}</div>{cards}')
 
