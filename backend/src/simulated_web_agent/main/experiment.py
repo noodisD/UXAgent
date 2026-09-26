@@ -991,7 +991,9 @@ async def experiment_async(
     gpt.configure(cfg.llm_provider)
     print("llm provider: " + cfg.llm_provider)
 
-    sem = asyncio.Semaphore(concurrency)
+    # 0 (an empty wizard field sends it) blocked every session at the
+    # semaphore for good, after the persona LLM calls were already spent.
+    sem = asyncio.Semaphore(max(1, int(concurrency or 1)))
     total = len(agents)
     done = 0
     lock = asyncio.Lock()

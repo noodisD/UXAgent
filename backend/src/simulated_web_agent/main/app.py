@@ -287,7 +287,7 @@ def _run_thread(run_id: str, payload: dict):
             general_intent=payload["general_intent"],
             start_url=payload["start_url"],
             max_steps=int(payload["max_steps"]),
-            concurrency=int(payload.get("concurrency", 4)),
+            concurrency=max(1, int(payload.get("concurrency") or 4)),
             example_persona=payload.get("example_persona", None),
             persona_slots=payload.get("persona_slots", None),
             device=payload.get("device", "desktop"),

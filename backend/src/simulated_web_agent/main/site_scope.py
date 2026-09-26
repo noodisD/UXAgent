@@ -51,10 +51,27 @@ def target_url_for(store) -> str:
         return ""
 
 
+# Second-level suffixes under which each name is a separate site. With plain
+# last-two-labels, every *.com.pl was "com.pl": for www.euro.com.pl the off-site
+# guard let the persona onto komputronik.com.pl and neonet.com.pl, and their
+# findings counted as the client's. Not a full public-suffix list — the
+# functional and regional .pl ones (NASK) and the common foreign ones.
+_SECOND_LEVEL = frozenset("""
+com.pl net.pl org.pl info.pl biz.pl edu.pl gov.pl mil.pl nom.pl priv.pl shop.pl
+sklep.pl media.pl auto.pl tm.pl travel.pl turystyka.pl agro.pl atm.pl pc.pl rel.pl
+realestate.pl gmina.pl powiat.pl waw.pl warszawa.pl wroc.pl wroclaw.pl krakow.pl
+gda.pl gdansk.pl gdynia.pl sopot.pl poznan.pl lodz.pl szczecin.pl katowice.pl
+lublin.pl torun.pl bydgoszcz.pl bialystok.pl olsztyn.pl opole.pl rzeszow.pl
+kielce.pl zgora.pl slask.pl pomorze.pl mazury.pl
+co.uk org.uk ac.uk gov.uk me.uk com.au net.au org.au co.nz co.jp com.br com.mx
+com.tr co.za com.ua co.il com.cn com.sg co.in com.ar com.es
+""".split())
+
+
 def registrable_domain(url) -> str:
-    """'https://signin.dm.pl/x' -> 'dm.pl'. Naive last-two-labels heuristic —
-    fine for the .pl/.com domains this tool audits; not a public-suffix parser
-    (co.uk-style TLDs would need one)."""
+    """'https://signin.dm.pl/x' -> 'dm.pl'; 'https://www.euro.com.pl/' ->
+    'euro.com.pl'. Last two labels, or three under a known second-level
+    suffix (_SECOND_LEVEL)."""
     if not url or not isinstance(url, str):
         return ""
     try:
@@ -63,7 +80,9 @@ def registrable_domain(url) -> str:
         return ""
     if not netloc or "." not in netloc:
         return ""
-    return ".".join(netloc.split(".")[-2:])
+    labels = netloc.split(".")
+    n = 3 if len(labels) >= 3 and ".".join(labels[-2:]) in _SECOND_LEVEL else 2
+    return ".".join(labels[-n:])
 
 
 def same_site(url, target_url) -> bool:

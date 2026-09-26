@@ -133,7 +133,11 @@ async def run_link_check(store: TraceStore, headless: bool = True) -> list[dict]
     Reads URLs from store; saves findings via store.write_link_findings().
     Returns the findings list.
     """
-    urls = store.visited_urls()[:_MAX_URLS]
+    # On-site pages only: a tab or redirect to another domain must not have its
+    # links counted as the client's.
+    from .site_scope import same_site, target_url_for
+    target = target_url_for(store)
+    urls = [u for u in store.visited_urls() if not target or same_site(u, target)][:_MAX_URLS]
 
     if not urls:
         log.warning("[link_checker] No URLs in %s", store.trace_dir)

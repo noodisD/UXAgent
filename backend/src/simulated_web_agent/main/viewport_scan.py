@@ -332,7 +332,10 @@ async def run_viewport_scan(store: TraceStore, headless: bool = True) -> list[di
     Reads URLs from store; saves findings via store.write_viewport_findings().
     Returns the findings list.
     """
-    urls = store.visited_urls()[:5]  # limit to first 5 to keep scan fast
+    # On-site pages only, first 5 to keep the scan fast.
+    from .site_scope import same_site, target_url_for
+    target = target_url_for(store)
+    urls = [u for u in store.visited_urls() if not target or same_site(u, target)][:5]
 
     if not urls:
         log.warning("[viewport] No URLs found in %s", store.trace_dir)
