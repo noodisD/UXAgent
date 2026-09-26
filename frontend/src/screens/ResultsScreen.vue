@@ -454,9 +454,11 @@ const mean = (vals: number[]) => vals.length ? vals.reduce((a, b) => a + b, 0) /
 // Why a finding is held back from the confirmed report (drives the chip). One
 // of the three gates: off-site page, claim unsupported by the trace, or a
 // harness interaction failure. null = a confirmed finding.
-function exclusionOf(h: any): 'offSite' | 'unsupported' | 'harness' | null {
+function exclusionOf(h: any): 'offSite' | 'unsupported' | 'harness' | 'progress' | null {
   if (h?.offSite) return 'offSite'
   if (h?.claimVerdict === 'unsupported') return 'unsupported'
+  // Held, but the repeated clicks worked: the "failed interaction" hint is wrong for it.
+  if (h?.harnessSuspect && h?.repeatedWithProgress) return 'progress'
   if (h?.harnessSuspect) return 'harness'
   return null
 }

@@ -85,9 +85,9 @@ def _gate_reason(finding: dict) -> str:
         return ("cytowany tekst pochodzi z automatycznego opisu strony, a nie ze "
                 "strony — żadna strona tej sesji go nie zawiera")
     if finding.get("repeated_with_progress"):
-        return ("powtórzone kliknięcie za każdym razem zmieniało stronę — to nie "
-                "awaria narzędzia; wstrzymane, bo zapis nie rozstrzyga, czy opisane "
-                "zachowanie jest wadą strony")
+        return ("powtórzone kliknięcie za każdym razem zmieniało stronę, więc to nie "
+                "awaria narzędzia, ale zapis nie rozstrzyga, czy opisane zachowanie "
+                "jest wadą strony")
     if finding.get("harness_suspect"):
         return "prawdopodobna awaria narzędzia, nie strony"
     if finding.get("off_site"):

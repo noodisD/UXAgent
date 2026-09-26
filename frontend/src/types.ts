@@ -76,6 +76,7 @@ export type HeuristicFinding = FindingEvidence & {
   severity: Severity; id: number; evidence: string; recommendation: string
   /** methodology fields — see METHODOLOGY_PLAN.md §1.3 / §3.1 */
   harnessSuspect?: boolean
+  repeatedWithProgress?: string | null
   requiresHumanCheck?: boolean
   confidence?: 'high' | 'medium' | 'low'
   /** set when evidence capped an over-claimed confidence */

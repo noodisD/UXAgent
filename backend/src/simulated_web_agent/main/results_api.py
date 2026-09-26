@@ -268,6 +268,9 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
                 "observationQuote": h.get("observation_quote", ""),
                 "verified": bool(h.get("verified")),
                 "harnessSuspect": bool(h.get("harness_suspect")),
+                # Held for repeated clicks that did change the page — not a
+                # failure of the tool (attribution.progress_run_steps).
+                "repeatedWithProgress": h.get("repeated_with_progress") or None,
                 "requiresHumanCheck": bool(h.get("requires_human_check")),
                 "confidence": h.get("confidence", "medium"),
                 # Set when evidence capped an over-claimed confidence, so the
