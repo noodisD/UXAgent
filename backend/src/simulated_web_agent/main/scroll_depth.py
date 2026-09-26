@@ -19,6 +19,33 @@ from .trace_store import TraceStore
 log = logging.getLogger(__name__)
 
 
+def _landing_steps(store: TraceStore) -> set[int]:
+    """Steps whose reading is where a newly loaded page happened to sit.
+
+    A reading is taken after the harness brings the step's target into view,
+    so it shows how deep the participant went to reach it. A step on a page
+    that has just loaded, with no target to scroll to (scroll, back,
+    terminate…), records the page's own landing position instead — not the
+    participant. The first step is the same case, and is dropped above.
+    """
+    from .trace_store import parse_action
+
+    try:
+        actions = [parse_action(a) or {} for a in (store.read_action_trace() or [])]
+    except Exception:
+        return set()
+    out = set()
+    for i in range(1, len(actions)):
+        try:
+            here = (store.url_at_step(i) or "").split("#")[0]
+            before = (store.url_at_step(i - 1) or "").split("#")[0]
+        except Exception:
+            continue
+        if here and before and here != before and not actions[i].get("target"):
+            out.add(i)
+    return out
+
+
 def run_scroll_analysis(store: TraceStore) -> dict:
     """
     Aggregate scroll depth data from existing scroll_top_*.txt files.
@@ -45,7 +72,8 @@ def run_scroll_analysis(store: TraceStore) -> dict:
     # "maximum scroll depth", identical across all three because it was the
     # page's landing position, not anything a participant did.
     first = min((d["step"] for d in depths), default=None)
-    acted = [d for d in depths if d["step"] != first] or []
+    landed = _landing_steps(store)
+    acted = [d for d in depths if d["step"] != first and d["step"] not in landed] or []
     depth_pcts = [d["depth_pct"] for d in acted if d.get("depth_pct") is not None]
     scroll_tops = [d["scroll_top"] for d in acted if d.get("scroll_top") is not None]
     # Steps whose page could not be scrolled at the document level at all.

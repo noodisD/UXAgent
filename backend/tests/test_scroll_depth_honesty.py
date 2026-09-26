@@ -82,3 +82,15 @@ def test_participant_behaviour_is_not_worded_as_a_site_verdict():
                                  "steps_measured": 10, "steps_unmeasurable": 0})
     assert "below-the-fold mogą być pomijane" not in html
     assert "Uczestnicy badania" in html
+
+
+def test_a_freshly_loaded_page_with_no_target_is_not_the_participant(tmp_path):
+    """The reading is where the page loaded, not where anyone scrolled."""
+    store = _session(tmp_path, [(0, 3000, 900), (1500, 3000, 900), (2100, 3000, 900)])
+    store.write_action_trace([json.dumps({"action": "click", "target": "a"}),
+                              json.dumps({"action": "click", "target": "b"}),
+                              json.dumps({"action": "scroll", "direction": "down", "amount": 1})])
+    for url in ("https://x.pl/", "https://x.pl/", "https://x.pl/nowa"):
+        store.append_observation({"tabs": [{"url": url, "active": True}]})
+    summary = run_scroll_analysis(store)
+    assert summary["max_depth_pct"] == 71.4, "step 2 — new page, no target — is left out"

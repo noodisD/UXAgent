@@ -1017,10 +1017,12 @@ def _render_pagespeed(ps: dict | None) -> str:
 
 
 _SCROLL_METHOD = (
-    "Jak to mierzymy: przed każdym krokiem uczestnika zapisywana jest pozycja "
-    "przewinięcia okna przeglądarki i wysokość strony; wynik to odsetek strony, "
-    "do którego uczestnik przewinął. Pierwszy zapis (sprzed pierwszej akcji) jest "
-    "pomijany, bo nie odzwierciedla zachowania uczestnika. Są to zachowania "
+    "Jak to mierzymy: przy każdym kroku uczestnika zapisywana jest pozycja "
+    "przewinięcia okna przeglądarki — po przewinięciu do elementu, którego krok "
+    "dotyczy — i wysokość strony; wynik to odsetek strony, do którego uczestnik "
+    "dotarł. Pomijane są zapisy, które nie odzwierciedlają zachowania uczestnika: "
+    "sprzed pierwszej akcji oraz z dopiero co wczytanej strony, na której krok "
+    "nie dotyczył żadnego elementu. Są to zachowania "
     "symulowanych uczestników badania, a nie rzeczywistych użytkowników, i dane "
     "nie pochodzą z Google PageSpeed."
 )
