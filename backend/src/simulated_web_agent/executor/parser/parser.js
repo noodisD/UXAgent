@@ -5,11 +5,38 @@
 
 const parse = () => {
   /* ---------- globals --------------------------------------------------- */
+  // Not 'picture': its <img alt> is often a control's only name. With it
+  // blacklisted, every colour chip on the Hyundai configurator reached the
+  // persona as an unnamed <button>, and the report built false findings on
+  // colours the persona picked blind. Its <source> children are empty and
+  // are pruned like any other empty element.
   const BLACKLISTED_TAGS = new Set([
     'script', 'style', 'link', 'meta', 'noscript', 'template',
-    'iframe', 'svg', 'canvas', 'picture', 'video', 'audio',
+    'iframe', 'svg', 'canvas', 'video', 'audio',
     'object', 'embed'
   ]);
+
+  // Elements that are controls in their own right, even inside another
+  // clickable element — a checkbox or an "info" button inside a clickable
+  // card. They used to get no id there, and when their only content was an
+  // icon they vanished entirely: the package step's checkbox
+  // (aria-label "checkbox Pakiet COMFORT") never reached the persona, and the
+  // report said the step had no way to add a package.
+  const CONTROL_TAGS = new Set(['button', 'input', 'select', 'textarea']);
+  const CONTROL_ROLES = new Set([
+    'button', 'checkbox', 'radio', 'switch', 'link', 'option', 'tab', 'menuitem'
+  ]);
+  const isRealControl = (el, tag) =>
+    CONTROL_TAGS.has(tag) ||
+    (tag === 'a' && el.hasAttribute('href')) ||
+    CONTROL_ROLES.has(el.getAttribute('role') || '');
+
+  // A control's name when it shows no text: its aria-label, or the alt of
+  // the image it wraps (colour and interior chips are images only).
+  const imageAlt = (el) => {
+    const img = el.querySelector && el.querySelector('img[alt]');
+    return img ? (img.getAttribute('alt') || '').trim() : '';
+  };
 
   const ALLOWED_ATTR = new Set([
     'id', 'type', 'name', 'value', 'placeholder',
@@ -56,11 +83,26 @@ const parse = () => {
 
   const isEmpty = (el) => {
     if (PRESERVE_EMPTY_TAGS.has(el.tagName.toLowerCase())) return false;
+    // A named control, or anything carrying its own accessible name, is
+    // content even with no text: an icon-only checkbox or link.
+    if (el.hasAttribute('parser-semantic-id') ||
+        (el.getAttribute('aria-label') || '').trim()) return false;
     for (const n of el.childNodes) {
       if (n.nodeType === 3 && n.textContent.trim()) return false;
       if (n.nodeType === 1 && !isEmpty(n)) return false;
     }
     return true;
+  };
+
+  const hasOnScreenFixedLayer = (el) => {
+    const all = el.querySelectorAll('*');
+    for (let i = 0; i < all.length && i < 3000; i++) {
+      const pos = getComputedStyle(all[i]).position;
+      if (pos !== 'fixed' && pos !== 'sticky') continue;
+      const r = all[i].getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) return true;
+    }
+    return false;
   };
 
   const isVisible = (el) => {
@@ -94,7 +136,12 @@ const parse = () => {
         const canScrollY = /(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight;
         if (canScrollY) { hasScrollableAncestor = true; break; }
       }
-      belowPortNotScrollable = !hasScrollableAncestor;
+      // A wrapper laid out below the fold can still hold a fixed layer that is
+      // on screen: a modal's portal, appended to the end of <body> on a page
+      // whose scrolling the modal has locked. Dropping the wrapper dropped the
+      // dialog — "Czy zapisać konfigurację na później?" was on screen while
+      // the persona saw only the page beneath and called "Zamknij" broken.
+      belowPortNotScrollable = !hasScrollableAncestor && !hasOnScreenFixedLayer(el);
     }
     if (hidden || zeroSize || outOfPort || belowPortNotScrollable) return false;
     return true;
@@ -179,12 +226,15 @@ const parse = () => {
       return computedStyle.cursor === 'pointer';
     })();
 
-    const isClickable = !parentIsClickable && probablyClickable && !isDisabled;
+    const isClickable = probablyClickable && !isDisabled &&
+      (!parentIsClickable || isRealControl(original, tag));
 
     let thisName = '';
     if (isClickable) {
       const base = slug((original.innerText || '').trim() ||
+        (original.getAttribute('aria-label') || '').trim() ||
         original.getAttribute('title') ||
+        imageAlt(original) ||
         original.getAttribute('placeholder') ||
         tag);
       thisName = uniqueName(parentName ? `${parentName}.${base}` : base);
