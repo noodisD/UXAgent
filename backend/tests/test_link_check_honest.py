@@ -18,6 +18,7 @@ from simulated_web_agent.main.link_checker import _check_links_on_page, classify
 @pytest.mark.parametrize("status,error,verdict", [
     (200, None, "ok"), (301, None, "ok"), (404, None, "broken"), (503, None, "broken"),
     (403, None, "refused"), (429, None, "refused"),
+    (400, None, "refused"),  # facebook.com to an automated request: not a dead link
     (None, "net::ERR_NAME_NOT_RESOLVED", "broken"),
     (None, "getaddrinfo ENOTFOUND nie-ma-takiej.pl", "broken"),
     (None, "Timeout 8000ms exceeded", "unchecked"),

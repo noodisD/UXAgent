@@ -40,6 +40,10 @@ _OK_STATUSES = {200, 201, 204, 301, 302, 303, 304, 307, 308}
 # one gets the page. A UX specialist checks a "broken link" claim by clicking
 # it, so a false one here costs more credibility than a missed real one.
 #
+#   400     — the server rejected the form of our request: facebook.com
+#             answers 400 to an automated request for a profile a person
+#             opens fine, and the first live run of the request client
+#             reported Hyundai's Facebook link as broken on 10 pages
 #   401/403 — refused this client (bot protection, auth wall)
 #   405     — the server dislikes our request method, not the URL
 #   429     — we asked too often
@@ -47,7 +51,7 @@ _OK_STATUSES = {200, 201, 204, 301, 302, 303, 304, 307, 308}
 # Genuinely broken still is: 404, 410, any 5xx, and a domain that does not
 # resolve. A timeout or a refused connection is "could not check", reported as
 # such — never counted as a working link, which is what status 0 used to mean.
-_REFUSED_US_STATUSES = {401, 403, 405, 429}
+_REFUSED_US_STATUSES = {400, 401, 403, 405, 429}
 
 # Exception texts that mean the host does not exist — dead for any visitor.
 _NO_SUCH_HOST = ("err_name_not_resolved", "getaddrinfo", "enotfound", "name or service not known",
@@ -119,7 +123,7 @@ async def _check_links_on_page(page, url: str) -> dict[str, Any]:
             try:
                 resp = await request.head(href, timeout=_FETCH_TIMEOUT_MS, max_redirects=5)
                 status = resp.status
-                if status == 405:  # some servers refuse HEAD; ask the way a browser does
+                if status in (400, 405):  # some servers refuse HEAD; ask the way a browser does
                     resp = await request.get(href, timeout=_FETCH_TIMEOUT_MS, max_redirects=5)
                     status = resp.status
             except Exception as exc:
