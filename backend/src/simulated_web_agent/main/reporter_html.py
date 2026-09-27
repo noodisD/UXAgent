@@ -136,6 +136,7 @@ body {
    five and dropped the sixth onto a line by itself. Three columns give every
    label room and pair the severities on one row. */
 .vp-na { color: #6c757d; font-weight: 600; }
+.a11y-also { font-size: 12.5px; color: #3a3f47; margin: 4px 0; }
 .obj-src { font-size: 11.5px; color: #6c757d; margin: 2px 0 6px; }
 .header-note { position: relative; z-index: 1; margin-top: 18px; font-size: 12.5px; line-height: 1.5;
   color: rgba(255,255,255,.78); border-left: 2px solid rgba(255,255,255,.35); padding-left: 10px; }
@@ -1421,7 +1422,8 @@ def _unconfirmed_note(narr: dict | None) -> str:
     items = [i for i in ((narr or {}).get("unconfirmed_issues") or []) if isinstance(i, dict)]
     if not items:
         return ""
-    names = "; ".join(f"H{i.get('heuristic_id')}: {i.get('heuristic_name', '')}" for i in items)
+    names = "; ".join((f"H{i['heuristic_id']}: " if isinstance(i.get("heuristic_id"), int) else "")
+                      + str(i.get("heuristic_name") or "") for i in items)
     return (f"Pominięto też {len(items)} problem(y) z podsumowania, dla których żadne "
             f"ustalenie nie zostało potwierdzone — {names}. Ich źródłowe wnioski są "
             "na liście poniżej albo nie przeszły weryfikacji.")
@@ -1594,6 +1596,12 @@ def _render_accessibility_detail(stats: dict) -> str:
         # two severities, depending on where the reader looked.
         sev, measured_text = accessibility_severity(f, images)
         measured = f'<div class="measured">{_esc(measured_text)}</div>' if measured_text else ""
+        # Other barriers of the same kind, on other pages, with their own text
+        # — merged into this entry, never presented as its proof.
+        measured += "".join(
+            f'<div class="a11y-also"><b>Również:</b> {_esc(o.get("detail") or "")} '
+            f'<span class="a11y-where">{_esc(o.get("url") or "")}</span></div>'
+            for o in (f.get("other_instances") or [])[:3])
         bg, fg, border = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
         where = ", ".join(f.get("urls") or [])[:160]
         who = ", ".join(f.get("personas") or [])

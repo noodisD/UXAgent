@@ -316,6 +316,25 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
     }
 
 
+def rationale_text(result: dict) -> str:
+    """The score's one-line rationale, written from the breakdown itself.
+
+    The narrator wrote its own, and it contradicted the table printed under
+    it — "−0.25 za częściowe wykonanie przez wszystkie 3/3" above a line
+    counting 2 of 3, "poważny problem" above "liczone jako drobny".
+    """
+    items = sorted((d for d in result.get("deductions") or [] if d.get("amount")),
+                   key=lambda d: -abs(d["amount"]))
+    parts = [f"{d['label']} −{d['amount']:.2f}" if d["amount"] >= 0
+             else f"{d['label']} +{abs(d['amount']):.2f}" for d in items[:4]]
+    more = len(items) - len(parts)
+    text = (f"Ocena {result['score']:.1f}/5: od {result['start']:.1f} odjęto "
+            f"{result['total_deduction']:.2f} pkt")
+    if parts:
+        text += " — " + "; ".join(parts) + (f" i {more} mniejsze pozycje" if more > 0 else "")
+    return text + ". Pełne rozbicie w sekcji „Jak obliczono ocenę”."
+
+
 def breakdown_text(result: dict) -> str:
     """The breakdown in plain text, for the aggregate prompt to explain."""
     lines = [f"Punkt wyjścia: {result['start']:.1f}"]

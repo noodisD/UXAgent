@@ -538,6 +538,10 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 doc.add_paragraph(str(f["detail"]))
             if measured:
                 doc.add_paragraph(measured)
+            for o in (f.get("other_instances") or [])[:3]:
+                p = doc.add_paragraph()
+                p.add_run("Również: ").bold = True
+                p.add_run(f"{o.get('detail') or ''} ({o.get('url') or ''})")
             if f.get("recommendation"):
                 p = doc.add_paragraph()
                 p.add_run("Rekomendacja: ").bold = True

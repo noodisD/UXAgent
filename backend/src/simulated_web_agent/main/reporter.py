@@ -30,7 +30,7 @@ from .severity import (
 )
 from .a11y_checks import a11y_topic, measure_names, merge_pages
 from .evidence import page_quote, pages_contain, rendering_artifact
-from .scoring import RULES as SCORING_RULES, breakdown_text, compute_ux_score
+from .scoring import RULES as SCORING_RULES, breakdown_text, compute_ux_score, rationale_text
 from .attribution import restates_a_gated_finding
 from .iso_metrics import current_effectiveness, effective_outcome
 from .redaction import clean as _redact, mentions_harness_fault
@@ -555,6 +555,10 @@ _NOT_ASSESSABLE_MARKERS = (
     "cannot judge", "can't judge", "unable to judge", "no experience to judge",
     "too short to assess", "too short to evaluate", "too short to judge",
     "no task execution", "nie mogę tego ocenić", "nie jestem w stanie ocenić",
+    # The first live run on the current code: "I had no opportunity to assess
+    # feelings of control … regarding payment" averaged as a 1,00/5.
+    "no opportunity to assess", "no opportunity to evaluate", "no opportunity to judge",
+    "had no opportunity", "nie miałem okazji ocenić", "nie miałam okazji ocenić",
 )
 
 
@@ -612,6 +616,37 @@ def _build_survey_questions(survey_scores: dict, survey_open: dict,
             out.append({"id": qid, "prompt": _survey_prompt(qid, meta),
                         "kind": "not_assessable", "not_assessable": int(survey_na[qid])})
     return out
+
+
+def _page_of(url: str) -> str:
+    """A page's identity for grouping: scheme, host and path, no query or fragment."""
+    return str(url or "").split("#")[0].split("?")[0].rstrip("/")
+
+
+def _order_a11y_instances(entry: dict) -> None:
+    """Proof from the barrier the entry describes; other barriers named apart.
+
+    Merging by topic put different barriers under one entry — an unnamed
+    combobox on the test-drive form and two unnamed buttons on the homepage —
+    and took the first three examples as they came, so the homepage was cited
+    as proof of the combobox and "2 przyciski bez dostępnej nazwy" appeared
+    nowhere. The worst instance's page supplies the examples first; instances
+    on other pages are listed as further occurrences with their own text.
+    """
+    instances = entry.pop("_instances", [])
+    worst = _page_of(entry.pop("_worst_url", ""))
+    ordered = sorted(instances, key=lambda i: (_page_of(i["example"]["url"]) != worst,
+                                               -severity_rank(i["severity"])))
+    entry["examples"] = [i["example"] for i in ordered[:3]]
+    others, seen = [], {worst}
+    for i in ordered:
+        page = _page_of(i["example"]["url"])
+        if page in seen or not i["detail"]:
+            continue
+        seen.add(page)
+        others.append({"detail": i["detail"][:300], "url": i["example"]["url"],
+                       "persona": i["persona"], "severity": i["severity"]})
+    entry["other_instances"] = others[:3]
 
 
 def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = None,
@@ -975,6 +1010,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 "urls": [], "personas": set(),
                 "topic": topic,
                 "examples": [], "verified": False,
+                "_instances": [], "_worst_url": str(f.get("url") or "").strip(),
             })
             if severity_rank(f.get("severity")) > severity_rank(entry["severity"]):
                 # The worst instance names the merged barrier and describes it.
@@ -982,6 +1018,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 entry["category"], entry["detail"] = category, detail
                 entry["recommendation"] = (str(f.get("recommendation") or "").strip()
                                            or entry["recommendation"])
+                entry["_worst_url"] = str(f.get("url") or "").strip()
             url = str(f.get("url") or "").strip()
             if url and url not in entry["urls"]:
                 entry["urls"].append(url)
@@ -991,16 +1028,19 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # aggregation used to drop all three. Both WCAG issues in the hyundai
             # run then rendered with no proof while their evidence sat on disk.
             shot = str(f.get("screenshot") or "").strip()
-            if len(entry["examples"]) < 3:
-                entry["examples"].append({
+            entry["_instances"].append({
+                "severity": f.get("severity", "drobny"), "detail": detail, "persona": who,
+                "example": {
                     "persona_dir": p_dir, "persona_name": who,
                     "step": f.get("step"), "url": url,
                     "screenshot": f"{p_dir}/{shot}" if shot and p_dir else None,
                     "observation_quote": str(f.get("observation_quote") or "")[:300],
                     "evidence": detail[:300],
                     "verified": bool(f.get("verified")),
-                })
+                }})
             entry["verified"] = entry["verified"] or bool(f.get("verified"))
+    for e in a11y_by_category.values():
+        _order_a11y_instances(e)
     a11y_findings = sorted(
         ({**e, "personas": sorted(e["personas"]), "urls": e["urls"][:5]}
          for e in a11y_by_category.values()),
@@ -1656,7 +1696,8 @@ async def generate_aggregated_report(
     if isinstance(narrative, dict) and "error" not in narrative:
         narrative["overall_ux_score"] = score_result["score"]
 
-    _attach_issue_evidence(narrative, stats)
+    _attach_issue_evidence(narrative, stats, measurements={
+        "links": link_data, "pagespeed": pagespeed_data})
 
     try:
         survey_summaries = await _summarize_survey(reports)
@@ -1738,7 +1779,7 @@ async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
     return {qid: str(summaries.get(qid, "")) for qid in order}
 
 
-def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
+def _attach_issue_evidence(narrative: dict, stats: dict, measurements: dict | None = None) -> None:
     """Deterministically join per-heuristic evidence examples onto narrative issues.
 
     The LLM writes the prose; evidence (screenshots, URLs, observation quotes)
@@ -1805,16 +1846,23 @@ def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
                 issue["verified"] = False
                 unconfirmed.append({**issue, "held_from": key})
                 continue
-            elif perf_line and _is_performance_issue(issue):
-                # A PageSpeed issue is proven by the measurement, not the trace;
-                # it was badged NIEZWERYFIKOWANE beside the score line deducting
-                # for the same number.
+            elif _measured_basis(issue, stats, perf_line, measurements):
+                # An issue proven by a measurement, not by the trace: PageSpeed,
+                # the viewport scan, the link check. It was badged
+                # NIEZWERYFIKOWANE beside the score line deducting for the same
+                # number.
                 issue["examples"] = []
                 issue["verified"] = True
-                issue["measured"] = {"basis": perf_line.get("basis", "")}
+                issue["measured"] = {"basis": _measured_basis(issue, stats, perf_line, measurements)}
             else:
+                # No confirmed finding and no measurement behind it — the same
+                # as a Nielsen issue with none, so held out the same way. The
+                # first live run on the current code counted "the Facebook link
+                # is broken" (a 400 to our request) as a minor issue this way.
                 issue["examples"] = []
                 issue["verified"] = False
+                unconfirmed.append({**issue, "held_from": key})
+                continue
 
             reason = _wcag_demotion_reason(issue, key)
             if reason:
@@ -1828,7 +1876,46 @@ def _attach_issue_evidence(narrative: dict, stats: dict) -> None:
         narrative[key] = kept
     if demoted:
         narrative["minor_issues"] = (narrative.get("minor_issues") or []) + demoted
-    narrative["unconfirmed_issues"] = unconfirmed
+    # Added to what an earlier pass set aside: aggregation runs this once and
+    # stores the result, and every render runs it again on what is left — which
+    # replaced the stored list with an empty one, so the note vanished.
+    prior = [i for i in (narrative.get("unconfirmed_issues") or []) if isinstance(i, dict)]
+    seen = {(i.get("heuristic_id"), i.get("heuristic_name"), i.get("impact")) for i in prior}
+    narrative["unconfirmed_issues"] = prior + [
+        i for i in unconfirmed if (i.get("heuristic_id"), i.get("heuristic_name"), i.get("impact")) not in seen]
+
+
+def _issue_text(issue: dict) -> str:
+    return " ".join(str(issue.get(k) or "") for k in ("heuristic_name", "impact")).lower()
+
+
+def _measured_basis(issue: dict, stats: dict, perf_line: dict | None,
+                    measurements: dict | None) -> str:
+    """The measurement that proves an issue with no heuristic finding, or ""."""
+    if _heuristic_id(issue):
+        return ""
+    text = _issue_text(issue)
+    m = measurements or {}
+    if _is_performance_issue(issue):
+        if perf_line:
+            return perf_line.get("basis", "")
+        mobile = ((m.get("pagespeed") or {}).get("mobile") or {})
+        score = mobile.get("performance_score")
+        if isinstance(score, (int, float)) and score < 50:
+            return f"PageSpeed mobile {score:g}/100"
+        return ""
+    if "link" in text or "odnośnik" in text:
+        broken = (m.get("links") or {}).get("broken_urls") or []
+        return (f"test linków: {len(broken)} uszkodzony(ch) — " + ", ".join(broken[:3])) if broken else ""
+    if any(w in text for w in ("responsyw", "mobiln", "dotyk", "przewijani", "kontrast")):
+        devices = [d for d in ((stats.get("viewport") or {}).get("devices") or []) if isinstance(d, dict)]
+        hits = [f"{d.get('viewport')}: {d.get('tap_targets_below_min', 0)} małych celów dotykowych, "
+                f"{d.get('contrast_failures', 0)} błędów kontrastu, "
+                f"{d.get('pages_with_overflow', 0)} stron z przewijaniem poziomym"
+                for d in devices if (d.get("tap_targets_below_min") or d.get("contrast_failures")
+                                     or d.get("pages_with_overflow"))]
+        return "skan urządzeń — " + "; ".join(hits) if hits else ""
+    return ""
 
 
 def _is_performance_issue(issue: dict) -> bool:
@@ -1895,11 +1982,17 @@ def resolve_narrative(agg: dict) -> dict:
     # computed score when there is one, so the headline can never disagree with
     # the breakdown printed under it. Runs made before scoring.py have no
     # breakdown and keep the score they were delivered with.
-    computed = (stats.get("score_breakdown") or {}).get("score")
+    breakdown = stats.get("score_breakdown") or {}
+    computed = breakdown.get("score")
     if computed is not None:
         narr["overall_ux_score"] = computed
+        # The rationale from the breakdown too, not the narrator's prose: the
+        # two disagreed in the first live run on the current code.
+        if isinstance(breakdown.get("deductions"), list) and "start" in breakdown:
+            narr["score_rationale"] = rationale_text(breakdown)
     _normalise_issue_severity(narr)
-    _attach_issue_evidence(narr, stats)
+    _attach_issue_evidence(narr, stats, measurements={
+        "links": agg.get("links"), "pagespeed": agg.get("pagespeed")})
     return narr
 
 
@@ -2030,7 +2123,10 @@ def _render_aggregated_md(agg: dict) -> str:
         if issues:
             h(2, sev_label)
             for issue in issues:
-                h(3, f"H{issue.get('heuristic_id', '?')}: {issue.get('heuristic_name', '')}")
+                # WCAG issues have no Nielsen number; "HNone:" was the heading.
+                h_id = issue.get("heuristic_id")
+                prefix = f"H{h_id}: " if isinstance(h_id, int) else ""
+                h(3, f"{prefix}{issue.get('heuristic_name', '')}")
                 if issue.get("verified") is False:
                     p("⚠ **Niezweryfikowane** — brak dowodu w zapisie sesji.")
                 p(f"**Częstotliwość:** {issue.get('frequency', '')}")
@@ -2072,7 +2168,25 @@ def _render_aggregated_md(agg: dict) -> str:
     survey_stats = stats.get("survey") or {}
     avg_scores = survey_stats.get("avg_scores") or {}
     open_answers = survey_stats.get("open_answers") or {}
-    if avg_scores or open_answers:
+    questions = [q for q in (survey_stats.get("questions") or []) if isinstance(q, dict)]
+    if questions:
+        # The same question list the HTML renders: the real prompt, each
+        # question's own scale (1-7 was printed "/5"), placeholders apart.
+        h(2, "Wyniki ankiety")
+        for q in questions:
+            prompt = q.get("prompt") or q.get("id") or ""
+            na = int(q.get("not_assessable") or 0)
+            if q.get("kind") == "open":
+                h(3, prompt)
+                ul([f"„{a}”" for a in q.get("answers") or []])
+            elif q.get("kind") == "not_assessable":
+                p(f"**{prompt}:** brak ocen — żaden uczestnik nie mógł odpowiedzieć ({na})")
+            else:
+                avg = q.get("avg")
+                avg_str = f"{avg:.2f}" if isinstance(avg, (int, float)) else "—"
+                tail = f", {na} bez oceny" if na else ""
+                p(f"**{prompt}:** śr. {avg_str} / {q.get('max', 5)} (n={q.get('n', 0)}{tail})")
+    elif avg_scores or open_answers:
         h(2, "Wyniki ankiety")
         _QUESTION_LABELS = {
             "q1": "Łatwość znalezienia produktu",
@@ -2093,9 +2207,13 @@ def _render_aggregated_md(agg: dict) -> str:
     ps = agg.get("pagespeed")
     if ps and not ps.get("skipped"):
         h(2, "Szybkość strony (PageSpeed Insights)")
+        from .reporter_html import pagespeed_error_text
         for strategy in ("mobile", "desktop"):
             data = ps.get(strategy) or {}
             if data.get("error"):
+                # Said, not skipped: a section with only a heading was the
+                # whole PageSpeed report when the mobile call timed out.
+                p(f"**{strategy.capitalize()}** — {pagespeed_error_text(data)}")
                 continue
             label = strategy.capitalize()
             score = data.get("performance_score", "—")

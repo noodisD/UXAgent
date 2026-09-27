@@ -148,8 +148,24 @@ def test_heuristic_and_measured_issues_outside_wcag_are_left_where_they_are():
     perf = {"heuristic_id": None, "heuristic_name": "Wydajność techniczna",
             "impact": "LCP 33 s na urządzeniach mobilnych"}
     narr = {"serious_issues": [perf]}
-    _attach_issue_evidence(narr, _stats())
-    assert narr["serious_issues"] == [perf]
+    _attach_issue_evidence(narr, _stats(),
+                           measurements={"pagespeed": {"mobile": {"performance_score": 21}}})
+    assert narr["serious_issues"] == [perf] and perf["verified"] is True
+    assert perf["measured"]["basis"] == "PageSpeed mobile 21/100"
+
+
+def test_an_issue_with_no_finding_and_no_measurement_is_held_out():
+    """The first live run on the current code counted "the Facebook link is
+    broken" — a 400 to our request, nothing measured behind it — as a minor issue."""
+    link = {"heuristic_id": None, "heuristic_name": "Konserwacja i spójność",
+            "impact": "Link do profilu na Facebooku jest uszkodzony."}
+    narr = {"minor_issues": [dict(link)]}
+    _attach_issue_evidence(narr, _stats(), measurements={"links": {"broken_urls": []}})
+    assert narr["minor_issues"] == []
+    assert [i["heuristic_name"] for i in narr["unconfirmed_issues"]] == ["Konserwacja i spójność"]
+    narr = {"minor_issues": [dict(link)]}
+    _attach_issue_evidence(narr, _stats(), measurements={"links": {"broken_urls": ["https://x.pl/404"]}})
+    assert narr["minor_issues"][0]["verified"] is True, "a broken link the check recorded"
 
 
 def test_the_join_is_idempotent():

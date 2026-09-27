@@ -7,7 +7,8 @@ they hurt real users, and say what to do about them.
 
 ## What the checks found
 
-STEPS SCANNED: {steps_scanned}
+STEPS SCANNED: {steps_scanned} (snapshots — a revisited page is scanned again)
+DISTINCT PAGES SCANNED: {pages_scanned}
 
 CANDIDATES (JSON):
 {candidates}
@@ -30,7 +31,9 @@ VISITED URLS:
 - `occurrences` — total matches across all snapshots. A revisited page is
   scanned again, so this DOUBLE-COUNTS the same elements. It is not a count of
   distinct broken elements. Never present it as one.
-- `steps_affected` — how many scanned pages showed the issue.
+- `steps_affected` — how many snapshots showed the issue (revisits counted again).
+- `pages_affected` — how many DISTINCT pages showed the issue. Use this, with
+  DISTINCT PAGES SCANNED, whenever you say on how many pages it occurs.
 - `min_size_px` — the smallest font size found (text_below_12px only).
 
 ## Your task
@@ -48,9 +51,9 @@ Rules:
 - "step" is REQUIRED and must be the candidate's `step`.
 - "url" is REQUIRED — the URL corresponding to that step.
 - "detail" must state the scale honestly, using `max_on_one_page` for the cited
-  step and `steps_affected` for the spread — e.g. "na najgorszej stronie (krok
-  13) 1436 obrazów bez tekstu alternatywnego; problem występuje na 13 z 13
-  przeskanowanych stron". Do NOT attach `max_on_one_page` to any step other than
+  step and `pages_affected` of DISTINCT PAGES SCANNED for the spread — e.g. "na
+  najgorszej stronie (krok 13) 1436 obrazów bez tekstu alternatywnego; problem
+  występuje na 5 z 6 odwiedzonych stron". Never present snapshots as pages. Do NOT attach `max_on_one_page` to any step other than
   `step`, and do NOT describe the cited page as "strona główna" unless its URL
   says so — read the URL for that step.
 

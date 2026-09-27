@@ -160,12 +160,23 @@ def extract_a11y_candidates(store: TraceStore) -> dict:
     # snapshot, and a revisited page is snapshotted again — so 1760 matches is
     # NOT 1760 distinct images. Give the per-page figure and the spread instead,
     # or the narrator will state the total as a defect count.
+    # Distinct pages as well as steps: the narrator wrote "problem na 1 z 18
+    # przeskanowanych stron" where 18 were snapshots of a handful of pages.
+    def _page(step):
+        try:
+            # Full URL, as measure_names counts pages: each configurator step
+            # (#/trims, #/colours) is its own view.
+            return store.url_at_step(step) or f"step {step}"
+        except Exception:
+            return f"step {step}"
+
     candidates = []
     for c in agg.values():
         per_step = c.pop("_per_step")
         worst_step, worst_count = max(per_step.items(), key=lambda kv: (kv[1], -kv[0]))
         c["occurrences"] = sum(per_step.values())
         c["steps_affected"] = len(per_step)
+        c["pages_affected"] = len({_page(s) for s in per_step})
         c["max_on_one_page"] = worst_count
         # Cite the worst page, not the first sighting: `step` and
         # `max_on_one_page` end up in the same sentence, so they must be true of
@@ -179,7 +190,9 @@ def extract_a11y_candidates(store: TraceStore) -> dict:
 
     log.info("[a11y_checks] %d candidate(s) from %d snapshot(s) in %s",
              len(candidates), len(snapshots), store.trace_dir)
-    return {"candidates": candidates, "steps_scanned": len(snapshots)}
+    pages_scanned = len({_page(s) for s, t in snapshots if isinstance(t, str)})
+    return {"candidates": candidates, "steps_scanned": len(snapshots),
+            "pages_scanned": pages_scanned}
 
 
 # Topics the narrative writes WCAG issues about, keyed so a narrative issue can

@@ -252,6 +252,7 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
     prompt = _prompts.get("accessibility_summarize").format(
         candidates=json.dumps(scan["candidates"], ensure_ascii=False, indent=2),
         steps_scanned=scan["steps_scanned"],
+        pages_scanned=scan.get("pages_scanned", scan["steps_scanned"]),
         urls=step_urls,
     )
     try:

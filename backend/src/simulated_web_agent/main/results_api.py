@@ -547,20 +547,59 @@ def _issue_key(issue: dict) -> str | None:
     return f"h:{h_id}" if h_id is not None else None
 
 
-def _issue_map(report: dict | None) -> dict[str, str]:
-    """issue key -> short impact text for all critical+serious narrative issues."""
-    narrative = (report or {}).get("narrative") or {}
-    out: dict[str, str] = {}
+def _comparable_issues(report: dict | None) -> list[dict]:
+    """The critical and serious issues the report shows, with a kind and content.
+
+    Read through resolve_narrative, as the report is. The kind is the
+    root-cause id, the Nielsen number, or for an accessibility issue its topic
+    — WCAG issues carry no Nielsen number and used to be skipped, so the one
+    critical issue of the 2026-09-26 run was listed as "resolved" against the
+    run before, where the same barrier had the id "A11Y-1".
+    """
+    if not isinstance(report, dict) or not report.get("narrative"):
+        return []
+    from .a11y_checks import a11y_topic
+    from .attribution import _content_stems
+    from .reporter import _is_wcag_issue, resolve_narrative
+
+    narrative = resolve_narrative(copy.deepcopy(report))
+    out = []
     for key in ("critical_issues", "serious_issues"):
         for issue in narrative.get(key) or []:
             if not isinstance(issue, dict):
                 continue
-            k = _issue_key(issue)
-            if k is None:
+            body = " ".join(str(issue.get(k) or "") for k in ("impact", "recommendation"))
+            kind = (f"wcag:{a11y_topic(body) or 'inne'}" if _is_wcag_issue(issue)
+                    else _issue_key(issue))
+            if kind is None:
                 continue
-            text = (issue.get("impact") or issue.get("heuristic_name") or "")[:160]
-            out.setdefault(k, text)
+            out.append({"kind": kind, "stems": _content_stems(body),
+                        "text": (issue.get("impact") or issue.get("heuristic_name") or "")[:160]})
     return out
+
+
+# Shared distinctive stems for two issues of one kind to count as the same
+# issue. Measured: the same test-drive combobox in two runs shares 21; two
+# unrelated H2 issues (Spanish text; a colour's price) share 6, half of them
+# boilerplate. Same Nielsen number alone is not the same defect.
+_SAME_ISSUE_STEMS = 8
+
+
+def _match_issues(now: list[dict], prev: list[dict]) -> tuple[list, list, list]:
+    """(fresh, persisting, not reported again) by kind and content."""
+    matched_prev: set[int] = set()
+    fresh, persisting = [], []
+    for n in now:
+        hit = next((j for j, p in enumerate(prev) if j not in matched_prev
+                    and p["kind"] == n["kind"]
+                    and len(p["stems"] & n["stems"]) >= _SAME_ISSUE_STEMS), None)
+        if hit is None:
+            fresh.append(n["text"])
+        else:
+            matched_prev.add(hit)
+            persisting.append(n["text"])
+    gone = [p["text"] for j, p in enumerate(prev) if j not in matched_prev]
+    return fresh, persisting, gone
 
 
 def _trend(now, prev, higher_is_better=True) -> str:
@@ -655,10 +694,8 @@ def _build_comparison(
          "trend": _trend(now_total, prev_total, higher_is_better=False)},
     ]
 
-    now_issues, prev_issues = _issue_map(report), _issue_map(prev_report)
-    fresh = [txt for h, txt in now_issues.items() if h not in prev_issues]
-    persisting = [txt for h, txt in now_issues.items() if h in prev_issues]
-    resolved = [txt for h, txt in prev_issues.items() if h not in now_issues]
+    fresh, persisting, resolved = _match_issues(_comparable_issues(report),
+                                                _comparable_issues(prev_report))
 
     return {
         "vsDate": _fmt_date(prev_manifest.get("started_at")),
