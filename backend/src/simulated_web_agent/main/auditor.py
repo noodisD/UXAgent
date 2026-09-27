@@ -163,7 +163,7 @@ async def _run_first_impression(store: TraceStore) -> dict:
         }
     ]
     try:
-        # "report" -> gemini-2.5-pro. The audit passes are the one place worth
+        # "report" -> the Pro tier (gpt.py). The audit passes are the one place worth
         # the expensive tier: one call per persona, versus the agent loop's one
         # per step. "large" is NOT a stronger model here — it resolves to the
         # same flash entry as "small" (see CLAUDE.md); "report" is the only real
@@ -256,7 +256,7 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
         urls=step_urls,
     )
     try:
-        # "report" -> gemini-2.5-pro; see _run_first_impression. Note the
+        # "report" -> the Pro tier; see _run_first_impression. Note the
         # 62%-return-the-example anchoring was fixed by the prompt, not the tier.
         return await _chat_json([{"role": "user", "content": prompt}],
                                 model="report", prefer=dict,

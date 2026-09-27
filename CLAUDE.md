@@ -215,10 +215,16 @@ dormant config. Under gemini the `model=` argument to `async_chat` resolves to:
 
 | `model=` | actual model | used by |
 |---|---|---|
-| `"lite"` | `gemini-2.5-flash-lite` | `agent.py` perceive (high-volume) |
-| `"small"` | `gemini-2.5-flash` | most passes |
-| `"large"` | `gemini-2.5-flash` | **identical to `small` — buys nothing** |
-| `"report"` | `gemini-2.5-pro` | `reporter.py` aggregate synthesis |
+| `"lite"` | `gemini-3.5-flash-lite` | `agent.py` perceive (high-volume) |
+| `"small"` | `gemini-3.8-flash` | most passes |
+| `"large"` | `gemini-3.8-flash` | **identical to `small` — buys nothing** |
+| `"report"` | `gemini-3.1-pro-preview` | audit passes and `reporter.py` aggregate synthesis |
+
+All four are called on Vertex's **`global` endpoint**, set per model in
+`gpt.py` (`vertex_location`), not through `VERTEXAI_LOCATION`: the 3.x models
+answer 404 in `us-central1`. Pro has no GA 3.x yet — `gemini-3.1-pro` is a 404,
+only `-preview` exists. The 2.5 family these replaced shuts down 2026-10-16.
+Memory embeddings still use `text-embedding-004`, which still answers on Vertex.
 
 `small` and `large` pick different *routers*, but both routers map `gemini` to
 the same model, so the distinction is a no-op here — it only means something for
@@ -226,7 +232,7 @@ providers we don't use. Do not "upgrade a pass to the large tier" and expect a
 better answer; I did, and claimed it fixed anchoring when the prompt rewrite had
 done all the work. **`"report"` is the only real quality lever.**
 
-**The audit phase runs on `"report"` (gemini-2.5-pro)**: first impression,
+**The audit phase runs on `"report"` (the Pro tier)**: first impression,
 heuristic evaluation, accessibility, cognitive walkthrough, bias audit. These
 are judgement calls, and they cost one call per persona — unlike the agent loop,
 which pays per step. Pro is ~2.3x slower per call; that is affordable here and

@@ -13,6 +13,17 @@ from .prompt_registry import registry as _prompt_registry
 
 provider = "openai"  # kept for backward-compat; use configure() to change
 
+# Gemini 3.x on Vertex is served from the global endpoint only: every one of
+# these models answered 404 in us-central1 (the VERTEXAI_LOCATION this project
+# runs with) and 200 on "global" (measured 2026-09-27). Set per model, so the
+# deployment's regional VERTEXAI_LOCATION keeps serving everything else.
+# The 2.5 family they replace is shut down on 2026-10-16.
+_GEMINI_LOCATION = "global"
+_GEMINI_FLASH = "vertex_ai/gemini-3.8-flash"
+_GEMINI_FLASH_LITE = "vertex_ai/gemini-3.5-flash-lite"
+# Pro has no GA 3.x release yet: "gemini-3.1-pro" is a 404, the preview is not.
+_GEMINI_PRO = "vertex_ai/gemini-3.1-pro-preview"
+
 
 chat_router = Router(
     model_list=[
@@ -34,7 +45,12 @@ chat_router = Router(
                 # params that actually work are reasoning_effort="disable" or
                 # thinkingConfig={"thinkingBudget": 0} — but that changes agent
                 # behaviour everywhere, so make it a deliberate call.
-                "model": "vertex_ai/gemini-2.5-flash",
+                # On 3.8 Flash the default thinks about as much as 2.5 Flash did
+                # (150-300 reasoning tokens on plan/act/feedback) but each call is
+                # ~1.5 s slower; reasoning_effort="low" measured 0 reasoning tokens
+                # and 2.5 Flash's latency.
+                "model": _GEMINI_FLASH,
+                "vertex_location": _GEMINI_LOCATION,
             },
         },
         {
@@ -45,7 +61,11 @@ chat_router = Router(
                 # flash-lite does not think by default (measured: reasoning=None),
                 # which is what perceive wants. No param needed — the
                 # thinking={"type": "disabled"} that used to sit here was inert.
-                "model": "vertex_ai/gemini-2.5-flash-lite",
+                # 3.5 Flash-Lite transcribed as much as 2.5 Flash-Lite on replayed
+                # pages, ~10% faster; it fences its JSON in ```, which
+                # _parse_json_response strips. 3.1 Flash-Lite truncated one page.
+                "model": _GEMINI_FLASH_LITE,
+                "vertex_location": _GEMINI_LOCATION,
             },
         },
         {
@@ -110,14 +130,20 @@ slow_chat_router = Router(
                 # params that actually work are reasoning_effort="disable" or
                 # thinkingConfig={"thinkingBudget": 0} — but that changes agent
                 # behaviour everywhere, so make it a deliberate call.
-                "model": "vertex_ai/gemini-2.5-flash",
+                # On 3.8 Flash the default thinks about as much as 2.5 Flash did
+                # (150-300 reasoning tokens on plan/act/feedback) but each call is
+                # ~1.5 s slower; reasoning_effort="low" measured 0 reasoning tokens
+                # and 2.5 Flash's latency.
+                "model": _GEMINI_FLASH,
+                "vertex_location": _GEMINI_LOCATION,
             },
         },
         {
             # Report tier: one-shot final synthesis where quality > latency.
             "model_name": "gemini_report",
             "litellm_params": {
-                "model": "vertex_ai/gemini-2.5-pro",
+                "model": _GEMINI_PRO,
+                "vertex_location": _GEMINI_LOCATION,
             },
         },
         {
