@@ -372,14 +372,24 @@ const assessments = computed(() => {
 const diagnostics = computed(() => {
   const r = report.value
   const ps = r?.pagespeed
+  // Mobile first, as the score counts it; say which device, and say so when
+  // the measurement failed instead of showing "n/a" or the other device.
+  const mobileScore = ps?.mobile?.performance_score
   const perf = ps && typeof ps === 'object'
-    ? (ps.desktop?.performance_score ?? ps.mobile?.performance_score ?? ps.performance ?? null)
+    ? (mobileScore ?? ps.desktop?.performance_score ?? ps.performance ?? null)
     : null
+  const psDevice = mobileScore != null ? 'mobile' : ps?.desktop?.performance_score != null ? 'desktop' : ''
+  const psFailed = !!(ps?.mobile?.error || (perf == null && ps?.desktop?.error))
   const scroll = r?.scroll || {}
   const links = r?.links || {}
   const forms = r?.forms || {}
   const out: { label: string; value: string; color?: string }[] = []
-  out.push({ label: t('rep.diag.pagespeed'), value: perf === null || perf === undefined ? 'n/a' : `${perf}/100`, color: perf != null ? pageSpeedColor(perf) : undefined })
+  out.push({
+    label: t('rep.diag.pagespeed') + (psDevice ? ` · ${psDevice}` : ''),
+    value: perf == null ? (psFailed ? t('rep.diag.psFailed') : 'n/a') : `${perf}/100`
+      + (psFailed && psDevice === 'desktop' ? ` (${t('rep.diag.psMobileFailed')})` : ''),
+    color: perf != null ? pageSpeedColor(perf) : undefined,
+  })
   if (scroll.avg_max_depth_pct != null) out.push({ label: t('rep.diag.scroll'), value: `${scroll.avg_max_depth_pct}%` })
   if (links.total_links_checked != null) out.push({ label: t('rep.diag.links'), value: `${links.unique_broken_urls ?? 0} / ${links.total_links_checked}` })
   if (forms.total_sessions != null) out.push({ label: t('rep.diag.forms'), value: `${forms.sessions_engaged_form ?? 0} / ${forms.total_sessions}` })
