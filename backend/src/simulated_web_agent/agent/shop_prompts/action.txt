@@ -111,4 +111,5 @@ Each action object must include an `action` key specifying one of the following 
 # Failed Action Handling
 
 - The input may include a `last_action_error` field. If it is set (not null), your PREVIOUS action FAILED with that error (e.g. element not found, click timeout, repeated action with no page change).
+- If `last_action_error` starts with "Advisory", your previous action worked; it is only a hint about your path (e.g. you keep reopening the same item). Follow the hint, but do not treat the page or the element as broken.
 - When `last_action_error` is present: do NOT retry the same target or the same action. Choose a different element, a different action type, or navigate another way (e.g. category links instead of search, scroll to reveal content, go back).

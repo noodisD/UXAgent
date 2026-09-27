@@ -30,7 +30,10 @@ from .severity import (
 )
 from .a11y_checks import a11y_topic, measure_names, merge_pages
 from .evidence import page_quote, pages_contain, rendering_artifact
-from .scoring import RULES as SCORING_RULES, breakdown_text, compute_ux_score, rationale_text
+from .scoring import (
+    RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
+    compute_ux_score, rationale_text,
+)
 from .attribution import restates_a_gated_finding
 from .iso_metrics import current_effectiveness, effective_outcome
 from .redaction import clean as _redact, mentions_harness_fault
@@ -1832,6 +1835,8 @@ def _attach_issue_evidence(narrative: dict, stats: dict, measurements: dict | No
                         "images_total": images["total"],
                         "images_unnamed": images["unnamed"],
                         "share_unnamed": images.get("share_unnamed"),
+                        "share_unnamed_content": images.get("share_unnamed_content"),
+                        "text": alt_text_measured_text(images),
                     }
             elif h_num:
                 # A usability issue under a heuristic with no confirmed finding.
@@ -1958,7 +1963,7 @@ def _wcag_demotion_reason(issue: dict, key: str) -> str | None:
         return None
     if not issue.get("verified"):
         return "no_evidence"
-    share = (issue.get("measured") or {}).get("share_unnamed")
+    share = alt_text_share(issue.get("measured"))
     if share is not None and share < _ALT_TEXT_SYSTEMIC_SHARE:
         return "measured_share"
     return None

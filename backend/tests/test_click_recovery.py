@@ -81,3 +81,80 @@ async def test_click_on_missing_element_raises_value_error():
     finally:
         await browser.close()
         await pw.stop()
+
+
+# A step bar that keeps its active step centred, smoothly undoing any scroll
+# of the strip. Playwright scrolls the target before each attempt, so after
+# one step had been clicked the next target kept moving under its neighbours
+# (as on the hyundai configurator at 390px, run 2026-09-26_19-54-51_72e8)
+# although a person could tap it where it was.
+_STEPS = ["Model", "Wersja", "Napęd", "Kolor", "Wnętrze", "Pakiety i opcje", "Podsumowanie"]
+STRIP_PAGE = """
+<!DOCTYPE html>
+<html><head><meta name="viewport" content="width=device-width"><style>
+body { margin:0 }
+header { position:fixed; top:0; left:0; right:0; height:56px; z-index:10; background:#fff }
+.logo { position:absolute; left:0; top:0; width:90px; height:56px; z-index:12; background:#002c5f }
+.strip { position:absolute; left:0; right:0; top:0; height:56px; overflow-x:auto;
+         white-space:nowrap; scroll-behavior:smooth }
+.strip a { display:inline-block; width:140px; line-height:56px; text-align:center;
+           background:#eee; border-right:1px solid #ccc }
+</style></head><body>
+<header>
+  <div class="strip">""" + "".join(
+    f'<a href="#" parser-semantic-id="s{i}" '
+    f'onclick="window.__clicked=(window.__clicked||[]).concat([{i}]);return false">{name}</a>'
+    for i, name in enumerate(_STEPS)) + """</div>
+  <a class="logo" href="#" onclick="window.__logo = true; return false"></a>
+</header>
+<script>
+  const strip = document.querySelector('.strip');
+  const active = document.querySelector('[parser-semantic-id="s3"]');
+  const centre = () => strip.scrollTo({left: active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2});
+  centre();
+  let t; strip.addEventListener('scroll', () => { clearTimeout(t); t = setTimeout(centre, 30); });
+</script>
+</body></html>
+"""
+
+COVERED_PAGE = """
+<!DOCTYPE html>
+<html><body style="margin:0">
+  <a href="#" parser-semantic-id="target" onclick="window.__clicked = true; return false"
+     style="display:block; height:40px">under the sheet</a>
+  <div onclick="window.__sheet = true" style="position:fixed; inset:0; z-index:5; background:rgba(0,0,0,.4)"></div>
+</body></html>
+"""
+
+
+async def test_click_lands_on_a_step_bar_that_moves_back_when_scrolled():
+    pw = await async_playwright().start()
+    browser = await pw.chromium.launch(headless=True)
+    try:
+        ctx = await browser.new_context(viewport={"width": 390, "height": 844},
+                                        is_mobile=True, has_touch=True)
+        page = await ctx.new_page()
+        await page.set_content(STRIP_PAGE)
+        await page.wait_for_timeout(600)
+        await page.locator('[parser-semantic-id="s4"]').click(timeout=1500)
+        # The failure being fixed: Playwright alone cannot land this click.
+        with pytest.raises(PlaywrightTimeoutError, match="intercepts pointer events"):
+            await page.locator('[parser-semantic-id="s2"]').click(timeout=1500)
+        await click_semantic_element(page, "s2", timeout=1500)
+        assert await page.evaluate("window.__clicked") == [4, 2]
+        assert not await page.evaluate("window.__logo === true"), "never the element on top"
+    finally:
+        await browser.close()
+        await pw.stop()
+
+
+async def test_an_element_covered_everywhere_is_not_clicked_through():
+    pw, browser, page = await _with_page(COVERED_PAGE)
+    try:
+        with pytest.raises(PlaywrightTimeoutError):
+            await click_semantic_element(page, "target", timeout=500)
+        assert not await page.evaluate("window.__clicked === true")
+        assert not await page.evaluate("window.__sheet === true")
+    finally:
+        await browser.close()
+        await pw.stop()

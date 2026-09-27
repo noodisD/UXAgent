@@ -490,8 +490,8 @@ const psColor = computed(() => psPerf.value !== null ? pageSpeedColor(psPerf.val
 const scoreCards = computed(() => [
   { label: t('ov.card.success'), value: `${succ.value}/${n.value}`, unit: '', sub: t('ov.card.success.sub', { part: part.value, fail: fail.value }),
     color: succ.value === n.value ? '#1f9d57' : fail.value > 0 ? '#d83a34' : '#cf8420' },
-  { label: t('ov.card.firstImpression'), value: avgFI.value === null ? '—' : avgFI.value.toFixed(1), unit: avgFI.value === null ? '' : '/5', sub: t('ov.card.fi.sub'), color: avgFI.value === null ? '#aeb4bd' : scoreColor(avgFI.value) },
-  { label: t('ov.card.accessibility'), value: avgA11y.value === null ? '—' : avgA11y.value.toFixed(1), unit: avgA11y.value === null ? '' : '/5', sub: t('ov.card.a11y.sub'), color: avgA11y.value === null ? '#aeb4bd' : scoreColor(avgA11y.value) },
+  { label: t('ov.card.firstImpression'), value: avgFI.value === null ? '—' : avgFI.value.toFixed(2).replace('.', ','), unit: avgFI.value === null ? '' : '/5', sub: t('ov.card.fi.sub'), color: avgFI.value === null ? '#aeb4bd' : scoreColor(avgFI.value) },
+  { label: t('ov.card.accessibility'), value: avgA11y.value === null ? '—' : avgA11y.value.toFixed(2).replace('.', ','), unit: avgA11y.value === null ? '' : '/5', sub: t('ov.card.a11y.sub'), color: avgA11y.value === null ? '#aeb4bd' : scoreColor(avgA11y.value) },
   { label: t('ov.card.findings'), value: String(counts.value.total), unit: '',
     sub: counts.value.held ? t('ov.card.findings.held', { crit: counts.value.critical, held: counts.value.held }) : t('ov.card.findings.sub', { crit: counts.value.critical }),
     color: '#1c2024' },

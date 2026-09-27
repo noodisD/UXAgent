@@ -48,6 +48,12 @@ _FI_DIM_LABELS = {
 }
 
 
+def avg_text(value) -> str:
+    # Imported late like the other shared helpers from reporter_html.
+    from .reporter_html import avg_text as _avg_text
+    return _avg_text(value)
+
+
 def _add_caption(doc, text: str) -> None:
     from docx.shared import Pt, RGBColor
 
@@ -203,7 +209,8 @@ def _add_survey_section(doc, stats: dict, summaries: dict) -> None:
         else:
             dist = ", ".join(f"{d.get('value')}: {d.get('count')}"
                              for d in (q.get("distribution") or []) if d.get("count"))
-            line = f"śr. {q.get('avg')} (n={q.get('n', 0)}, skala {q.get('min', 1)}–{q.get('max', 5)})"
+            line = (f"śr. {avg_text(q.get('avg'))} (n={q.get('n', 0)}, "
+                    f"skala {q.get('min', 1)}–{q.get('max', 5)})")
             if dist:
                 line += f" · rozkład {dist}"
             if na:
@@ -407,11 +414,9 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             # place the number is missing.
             measured = issue.get("measured") or {}
             if measured.get("images_total"):
-                pct = round(100 * (measured.get("share_unnamed") or 0))
+                from .scoring import alt_text_measured_text
                 p = doc.add_paragraph()
-                p.add_run(f"Zmierzono: {measured['images_unnamed']} z "
-                          f"{measured['images_total']} obrazów bez tekstu "
-                          f"alternatywnego ({pct}%).").bold = True
+                p.add_run(measured.get("text") or alt_text_measured_text(measured)).bold = True
             if issue.get("demotion_reason"):
                 was = {"critical_issues": "krytyczne", "serious_issues": "poważne"}.get(
                     issue.get("demoted_from"), "wyższej kategorii")
@@ -483,7 +488,7 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     if fi.get("avg_score") is not None or fi.get("dimension_avgs"):
         doc.add_heading("Pierwsze wrażenie (test 5 sekund)", level=1)
         if fi.get("avg_score") is not None:
-            doc.add_paragraph(f"Średnia ocena: {fi['avg_score']}/5")
+            doc.add_paragraph(f"Średnia ocena: {avg_text(fi['avg_score'])}/5")
         for s in (fi.get("screenshots") or [])[:3]:
             caption = str(s.get("persona") or "")
             if s.get("score") is not None:
@@ -492,7 +497,7 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         dims = [(label, (fi.get("dimension_avgs") or {}).get(key))
                 for key, label in _FI_DIM_LABELS.items()
                 if (fi.get("dimension_avgs") or {}).get(key) is not None]
-        _add_kv_table(doc, [(l, f"{v}/5") for l, v in dims])
+        _add_kv_table(doc, [(l, f"{avg_text(v)}/5") for l, v in dims])
         if narr.get("first_impression_assessment"):
             doc.add_paragraph(str(narr["first_impression_assessment"]))
 
@@ -522,7 +527,7 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     if acc.get("avg_score") is not None or acc.get("findings"):
         doc.add_heading("Dostępność", level=1)
         if acc.get("avg_score") is not None:
-            doc.add_paragraph(f"Średnia ocena dostępności: {acc['avg_score']}/5")
+            doc.add_paragraph(f"Średnia ocena dostępności: {avg_text(acc['avg_score'])}/5")
         if narr.get("accessibility_assessment"):
             doc.add_paragraph(str(narr["accessibility_assessment"]))
         from .scoring import accessibility_severity

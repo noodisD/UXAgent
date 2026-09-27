@@ -59,6 +59,18 @@ def _score_color(score: float | None) -> str:
     return "#E60000"
 
 
+def avg_text(value) -> str:
+    """An average as every format prints it: two decimals, Polish comma.
+
+    The survey printed "4,00", the first impression "3.07", accessibility "1"
+    and the Word file "4.0" — four spellings of one kind of number, and the
+    dashboard rounded the same average to "3.1".
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "—"
+    return f"{value:.2f}".replace(".", ",")
+
+
 def _score_bar(score: float | None, max_score: float = 5.0) -> str:
     if score is None:
         return ""
@@ -67,7 +79,7 @@ def _score_bar(score: float | None, max_score: float = 5.0) -> str:
     return f"""
         <div class="score-bar-wrap">
           <div class="score-bar" style="width:{pct}%; background:{color};"></div>
-          <span class="score-label" style="color:{color};">{score:.2f}/5</span>
+          <span class="score-label" style="color:{color};">{avg_text(score)}/5</span>
         </div>"""
 
 
@@ -473,7 +485,7 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
 def _fi_header(stats: dict) -> str:
     """The first-impression average, or "—": a present-but-null value printed "None/5"."""
     v = (stats.get("first_impression") or {}).get("avg_score")
-    return f"{v}/5" if isinstance(v, (int, float)) else "—"
+    return f"{avg_text(v)}/5" if isinstance(v, (int, float)) else "—"
 
 
 def _anything_observed(stats: dict) -> bool:
@@ -608,12 +620,9 @@ def _render_issues_group(title: str, issues: list) -> str:
         measured = issue.get("measured") or {}
         measured_html = ""
         if measured.get("images_total"):
-            pct = round(100 * (measured.get("share_unnamed") or 0))
-            measured_html = (
-                f'<div class="measured">Zmierzono: {measured["images_unnamed"]} z '
-                f'{measured["images_total"]} obrazów bez tekstu alternatywnego '
-                f'({pct}%).</div>'
-            )
+            from .scoring import alt_text_measured_text
+            text = measured.get("text") or alt_text_measured_text(measured)
+            measured_html = f'<div class="measured">{_esc(text)}</div>'
         elif measured.get("basis"):
             measured_html = f'<div class="measured">Zmierzono: {_esc(measured["basis"])}.</div>'
         demotion_html = ""
@@ -776,7 +785,7 @@ def _render_scale_question(q: dict) -> str:
                  f'<div class="sv-cnt">{d["count"] or ""}</div>'
                  f'<div class="sv-tick">{d["value"]}</div></div>')
     pct = round((avg - lo) / (hi - lo) * 100) if (avg is not None and hi > lo) else 0
-    avgtxt = (f"{avg:.2f}".replace(".", ",")) if avg is not None else "—"
+    avgtxt = avg_text(avg)
     return f"""
     <div class="sv-q">
       <div class="sv-q-head">
@@ -869,7 +878,7 @@ def _render_accessibility(stats: dict, narr: dict) -> str:
     color = _score_color(a11y_avg)
     body = f"""
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;">
-      <div style="font-size:40px;font-weight:800;color:{color};">{a11y_avg if a11y_avg else "—"}<span style="font-size:18px;">/5</span></div>
+      <div style="font-size:40px;font-weight:800;color:{color};">{avg_text(a11y_avg)}<span style="font-size:18px;">/5</span></div>
       <div style="font-size:13px;color:#6c757d;">Średnia ocena dostępności</div>
     </div>"""
     if assessment:
@@ -1204,8 +1213,8 @@ def stats_table_rows(stats: dict, narr: dict | None = None) -> list[tuple[str, s
         ("Problemy poważne", str(counts["serious"])),
         ("Problemy drobne", str(counts["minor"])),
         ("Do weryfikacji przez człowieka", str(int(sc.get("needs_verification") or 0))),
-        ("Pierwsze wrażenie (śr.)", f"{fi_avg}/5" if fi_avg else "—"),
-        ("Dostępność (śr.)", f"{a11y_avg}/5" if a11y_avg else "—"),
+        ("Pierwsze wrażenie (śr.)", f"{avg_text(fi_avg)}/5" if fi_avg else "—"),
+        ("Dostępność (śr.)", f"{avg_text(a11y_avg)}/5" if a11y_avg else "—"),
         ("Overflow mobile", overflow("mobile", "mobile_overflow_sessions")),
         ("Overflow tablet", overflow("tablet", "tablet_overflow_sessions")),
     ]

@@ -268,10 +268,64 @@ async def click_semantic_element(page, semantic_id: str, timeout: int = 5000) ->
         # diabetyk24.pl, where the open search panel trapped agents in click
         # loops on breadcrumbs / "Pokaż więcej".
         await dismiss_open_offcanvas(page)
+        if await _click_visible_point(page, element, rescroll=False):
+            return
         await element.evaluate(
-            "el => el.scrollIntoView({block: 'center', inline: 'nearest'})"
+            "el => el.scrollIntoView({block: 'center', inline: 'center'})"
         )
-        await element.click(timeout=timeout)
+        try:
+            await element.click(timeout=timeout)
+        except PlaywrightTimeoutError:
+            if not await _click_visible_point(page, element, rescroll=True):
+                raise
+
+
+# Where on the element a click would land on the element itself, once the page
+# has stopped moving. Checked by hit-testing, so nothing covering it is clicked
+# through: an element that is hidden or overlaid everywhere yields no point.
+_VISIBLE_POINT_JS = """async (el, rescroll) => {
+  if (rescroll) el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+  let last = '', same = 0;
+  for (let i = 0; i < 40 && same < 3; i++) {
+    await new Promise(r => requestAnimationFrame(r));
+    const b = el.getBoundingClientRect();
+    const key = Math.round(b.left) + ',' + Math.round(b.top);
+    same = key === last ? same + 1 : 0;
+    last = key;
+  }
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return null;
+  for (const fy of [0.5, 0.3, 0.7]) {
+    for (const fx of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+      const x = r.left + r.width * fx, y = r.top + r.height * fy;
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && (hit === el || el.contains(hit))) return {x, y};
+    }
+  }
+  return null;
+}"""
+
+
+async def _click_visible_point(page, element, rescroll: bool) -> bool:
+    """Click the element where it can be seen, as a person would tap it.
+
+    Playwright scrolls a target into view before every attempt. On the
+    hyundai configurator at 390px the step bar is a horizontal strip, and
+    each of those scrolls moved it: "Wnętrze" sat in plain view on the
+    screenshot while the click hit the logo, then "Napęd", then "Pakiety i
+    opcje", until the timeout — twice per step, on two steps. Waiting for the
+    page to settle and clicking a point the element itself occupies does
+    what the person would have done, without scrolling anything first.
+    """
+    try:
+        point = await element.evaluate(_VISIBLE_POINT_JS, rescroll)
+    except Exception:
+        return False
+    if not point:
+        return False
+    await page.mouse.click(point["x"], point["y"])
+    return True
 
 
 class ElementHighlight:

@@ -64,7 +64,7 @@ def test_the_content_matches_the_html_wording(tmp_path):
     assert "Zmierzono na 4 z 6 kroków" in text and "rzadko przewijali" in text
     assert "https://x.pl/404" in text
     assert "Wysłali formularz" in text and "0/2" in text
-    assert "śr. 4.0 (n=2" in text and "1 bez oceny" in text and "Brak ocen" in text
+    assert "śr. 4,00 (n=2" in text and "1 bez oceny" in text and "Brak ocen" in text
     assert "„Cennika”" in text and "Dlaczego tak odpowiadali: Bo było prosto." in text
     assert "1/2 sesji" in text and "nie zmierzono" in text, "tablet was not scanned"
     assert "Ocena responsywności." in text

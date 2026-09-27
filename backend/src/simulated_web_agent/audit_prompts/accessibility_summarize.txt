@@ -35,6 +35,17 @@ VISITED URLS:
 - `pages_affected` — how many DISTINCT pages showed the issue. Use this, with
   DISTINCT PAGES SCANNED, whenever you say on how many pages it occurs.
 - `min_size_px` — the smallest font size found (text_below_12px only).
+- `examples` (control_missing_name) — for some unnamed controls, the text the
+  page shows right before the control and the option it already has selected.
+  Visible text that is not the control's name means the label is there for
+  sighted users but not attached for a screen reader.
+- `where_on_worst_page` (image_missing_alt) — where the unnamed images on the
+  cited page sit: `in_named_control` are icons inside a button or link that
+  already has a name (the control is announced correctly — at most "drobny"),
+  `outside_content` are elements outside every page region such as tracking
+  pixels (not a barrier), `content` are the images whose meaning is really
+  missing. Judge severity and describe scale by `content`, and say how many of
+  the rest are icons in named controls — never present them as missing content.
 
 ## Your task
 
@@ -56,6 +67,12 @@ Rules:
   występuje na 5 z 6 odwiedzonych stron". Never present snapshots as pages. Do NOT attach `max_on_one_page` to any step other than
   `step`, and do NOT describe the cited page as "strona główna" unless its URL
   says so — read the URL for that step.
+- A missing name alone does not show that a task is blocked: the scan cannot
+  see whether the field is optional, already filled, or duplicated by another
+  control that has a label. Do not write that it "blocks" or "prevents" the
+  form or the task, and do not rate it "krytyczny" on that basis. If the
+  examples give a selected option, say the field is already filled; if they
+  give visible text, name it as the label a screen reader does not announce.
 
 ## Output format
 

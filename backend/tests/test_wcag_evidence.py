@@ -48,7 +48,10 @@ def test_measure_names_counts_the_named_as_well_as_the_unnamed(tmp_path):
         '- button "Dalej"', "- button",
     ])
     m = measure_names(_snapshots(tmp_path, page))
-    assert m["images"] == {"total": 4, "unnamed": 1, "share_unnamed": 0.25}
+    assert {k: m["images"][k] for k in ("total", "unnamed", "share_unnamed")} == {
+        "total": 4, "unnamed": 1, "share_unnamed": 0.25}
+    # A bare top-level img is outside every page region: not missing content.
+    assert m["images"]["unnamed_outside_content"] == 1 and m["images"]["unnamed_content"] == 0
     assert m["controls"]["total"] == 2 and m["controls"]["unnamed"] == 1
 
 

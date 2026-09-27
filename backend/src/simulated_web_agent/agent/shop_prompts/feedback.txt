@@ -102,4 +102,5 @@ Return **only** a single valid JSON object with this shape:
 # Failed Action Handling
 
 - The input may include a `last_action_error` field. If set, the last action FAILED with that error — the page likely did not change as intended.
+- Exception: if `last_action_error` starts with "Advisory", the last action did NOT fail — the page responded as normal. It is a hint from the study about your own path (for example, that you keep reopening the same item). Do not describe it as a failure, an error, or a problem with the website; simply take it into account when choosing what to do next.
 - In that case, produce thoughts that (1) acknowledge the failure and its cause, and (2) propose a concrete DIFFERENT approach for the next step. Never suggest repeating the failed action unchanged.

@@ -61,6 +61,57 @@ _SEVERITY_PL = {"krytyczny": "krytyczny", "poważny": "poważny", "drobny": "dro
 _CONFIDENCE_PL = {"high": "wysoka", "medium": "średnia", "low": "niska"}
 
 
+def alt_text_share(images: dict | None) -> float | None:
+    """The share of images whose missing name loses something.
+
+    Unnamed icons inside a named button or link and pixels outside the page
+    are not counted (a11y_checks.classify_unnamed_images). Runs measured
+    before that split carry only the raw share, which is used as it was.
+    """
+    images = images or {}
+    for key in ("share_unnamed_content", "share_unnamed"):
+        if isinstance(images.get(key), (int, float)):
+            return images[key]
+    return None
+
+
+def _pct(share: float) -> str:
+    value = 100 * share
+    if 0 < value < 10 and round(value) != round(value, 1):
+        return f"{value:.1f}".replace(".", ",")
+    return str(round(value))
+
+
+def alt_text_measured_text(images: dict | None) -> str:
+    """The measured line for alt text, the same in every format.
+
+    "90 z 517 obrazów bez opisu (17%)" alone was read as blind users losing
+    the car models, when 88 of the 90 were icons in named buttons and
+    tracking pixels. The split is printed with the total, so the reader sees
+    both what the scan found and what of it is a barrier.
+    """
+    images = images or {}
+    total = images.get("total") or images.get("images_total")
+    unnamed = images.get("unnamed", images.get("images_unnamed"))
+    if not total or unnamed is None:
+        return ""
+    text = (f"Zmierzono: {unnamed} z {total} obrazów bez tekstu alternatywnego "
+            f"({_pct(unnamed / total)}%).")
+    content = images.get("unnamed_content")
+    if content is None or not unnamed:
+        return text
+    split = []
+    if images.get("unnamed_in_named_control"):
+        split.append("ikony w przyciskach lub linkach, które mają własną nazwę — "
+                     f"{images['unnamed_in_named_control']}")
+    if images.get("unnamed_outside_content"):
+        split.append("elementy poza treścią strony (np. piksele śledzące) — "
+                     f"{images['unnamed_outside_content']}")
+    if split:
+        text += " Z tego: " + "; ".join(split) + "."
+    return text + f" Obrazy w treści strony bez opisu: {content} ({_pct(content / total)}%)."
+
+
 def accessibility_severity(finding: dict, images: dict | None) -> tuple[str, str]:
     """The severity every format shows for an accessibility finding, and the
     measurement behind a demotion ("" when there is none).
@@ -70,12 +121,10 @@ def accessibility_severity(finding: dict, images: dict | None) -> tuple[str, str
     PDF and the score all said "drobny" for 9-10% of images unnamed.
     """
     sev = (finding or {}).get("severity") or "drobny"
-    images = images or {}
-    share = images.get("share_unnamed")
-    if ((finding or {}).get("topic") == "alt_text" and isinstance(share, (int, float))
+    share = alt_text_share(images)
+    if ((finding or {}).get("topic") == "alt_text" and share is not None
             and share < RULES["alt_text_systemic_share"]):
-        return "drobny", (f"Zmierzono: {images.get('unnamed')} z {images.get('total')} "
-                          f"obrazów bez tekstu alternatywnego ({round(100 * share)}%).")
+        return "drobny", alt_text_measured_text(images)
     return sev, ""
 
 
@@ -174,7 +223,8 @@ def _task_line(outcomes: dict, sources: dict, held: set | None = None) -> dict |
 def _accessibility_lines(stats: dict) -> list[dict]:
     a11y = stats.get("accessibility") or {}
     images = (a11y.get("measured") or {}).get("images") or {}
-    share = images.get("share_unnamed")
+    share = alt_text_share(images)
+    counted = images.get("unnamed_content", images.get("unnamed"))
     lines = []
     for f in a11y.get("findings") or []:
         if not isinstance(f, dict) or not f.get("verified"):
@@ -182,8 +232,9 @@ def _accessibility_lines(stats: dict) -> list[dict]:
         sev, measured = accessibility_severity(f, images)
         note = ""
         if measured:
-            note = (f"; zmierzono {images.get('unnamed')} z {images.get('total')} "
-                    f"obrazów bez opisu ({round(100 * share)}%) — liczone jako drobny")
+            what = "obrazów treści" if "unnamed_content" in images else "obrazów"
+            note = (f"; zmierzono {counted} z {images.get('total')} {what} bez opisu "
+                    f"({_pct(share)}%) — liczone jako drobny")
         base = RULES["accessibility"].get(sev, RULES["accessibility"]["drobny"])
         lines.append({
             "kind": "accessibility",

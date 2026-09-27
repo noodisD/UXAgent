@@ -56,6 +56,15 @@ def _is_progression_control(target: str) -> bool:
     return any(stem in flat for stem in _PROGRESSION_STEMS)
 
 
+# The revisit escalation travels in the error channel because that is the one
+# the persona reads — but it is not an error: the click worked. Written as a
+# bare "You have clicked 'X' 3 times", the feedback prompt ("if set, the last
+# action FAILED") turned it into "the button did not respond" in the persona's
+# thoughts, and from there into a finding about the site. The prefix says what
+# it is, and both prompts treat it as a hint, not a failure.
+ADVISORY_PREFIX = "Advisory (not an error — the last action worked):"
+
+
 def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Optional[str]]:
     """Warnings for re-clicking a target already clicked this session.
 
@@ -76,7 +85,7 @@ def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Opt
     )
     if prior_clicks >= 2:
         return thought, (
-            f"You have clicked '{target}' {prior_clicks + 1} times this session. "
+            f"{ADVISORY_PREFIX} you have clicked '{target}' {prior_clicks + 1} times this session. "
             "Do not open it again — choose a product or link you have not visited yet."
         )
     return thought, None

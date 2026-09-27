@@ -25,7 +25,8 @@ def _store(path, snaps_urls):
 def test_a_revisited_page_counts_once_at_its_fullest(tmp_path):
     s = _store(tmp_path, [(HOME, "https://x.pl/"), (HOME_MORE, "https://x.pl/"), (HOME, "https://x.pl/")])
     m = measure_names(s)
-    assert m["images"] == {"total": 3, "unnamed": 1, "share_unnamed": 0.333}
+    assert {k: m["images"][k] for k in ("total", "unnamed", "share_unnamed")} == {
+        "total": 3, "unnamed": 1, "share_unnamed": 0.333}
 
 
 def test_the_same_page_across_participants_counts_once(tmp_path):
