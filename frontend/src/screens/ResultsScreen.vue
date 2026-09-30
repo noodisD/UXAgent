@@ -28,10 +28,10 @@
 
           <!-- vs previous run -->
           <div v-if="comparison" class="ux-card">
-            <div class="cmp-head">{{ t('cmp.title') }} <span class="cmp-date mono">· {{ comparison.vsDate }}</span></div>
+            <div class="cmp-head">{{ t('cmp.title') }} <span class="cmp-date mono">· {{ comparisonDate }}</span></div>
             <div class="cmp-metrics">
-              <div v-for="m in comparison.metrics" :key="m.label" class="cmp-metric">
-                <div class="cmp-label mono">{{ m.label }}</div>
+              <div v-for="m in comparison.metrics" :key="m.key || m.label" class="cmp-metric">
+                <div class="cmp-label mono">{{ m.key ? t('cmp.m.' + m.key) : m.label }}</div>
                 <div class="cmp-vals">
                   <span class="cmp-now mono">{{ m.now }}</span>
                   <span class="cmp-prev mono" :style="{ color: trendColor(m.trend) }">
@@ -410,7 +410,7 @@ import { useI18n } from '../i18n'
 
 const { state: app } = useApp()
 const { data, loading, error, load } = useResults()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 type TabKey = 'overview' | 'personas' | 'findings' | 'survey' | 'report'
 const tab = ref<TabKey>('overview')
@@ -531,6 +531,15 @@ function shotUrl(personaId: string, step: number): string {
 
 // Backend-supplied extras (present once the run detail includes them)
 const comparison = computed(() => (data.value as any)?.comparison ?? null)
+// The earlier run's date in the interface language; the server's string is the
+// fallback for an older payload without the ISO value.
+const comparisonDate = computed(() => {
+  const c = comparison.value
+  const d = c?.vsDateIso ? new Date(c.vsDateIso) : null
+  return d && !isNaN(d.getTime())
+    ? d.toLocaleDateString(locale.value === 'pl' ? 'pl-PL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    : (c?.vsDate ?? '')
+})
 // Keyed by question id, joined by id. It used to be a positional array joined
 // by loop index across two independently ordered backend lists — surveyRows is
 // questionnaire-ordered and omits unanswered questions, so a single gap

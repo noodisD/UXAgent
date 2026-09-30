@@ -547,6 +547,15 @@ def _issue_key(issue: dict) -> str | None:
     return f"h:{h_id}" if h_id is not None else None
 
 
+def _clip(text: str, limit: int = 160) -> str:
+    """Shorten to a word boundary with an ellipsis. A hard slice printed
+    "...ikony, które ni" to the dashboard."""
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:—-") + "…"
+
+
 def _comparable_issues(report: dict | None) -> list[dict]:
     """The critical and serious issues the report shows, with a kind and content.
 
@@ -574,7 +583,7 @@ def _comparable_issues(report: dict | None) -> list[dict]:
             if kind is None:
                 continue
             out.append({"kind": kind, "stems": _content_stems(body),
-                        "text": (issue.get("impact") or issue.get("heuristic_name") or "")[:160]})
+                        "text": _clip(issue.get("impact") or issue.get("heuristic_name") or "")})
 
     # The barriers the report lists in its accessibility section. The narrator
     # does not always repeat a verified WCAG finding among its critical and
@@ -597,7 +606,7 @@ def _comparable_issues(report: dict | None) -> list[dict]:
         if any(o["kind"] == kind for o in out):
             continue
         out.append({"kind": kind, "stems": _content_stems(body),
-                    "text": (f.get("detail") or f.get("category") or "")[:160]})
+                    "text": _clip(f.get("detail") or f.get("category") or "")})
     return out
 
 
@@ -705,15 +714,15 @@ def _build_comparison(
     prev_crit, prev_total = _crit_total(prev_report, prev_sc)
 
     metrics = [
-        {"label": "Overall score", "now": now_score if now_score is not None else "—",
+        {"key": "score", "label": "Overall score", "now": now_score if now_score is not None else "—",
          "prev": prev_score if prev_score is not None else "—", "trend": _trend(now_score, prev_score)},
         # Compared as a rate, because it is displayed as one: trending on the
         # raw numerator labelled 2/2 after 3/8 a regression.
-        {"label": "Task success", "now": f"{now_ok}/{now_all}", "prev": f"{prev_ok}/{prev_all}",
+        {"key": "taskSuccess", "label": "Task success", "now": f"{now_ok}/{now_all}", "prev": f"{prev_ok}/{prev_all}",
          "trend": _trend(_rate(now_ok, now_all), _rate(prev_ok, prev_all))},
-        {"label": "Critical findings", "now": now_crit, "prev": prev_crit,
+        {"key": "critical", "label": "Critical findings", "now": now_crit, "prev": prev_crit,
          "trend": _trend(now_crit, prev_crit, higher_is_better=False)},
-        {"label": "Total findings", "now": now_total, "prev": prev_total,
+        {"key": "total", "label": "Total findings", "now": now_total, "prev": prev_total,
          "trend": _trend(now_total, prev_total, higher_is_better=False)},
     ]
 
@@ -722,6 +731,9 @@ def _build_comparison(
 
     return {
         "vsDate": _fmt_date(prev_manifest.get("started_at")),
+        # strftime's month names follow the server's C locale ("Sep"); the
+        # dashboard formats this one in the interface language.
+        "vsDateIso": prev_manifest.get("started_at") or "",
         "vsRunId": prev_dir.name,
         "metrics": metrics,
         "fresh": fresh[:4],
