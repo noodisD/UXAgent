@@ -38,11 +38,31 @@ _STALE_RESULT_MARKERS = (
     "nie wyświetlił listy wyników", "nie wyświetliła listy wyników",
 )
 
+# --- financing_info_missing --------------------------------------------------
+# The same absence reported under two heuristics in the 2026-09-30 hyundai run:
+# H2 "brak prezentacji estymowanej raty miesięcznej" and H7 "brak kalkulatora
+# rat", by two personas on the summary page. Two issues, two score deductions,
+# one missing thing. Both a financing context AND an absence symptom are needed,
+# so "the rate calculator does not work" is left alone. Run over the 64
+# recorded findings it matches none of them, and both of those.
+_FINANCING_CONTEXT_MARKERS = (
+    "raty miesięcz", "ratę miesięcz", "rat miesięcz", "kalkulator rat", "kalkulatora rat",
+    "kalkulator finans", "kalkulatora finans", "symulator finans", "symulatora finans",
+    "raty leasing", "rat leasing",
+)
+_ABSENCE_MARKERS = (
+    "brak", "nie podaje", "nie prezentuje", "nie ma ", "bez prezentacji", "jedynie całkow",
+    "tylko całkow", "nie wyświetla", "nie pokazuje",
+)
+
 # (root_cause_id, Polish display name, context markers, symptom markers)
 _SIGNATURES = (
     ("search_stale_results",
      "Wyszukiwarka nie aktualizuje wyników dla nowego zapytania",
      _QUERY_CONTEXT_MARKERS, _STALE_RESULT_MARKERS),
+    ("financing_info_missing",
+     "Brak raty miesięcznej lub kalkulatora finansowania w podsumowaniu",
+     _FINANCING_CONTEXT_MARKERS, _ABSENCE_MARKERS),
 )
 
 

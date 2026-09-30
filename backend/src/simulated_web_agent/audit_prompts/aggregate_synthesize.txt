@@ -185,6 +185,10 @@ Rules:
 OCENA OBLICZONA (wiążąca, z rozbiciem):
 {score_breakdown}
 - key_strengths: 2–4 items. Only include genuine strengths backed by data.
+- Każdą średnią (np. 4,67/5) przypisuj WYŁĄCZNIE do pytania lub wymiaru, z którego pochodzi
+  (id w legendzie pytań). Nie łącz dwóch pytań pod jedną średnią i nie nazywaj średniej z
+  jednego pytania oceną innego: np. jeśli „Konfigurowanie było proste" ma 3,83, a „Cena była
+  jasna" 4,67, to nie pisz, że konfigurowanie i cena zostały ocenione na 4,67.
 - critical_issues / serious_issues / minor_issues: only include issues present in the data. Use empty arrays if none.
 - priority_recommendations: ranked 1–N, most impactful first. Maximum 5.
 - ALL text values must be in Polish.

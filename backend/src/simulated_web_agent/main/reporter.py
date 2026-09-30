@@ -35,9 +35,9 @@ from .scoring import (
     RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
     compute_ux_score, rationale_text,
 )
-from .attribution import restates_a_gated_finding
+from .attribution import harness_suspect_causes, restates_a_gated_finding
 from .iso_metrics import current_effectiveness, effective_outcome
-from .redaction import clean as _redact, mentions_harness_fault
+from .redaction import clean as _redact, describes_interaction_trouble, mentions_harness_fault
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -692,9 +692,21 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             own_findings = TraceStore(Path(trace_dir)).read_heuristic_findings() or []
         except Exception:
             own_findings = []
+        # Third way: the session itself recorded the tool failing (a blocked or
+        # timed-out click, a retry loop) and the account describes interactions
+        # not working. Each alone is weak — people do report broken buttons, and
+        # sessions do have a stray error — together the account may be the error.
+        tool_trouble = False
+        if store is not None:
+            try:
+                tool_trouble = any(code in ("executor_error", "fallback", "repeat")
+                                   for code, _ in harness_suspect_causes(store).values())
+            except Exception:
+                tool_trouble = False
         entry["self_reported_only"] = (
             any(mentions_harness_fault(t) for t in refl_texts)
             or restates_a_gated_finding(refl_texts, own_findings)
+            or (tool_trouble and any(describes_interaction_trouble(t) for t in refl_texts))
         )
         # What the score counts for this participant, and from where — so the
         # objectives section shows the same outcome (iso_metrics.effective_outcome).
@@ -1745,7 +1757,10 @@ async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
         "You are a UX researcher. For EACH survey question (keyed by question id), "
         "synthesise WHY the agents answered the way they did, based on their stated "
         "reasoning. 2-4 sentences per question, in Polish. "
-        "Describe only why they answered as they did. Do NOT say whether the task was "
+        "Describe only why they answered as they did. Do NOT state as fact that buttons, "
+        "links or pages malfunctioned (did not respond, looped, blocked clicks, script "
+        "errors): participants sometimes describe the automation failing, so report such "
+        "remarks as what some participants said, or leave them out. Do NOT say whether the task was "
         "completed, or whether anything blocked or prevented it: the answers do not "
         "show that, and the outcome is measured elsewhere (a summary that said no one "
         "met a barrier sat beside a participant who only partly finished). "

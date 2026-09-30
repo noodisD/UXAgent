@@ -76,6 +76,27 @@ def redact_internals(text: str) -> str:
     return re.sub(r"\s+([,.;:])", r"\1", out).strip()
 
 
+# How a person says an interaction would not work. On its own this is ordinary —
+# people do report broken buttons — so it counts only beside a trace showing the
+# tool itself failed in that session (see reporter). The 2026-09-30 hyundai run:
+# "divy blokujące klikanie", "zapętlający się konfigurator", "błędy skryptów" and
+# a recommended "naprawa struktury warstw (z-index)" were echoes of Playwright's
+# "<div> intercepts pointer events" and a retried click, and reached the client
+# as site facts because no word on the harness list appeared in them.
+_INTERACTION_TROUBLE = re.compile(
+    r"blokując|zablokow|uniemożliw|nie\s+działa|niedziała|nie\s+reagow|zapętl|zacina|zaciął|"
+    r"błęd\w*\s+skrypt|błęd\w*\s+warstw|z-index|\bdiv|warstw\w*\s+(?:interfejs|strony)|"
+    r"nakładając\w*\s+się|nie\s+dało\s+się\s+klikn",
+    re.I)
+
+
+def describes_interaction_trouble(text: str) -> bool:
+    """True when free text says an interaction did not work (clicks blocked,
+    controls dead, a loop). Only evidence of something, never proof: pair it
+    with the session's own record of tool failures."""
+    return bool(isinstance(text, str) and text and _INTERACTION_TROUBLE.search(text))
+
+
 def mentions_harness_fault(text: str) -> bool:
     """True when free text describes this tool's own interaction failing."""
     if not isinstance(text, str) or not text:
