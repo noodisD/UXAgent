@@ -96,6 +96,20 @@ def pl_plural(n: int, one: str, few: str, many: str) -> str:
     return many
 
 
+def evidence_quote(ex: dict, limit: int = 300) -> tuple[str, str]:
+    """(label, text) for the quote under an evidence screenshot — one rule for
+    every format.
+
+    The page's own words where they can be found; otherwise the session's
+    description of the page, labelled as such: it is written by the perception
+    model, often in English, and is not a quotation from the site.
+    """
+    page_text = (ex.get("page_quote") or "").strip()
+    text = (page_text or ex.get("observation_quote") or "")[:limit]
+    label = "Tekst ze strony" if page_text else "Opis strony w zapisie sesji (automatyczny)"
+    return label, text
+
+
 def held_intro_text(k: int) -> str:
     """The lead-in to the held-back list, worded so it is right for any count.
 
@@ -680,10 +694,8 @@ def _render_issues_group(title: str, issues: list) -> str:
             # session's description of the page, labelled as such — it is
             # written by the perception model, often in English, and is not a
             # quotation from the site.
-            page_text = (ex.get("page_quote") or "").strip()
-            quote = _esc((page_text or ex.get("observation_quote") or "")[:300])
-            quote_label = ("Tekst ze strony" if page_text
-                           else "Opis strony w zapisie sesji (automatyczny)")
+            quote_label, quote_text = evidence_quote(ex)
+            quote = _esc(quote_text)
             who = _esc(ex.get("persona_name", ""))
             step = ex.get("step")
             shot = ex.get("screenshot")

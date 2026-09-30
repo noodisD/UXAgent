@@ -442,7 +442,13 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                     f"krok {ex['step']}" if ex.get("step") is not None else "",
                     ex.get("url"),
                 ] if x)
-                _add_picture(doc, run_dir, ex.get("screenshot"), caption)
+                # A missing screenshot no longer drops the citation with it.
+                if not _add_picture(doc, run_dir, ex.get("screenshot"), caption):
+                    _add_caption(doc, caption)
+                from .reporter_html import evidence_quote
+                label, quote = evidence_quote(ex)
+                if quote:
+                    _add_caption(doc, f"{label}: „{quote}”")
 
     # ── Held for a human ─────────────────────────────────────────────────
     held_items = (stats.get("heuristic") or {}).get("needs_verification_items") or []
@@ -474,6 +480,7 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             p = doc.add_paragraph()
             p.add_run("Co sprawdzić: ").bold = True
             p.add_run(str(it.get("check", "")))
+            _add_picture(doc, run_dir, it.get("screenshot"), f"krok {it.get('step')}")
 
     # ── Recommendations ──────────────────────────────────────────────────
     recs = narr.get("priority_recommendations") or []
