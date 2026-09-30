@@ -840,6 +840,16 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # Deduplicated by category: the same barrier on five pages is one problem to
     # fix, and listing it five times buries everything else.
     a11y_by_category: dict[str, dict] = {}
+    # Which device each session ran on, so an instance can say "mobile".
+    device_by_dir: dict[str, str] = {}
+    for _s in (stores or []):
+        try:
+            _card = _s.read_persona_card() or {}
+        except Exception:
+            continue
+        _name = Path(str(getattr(_s, "trace_dir", ""))).name
+        if _name and _card.get("device"):
+            device_by_dir[_name] = str(_card["device"]).strip().lower()
     for r in reports:
         acc = r.get("accessibility") or {}
         if not isinstance(acc, dict):
@@ -870,6 +880,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 "urls": [], "personas": set(),
                 "topic": topic,
                 "examples": [], "verified": False,
+                "instances": [],
                 "_instances": [], "_worst_url": str(f.get("url") or "").strip(),
             })
             if severity_rank(f.get("severity")) > severity_rank(entry["severity"]):
@@ -899,6 +910,17 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                     "verified": bool(f.get("verified")),
                 }})
             entry["verified"] = entry["verified"] or bool(f.get("verified"))
+            # Each occurrence with its OWN page, device and wording. The merged
+            # entry keeps the worst instance's description beside a flat list of
+            # every page, and the aggregate model paired them: a combobox on the
+            # test-drive form became "pola wyboru … na stronie głównej", where the
+            # home page had two unnamed buttons, on mobile only.
+            if len(entry["instances"]) < 12:
+                entry["instances"].append({
+                    "page": _page_of(url), "device": device_by_dir.get(p_dir, ""),
+                    "persona": who, "severity": f.get("severity", "drobny"),
+                    "detail": detail[:300],
+                })
     for e in a11y_by_category.values():
         _order_a11y_instances(e)
     a11y_findings = sorted(
@@ -1327,6 +1349,25 @@ def _group_counts(stats: dict) -> Counter:
                    if isinstance(r, dict))
 
 
+def _a11y_for_prompt(acc: dict) -> dict:
+    """The accessibility statistics as the aggregate model should read them.
+
+    The stored entry merges one barrier topic across pages and participants:
+    one description (the worst instance's), every page in one list, every
+    participant in another. Read together they invite pairing one instance's
+    wording with another's page. The model gets each finding's `instances`
+    instead — page, device, participant and what was found THERE — and none of
+    the flat lists that could be re-paired.
+    """
+    out = {k: v for k, v in (acc or {}).items() if k != "findings"}
+    out["findings"] = [
+        {k: f.get(k) for k in ("category", "severity", "topic", "recommendation", "verified")}
+        | {"instances": f.get("instances") or []}
+        for f in (acc or {}).get("findings") or [] if isinstance(f, dict)
+    ]
+    return out
+
+
 def _survey_legend(survey_stats: dict | None) -> str:
     """"id = wording (scale)" for every question of this study's questionnaire.
 
@@ -1499,7 +1540,7 @@ async def generate_aggregated_report(
     heuristic_summary = json.dumps(
         stats["heuristic"]["by_heuristic"][:10], ensure_ascii=False, indent=2
     )
-    a11y_summary = json.dumps(stats["accessibility"], ensure_ascii=False, indent=2)
+    a11y_summary = json.dumps(_a11y_for_prompt(stats["accessibility"]), ensure_ascii=False, indent=2)
     vp_summary = json.dumps(stats["viewport"], ensure_ascii=False, indent=2)
     sc = stats["heuristic"]["severity_counts"]
     top_issues = _top_issues_text(stats)

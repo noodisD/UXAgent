@@ -43,6 +43,12 @@ nie licz tych samych przyczyn ponownie we własnej analizie.
 
 ACCESSIBILITY SUMMARY:
 {accessibility_summary}
+WAŻNE (instancje): każda bariera dostępności ma listę `instances` — strona, urządzenie,
+uczestnik i opis tego, co znaleziono WŁAŚNIE TAM. Opisując barierę, użyj strony i urządzenia
+z jej instancji. Nigdy nie łącz opisu jednej instancji (np. pole wyboru w formularzu jazdy
+testowej) ze stroną innej (np. przyciski na stronie głównej). Jeśli coś występuje tylko na
+urządzeniu mobilnym, napisz to; nazwij rodzaj kontrolki (przycisk, pole wyboru, link) tak,
+jak w opisie instancji.
 WAŻNE (tekst alternatywny): `measured.images` rozbija obrazy bez opisu na
 `unnamed_in_named_control` (ikony w przyciskach i linkach, które mają własną nazwę —
 czytnik ekranu ogłasza je poprawnie), `unnamed_outside_content` (elementy poza treścią
