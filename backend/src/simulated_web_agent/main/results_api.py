@@ -575,6 +575,29 @@ def _comparable_issues(report: dict | None) -> list[dict]:
                 continue
             out.append({"kind": kind, "stems": _content_stems(body),
                         "text": (issue.get("impact") or issue.get("heuristic_name") or "")[:160]})
+
+    # The barriers the report lists in its accessibility section. The narrator
+    # does not always repeat a verified WCAG finding among its critical and
+    # serious issues: in the 2026-09-27 run the test-drive combobox was there
+    # only, and the comparison — which read the narrative alone — called it
+    # "resolved" against the run before while the report still listed it.
+    # Only what the report shows at critical or serious (scoring's own rule,
+    # demotions included), and not a topic the narrative already carries.
+    from .scoring import accessibility_severity
+
+    a11y = ((report.get("statistics") or {}).get("accessibility") or {})
+    images = (a11y.get("measured") or {}).get("images") or {}
+    for f in a11y.get("findings") or []:
+        if not isinstance(f, dict) or not f.get("verified"):
+            continue
+        if accessibility_severity(f, images)[0] not in ("krytyczny", "poważny"):
+            continue
+        body = " ".join(str(f.get(k) or "") for k in ("category", "detail", "recommendation"))
+        kind = f"wcag:{f.get('topic') or a11y_topic(body) or 'inne'}"
+        if any(o["kind"] == kind for o in out):
+            continue
+        out.append({"kind": kind, "stems": _content_stems(body),
+                    "text": (f.get("detail") or f.get("category") or "")[:160]})
     return out
 
 
