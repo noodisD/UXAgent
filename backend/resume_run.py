@@ -124,7 +124,7 @@ async def resume(run_dir: Path) -> None:
         )
         log.info("Manifest settled: status=done")
 
-    for name in ("aggregated_report.json", "aggregated_report.md", "aggregated_report.html"):
+    for name in ("aggregated_report.json", "aggregated_report.html"):
         p = run_dir / name
         log.info("  %s %s", "OK  " if p.exists() else "MISS", name)
 

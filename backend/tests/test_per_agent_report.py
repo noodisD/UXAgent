@@ -3,7 +3,6 @@ Tests for generate_per_agent_report() in reporter.py.
 
 Behavior under test:
   3. ux_report.json is created in trace_dir with the correct top-level structure
-  4. ux_report.md contains a severity header for each heuristic finding
 """
 import json
 import pytest
@@ -54,21 +53,14 @@ async def test_per_agent_report_creates_json_with_required_keys(store: TraceStor
 
 
 # ---------------------------------------------------------------------------
-# Slice 4: ux_report.md contains severity headers for each finding
+# The Markdown report is retired: only the JSON is written
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_per_agent_report_md_contains_severity_header_for_each_finding(store: TraceStore):
-    findings = [
-        make_finding(heuristic_id=1, severity="krytyczny"),
-        make_finding(heuristic_id=5, severity="drobny"),
-    ]
-    _write_trace_fixtures(store, findings=findings)
+async def test_per_agent_report_writes_json_only(store: TraceStore):
+    _write_trace_fixtures(store, findings=[make_finding(heuristic_id=1, severity="krytyczny")])
 
     await generate_per_agent_report(store)
 
-    md = (store.trace_dir / "ux_report.md").read_text(encoding="utf-8")
-    assert "KRYTYCZNY" in md, "Markdown must label critical findings"
-    assert "DROBNY" in md, "Markdown must label minor findings"
-    assert "H1" in md, "Markdown must reference heuristic 1"
-    assert "H5" in md, "Markdown must reference heuristic 5"
+    assert (store.trace_dir / "ux_report.json").exists()
+    assert not (store.trace_dir / "ux_report.md").exists()

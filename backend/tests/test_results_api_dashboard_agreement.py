@@ -57,7 +57,7 @@ def _persona(run_dir, name, answers, steps=12):
     })
     # The per-agent report exactly as the pipeline writes it — the report's
     # aggregation reads survey answers from here.
-    store.write_ux_report(_build_per_agent_json(store), "")
+    store.write_ux_report(_build_per_agent_json(store))
     return store
 
 

@@ -172,7 +172,6 @@ runs/
 └── <site-slug>/                    ← derived from URL (e.g. t-mobile.pl → tmobile)
     ├── aggregated_report.html      ← main deliverable (site-level)
     ├── aggregated_report.json
-    ├── aggregated_report.md
     ├── pagespeed.json              ← Google PageSpeed Insights scores
     └── <YYYY-MM-DD_HH-MM-SS_xxxx>/  ← one folder per persona run
         ├── persona_card.json       ← name, objective, demographics
@@ -187,7 +186,6 @@ runs/
         ├── survey_result.json
         ├── url_trace.json          ← step-by-step navigation log
         ├── ux_report.json          ← structured per-run report
-        ├── ux_report.md
         ├── objective_reflection.md ← LLM narrative vs persona goal
         └── screenshot/             ← screenshot_N.png per step
 ```

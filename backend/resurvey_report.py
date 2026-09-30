@@ -66,7 +66,7 @@ async def main():
 
     runs_dir = stores[0].trace_dir.parent
     print(f"\nDone. Reports written to {runs_dir}:")
-    for name in ("aggregated_report.json", "aggregated_report.md", "aggregated_report.html"):
+    for name in ("aggregated_report.json", "aggregated_report.html"):
         p = runs_dir / name
         if p.exists():
             print(f"  {p}  ({p.stat().st_size:,} bytes)")

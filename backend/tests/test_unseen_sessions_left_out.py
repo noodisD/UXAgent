@@ -26,7 +26,7 @@ _NARRATIVE = {"executive_summary": "Podsumowanie.", "overall_ux_score": 3,
 
 def _store(root, name, steps, observations=()):
     s = TraceStore(root / name)
-    s.write_ux_report(make_agent_report(findings=[make_finding(severity="poważny")]), "# md")
+    s.write_ux_report(make_agent_report(findings=[make_finding(severity="poważny")]))
     s.write_session_result({"steps_taken": steps})
     for i, text in enumerate(observations):
         s.write_observation_step_text(i, text)

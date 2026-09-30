@@ -2,10 +2,10 @@
 Report generation: per-agent and aggregated.
 
 Per-agent:
-  generate_per_agent_report(store) → trace_dir/ux_report.json + .md
+  generate_per_agent_report(store) → trace_dir/ux_report.json
 
 Aggregated (called after ALL agents finish):
-  generate_aggregated_report(stores, task, url) → runs/aggregated_report.json + .md
+  generate_aggregated_report(stores, task, url) → runs/aggregated_report.json (+ .html)
 """
 
 import json
@@ -193,160 +193,11 @@ def _build_per_agent_json(store: TraceStore) -> dict:
     }
 
 
-def _render_md(report: dict) -> str:
-    lines: list[str] = []
-
-    def h(level: int, text: str):
-        lines.append(f"{'#' * level} {text}\n")
-
-    def p(text: str):
-        lines.append(f"{text}\n")
-
-    def ul(items: list[str]):
-        for item in items:
-            lines.append(f"- {item}")
-        lines.append("")
-
-    h(1, "Raport UX – ocena agenta")
-    persona_text = report.get("persona", "")
-    # Show first paragraph as the header line; full persona follows
-    persona_first = persona_text.split("\n\n")[0] if persona_text else ""
-    p(f"**Persona:** {persona_first}")
-    if persona_text and "\n\n" in persona_text:
-        lines.append(f"\n<details><summary>Pełna persona</summary>\n\n{persona_text}\n\n</details>\n")
-    p(f"**Zadanie:** {report.get('intent', '')}")
-
-    # First impression
-    fi = report.get("first_impression") or {}
-    if not isinstance(fi, dict):
-        fi = {}  # malformed LLM shape (e.g. a bare list) — skip the section
-    if fi and not fi.get("error"):
-        h(2, "Pierwsze wrażenie (test 5 sekund)")
-        p(f"**Ocena ogólna:** {fi.get('overall_score', '—')}/5")
-        p(fi.get("clarity_summary", ""))
-        scores = fi.get("scores") or {}
-        if scores:
-            h(3, "Oceny cząstkowe")
-            score_labels = {
-                "purpose_clarity": "Jasność celu",
-                "navigation_visibility": "Widoczność nawigacji",
-                "call_to_action": "Wezwanie do działania",
-                "visual_hierarchy": "Hierarchia wizualna",
-                "trustworthiness": "Wiarygodność",
-            }
-            for key, label in score_labels.items():
-                lines.append(f"| {label} | {scores.get(key, '—')}/5 |")
-            lines.append("")
-        strengths = fi.get("strengths") or []
-        weaknesses = fi.get("weaknesses") or []
-        if strengths:
-            h(3, "Mocne strony")
-            ul(strengths)
-        if weaknesses:
-            h(3, "Słabe strony")
-            ul(weaknesses)
-
-    # Heuristic findings
-    findings = report.get("heuristic_findings") or []
-    counts = report.get("severity_counts") or {}
-    h(2, "Ocena heurystyczna (Nielsen)")
-    # The headline must be the sum of the breakdown beside it. It used to be
-    # len(findings) — every finding, including the ones the gates demoted —
-    # while the three counts came from `confirmed` only, so a persona with 9
-    # findings of which 6 were harness-suspect rendered as "Found 9 problems:
-    # 1 critical, 1 serious, 1 minor".
-    confirmed_total = (
-        counts.get("krytyczny", 0) + counts.get("poważny", 0) + counts.get("drobny", 0)
-    )
-    gated = counts.get("needs_verification", 0)
-    summary = (
-        f"Znaleziono **{confirmed_total}** potwierdzonych problemów: "
-        f"{counts.get('krytyczny', 0)} krytycznych, "
-        f"{counts.get('poważny', 0)} poważnych, "
-        f"{counts.get('drobny', 0)} drobnych."
-    )
-    if gated:
-        summary += (
-            f" Dodatkowo {gated} zgłoszeń odrzucono lub oznaczono do weryfikacji "
-            f"(nie wliczono ich powyżej)."
-        )
-    p(summary)
-    if findings:
-        for f in findings:
-            # A demoted finding must not read like a confirmed one. The counts
-            # above already exclude these, but the list rendered them
-            # identically — so a harness failure still appeared as
-            # "[KRYTYCZNY] H3: …" to anyone reading the per-persona file, which
-            # is precisely the false defect the gates exist to stop shipping.
-            # Marked rather than dropped: they are the audit trail explaining
-            # why the headline count is lower than the raw tally.
-            reason = _gate_reason(f)
-            severity_badge = f.get("severity", "drobny").upper()
-            prefix = "⚠ DO WERYFIKACJI — " if reason else ""
-            h(3, f"{prefix}[{severity_badge}] H{f.get('heuristic_id', '?')}: "
-                 f"{f.get('heuristic_name', '')}")
-            if reason:
-                p(f"*Nie wliczono do wyników — {reason}.*")
-            p(f"**URL:** {f.get('url', '—')}  |  **Krok:** {f.get('step', '—')}")
-            p(f"**Dowód:** {f.get('evidence', '')}")
-            p(f"**Rekomendacja:** {f.get('recommendation', '')}")
-
-    # Accessibility
-    acc = report.get("accessibility") or {}
-    if acc and not acc.get("error"):
-        h(2, "Dostępność")
-        p(f"**Ocena:** {acc.get('overall_score', '—')}/5")
-        p(acc.get("summary", ""))
-        acc_findings = acc.get("findings") or []
-        if acc_findings:
-            h(3, "Problemy z dostępnością")
-            for af in acc_findings:
-                p(f"**[{af.get('severity', '').upper()}]** {af.get('category', '')} — {af.get('detail', '')}")
-                p(f"*Rekomendacja:* {af.get('recommendation', '')}")
-        font_issues = acc.get("font_size_issues") or []
-        if font_issues:
-            h(3, "Problemy z rozmiarem czcionki")
-            for fi_item in font_issues:
-                p(f"Krok {fi_item.get('step', '?')}: min {fi_item.get('min_size_found', '?')} — {fi_item.get('detail', '')}")
-
-    # Viewport
-    vp_findings = report.get("viewport_findings") or []
-    issues = [v for v in vp_findings if v.get("horizontal_overflow") or v.get("wide_elements") or v.get("small_fonts")]
-    h(2, "Responsywność")
-    if issues:
-        for v in issues:
-            p(f"**{v.get('viewport', '')} @ {v.get('url', '')}**")
-            if v.get("horizontal_overflow"):
-                p("⚠ Wykryto poziomy pasek przewijania (overflow).")
-            if v.get("wide_elements"):
-                p(f"Elementy szersze niż viewport: {', '.join(v['wide_elements'][:5])}")
-            if v.get("small_fonts"):
-                for sf in v["small_fonts"]:
-                    p(f"Mała czcionka: {sf.get('size')}px: \"{sf.get('text', '')}\"")
-    else:
-        p("Nie wykryto problemów z responsywnością.")
-
-    # Survey
-    survey = report.get("survey_result") or {}
-    answers = survey.get("answers") or []
-    if answers:
-        h(2, "Wyniki ankiety")
-        for a in answers:
-            qid = a.get("question_id", "")
-            val = a.get("value", "")
-            reason = a.get("reason", "")
-            p(f"**{qid}:** {val}")
-            if reason:
-                p(f"*{reason}*")
-
-    return "\n".join(lines)
-
 
 async def generate_per_agent_report(store: TraceStore) -> dict:
-    """Build and save per-agent ux_report.json + ux_report.md."""
+    """Build and save the per-agent ux_report.json."""
     report = _build_per_agent_json(store)
-    md = _render_md(report)
-    store.write_ux_report(report, md)
+    store.write_ux_report(report)
     log.info("[reporter] Per-agent report saved to %s", store.trace_dir)
     return report
 
@@ -1752,8 +1603,6 @@ async def generate_aggregated_report(
         json.dumps(aggregated, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    md = _render_aggregated_md(aggregated)
-    (runs_dir / "aggregated_report.md").write_text(md, encoding="utf-8")
 
     from .reporter_html import save_html_report
     save_html_report(aggregated, runs_dir)
@@ -2005,11 +1854,11 @@ def resolve_narrative(agg: dict) -> dict:
     """The narrative to render, with the LLM-failure fallback already applied.
 
     One function because the same three-clause guard used to be written out in
-    both renderers, and only the Markdown copy called _attach_issue_evidence.
-    When the aggregate LLM call failed, aggregated_report.md showed screenshots,
-    URLs, quotes and correct `verified` flags while report.html — the artifact
-    actually served to the client — showed the same issues stripped of all
-    evidence. Both now take this path.
+    each renderer, and only one of them (the Markdown report, since retired)
+    called _attach_issue_evidence. When the aggregate LLM call failed, that copy
+    showed screenshots, URLs, quotes and correct `verified` flags while
+    report.html — the artifact actually served to the client — showed the same
+    issues stripped of all evidence. Every renderer now takes this path.
     """
     stats = agg.get("statistics") or {}
     narr = agg.get("narrative") or {}
@@ -2120,220 +1969,3 @@ def _narrative_from_stats(stats: dict) -> dict:
     }
 
 
-def _render_aggregated_md(agg: dict) -> str:
-    lines: list[str] = []
-    stats = agg.get("statistics") or {}
-    narr = resolve_narrative(agg)
-    n = stats.get("participant_count", 0)
-
-    def h(level: int, text: str):
-        lines.append(f"{'#' * level} {text}\n")
-
-    def p(text: str):
-        lines.append(f"{text}\n")
-
-    def ul(items: list):
-        for i in items:
-            lines.append(f"- {i if isinstance(i, str) else json.dumps(i, ensure_ascii=False)}")
-        lines.append("")
-
-    h(1, f"Raport zbiorczy UX — {agg.get('website', '')}")
-    p(f"**Zadanie:** {agg.get('task', '')}  |  **Liczba uczestników:** {n}")
-
-    if narr.get("executive_summary"):
-        h(2, "Podsumowanie")
-        p(narr["executive_summary"])
-
-    overall = narr.get("overall_ux_score")
-    if overall is not None:
-        p(f"**Ogólna ocena UX: {overall}/5** — {narr.get('score_rationale', '')}")
-
-    # Key strengths
-    strengths = narr.get("key_strengths") or []
-    if strengths:
-        h(2, "Mocne strony")
-        ul(strengths)
-
-    # Critical issues
-    for sev_key, sev_label in [("critical_issues", "Problemy krytyczne"), ("serious_issues", "Problemy poważne"), ("minor_issues", "Problemy drobne")]:
-        issues = narr.get(sev_key) or []
-        if issues:
-            h(2, sev_label)
-            for issue in issues:
-                # WCAG issues have no Nielsen number; "HNone:" was the heading.
-                h_id = issue.get("heuristic_id")
-                prefix = f"H{h_id}: " if isinstance(h_id, int) else ""
-                h(3, f"{prefix}{issue.get('heuristic_name', '')}")
-                if issue.get("verified") is False:
-                    p("⚠ **Niezweryfikowane** — brak dowodu w zapisie sesji.")
-                p(f"**Częstotliwość:** {issue.get('frequency', '')}")
-                p(f"**Wpływ:** {issue.get('impact', '')}")
-                p(f"**Rekomendacja:** {issue.get('recommendation', '')}")
-                for ex in issue.get("examples") or []:
-                    parts = [f"**Dowód:** {ex.get('url', '')}"]
-                    if ex.get("persona_name"):
-                        parts.append(f"(uczestnik {ex['persona_name']}, krok {ex.get('step')})")
-                    if ex.get("screenshot"):
-                        parts.append(f"— zrzut: `{ex['screenshot']}`")
-                    p(" ".join(parts))
-                    if ex.get("observation_quote"):
-                        p(f"> {ex['observation_quote'][:300]}")
-
-    # Assessments
-    for key, label in [
-        ("first_impression_assessment", "Pierwsze wrażenie"),
-        ("accessibility_assessment", "Dostępność"),
-        ("responsiveness_assessment", "Responsywność"),
-    ]:
-        val = narr.get(key)
-        if val:
-            h(2, label)
-            p(val)
-
-    # Priority recommendations
-    recs = narr.get("priority_recommendations") or []
-    if recs:
-        h(2, "Priorytetowe rekomendacje")
-        for rec in recs:
-            h(3, f"{rec.get('priority', '?')}. {rec.get('area', '')}")
-            p(rec.get("action", ""))
-            expected = rec.get("expected_impact")
-            if expected:
-                p(f"*Oczekiwany efekt:* {expected}")
-
-    # Survey scores
-    survey_stats = stats.get("survey") or {}
-    avg_scores = survey_stats.get("avg_scores") or {}
-    open_answers = survey_stats.get("open_answers") or {}
-    questions = [q for q in (survey_stats.get("questions") or []) if isinstance(q, dict)]
-    if questions:
-        # The same question list the HTML renders: the real prompt, each
-        # question's own scale (1-7 was printed "/5"), placeholders apart.
-        h(2, "Wyniki ankiety")
-        for q in questions:
-            prompt = q.get("prompt") or q.get("id") or ""
-            na = int(q.get("not_assessable") or 0)
-            if q.get("kind") == "open":
-                h(3, prompt)
-                ul([f"„{a}”" for a in q.get("answers") or []])
-            elif q.get("kind") == "not_assessable":
-                p(f"**{prompt}:** brak ocen — żaden uczestnik nie mógł odpowiedzieć ({na})")
-            else:
-                avg = q.get("avg")
-                avg_str = f"{avg:.2f}" if isinstance(avg, (int, float)) else "—"
-                tail = f", {na} bez oceny" if na else ""
-                p(f"**{prompt}:** śr. {avg_str} / {q.get('max', 5)} (n={q.get('n', 0)}{tail})")
-    elif avg_scores or open_answers:
-        h(2, "Wyniki ankiety")
-        _QUESTION_LABELS = {
-            "q1": "Łatwość znalezienia produktu",
-            "q2": "Przejrzystość i czytelność strony",
-            "q3": "Łatwość sprawdzenia dostępności / znalezienia sklepu",
-            "q4": "Sprawność działania strony",
-        }
-        for qid, avg in sorted(avg_scores.items()):
-            label = _QUESTION_LABELS.get(qid, qid)
-            avg_str = f"{avg:.2f}" if avg is not None else "—"
-            p(f"**{label} ({qid}):** {avg_str}/5")
-        for qid, answers in sorted(open_answers.items()):
-            label = _QUESTION_LABELS.get(qid, qid)
-            h(3, label)
-            ul([f'„{a}"' for a in answers])
-
-    # Page speed
-    ps = agg.get("pagespeed")
-    if ps and not ps.get("skipped"):
-        h(2, "Szybkość strony (PageSpeed Insights)")
-        from .reporter_html import pagespeed_error_text
-        for strategy in ("mobile", "desktop"):
-            data = ps.get(strategy) or {}
-            if data.get("error"):
-                # Said, not skipped: a section with only a heading was the
-                # whole PageSpeed report when the mobile call timed out.
-                p(f"**{strategy.capitalize()}** — {pagespeed_error_text(data)}")
-                continue
-            label = strategy.capitalize()
-            score = data.get("performance_score", "—")
-            perf_label = data.get("performance_label", "").upper()
-            si = data.get("speed_index") or {}
-            fcp = data.get("fcp") or {}
-            lcp = data.get("lcp") or {}
-            tbt = data.get("tbt") or {}
-            cls_ = data.get("cls") or {}
-            p(f"**{label}** — Performance score: **{score}/100** [{perf_label}]")
-            p(f"| Metryka | Wartość | Status |")
-            p(f"|---|---|---|")
-            p(f"| Speed Index | {si.get('display','—')} | {si.get('status','').upper()} |")
-            p(f"| LCP (Largest Contentful Paint) | {lcp.get('display','—')} | {lcp.get('status','').upper()} |")
-            p(f"| FCP (First Contentful Paint) | {fcp.get('display','—')} | {fcp.get('status','').upper()} |")
-            p(f"| TBT (Total Blocking Time) | {tbt.get('display','—')} | — |")
-            p(f"| CLS (Cumulative Layout Shift) | {cls_.get('display','—')} | — |")
-
-    # Scroll depth
-    scroll = agg.get("scroll") or {}
-    avg_max = scroll.get("avg_max_depth_pct")
-    if avg_max is not None:
-        h(2, "Głębokość przewijania")
-        mn = scroll.get("min_max_depth_pct", "—")
-        mx = scroll.get("max_max_depth_pct", "—")
-        p(f"Średnia maks. głębokość przewijania: **{avg_max}%** (zakres {mn}–{mx}%)")
-        if avg_max < 30:
-            p("⚠ Uczestnicy rzadko przewijali poniżej 30% strony — treści below-the-fold mogą być pomijane.")
-
-    # Broken links
-    links = agg.get("links") or {}
-    broken_urls = links.get("broken_urls") or []
-    total_checked = links.get("total_links_checked", 0)
-    if total_checked:
-        h(2, "Uszkodzone linki")
-        if broken_urls:
-            p(f"Znaleziono **{len(broken_urls)}** uszkodzony(ch) link(ów) spośród {total_checked} sprawdzonych:")
-            for u in broken_urls[:10]:
-                lines.append(f"- {u}")
-            lines.append("")
-        else:
-            p(f"Nie wykryto uszkodzonych linków (sprawdzono {total_checked} linków).")
-
-    # Form funnel
-    forms = agg.get("forms") or {}
-    sessions_engaged = forms.get("sessions_engaged_form")
-    sessions_submitted = forms.get("sessions_submitted_form")
-    total_sessions = forms.get("total_sessions")
-    if sessions_engaged is not None:
-        h(2, "Lejek formularzy")
-        p(f"Sesje, które wypełniły pole formularza: **{sessions_engaged}/{total_sessions}**")
-        p(f"Sesje, które dotarły do akcji submit: **{sessions_submitted}/{total_sessions}**")
-        avg_fields = forms.get("avg_fields_filled")
-        if avg_fields is not None:
-            p(f"Średnia liczba pól wypełnionych na sesję: **{avg_fields}**")
-
-    # Statistics table
-    h(2, "Statystyki zbiorcze")
-    heur = stats.get("heuristic", {})
-    # The issues listed above, as the HTML header counts them; the findings
-    # behind them are a different unit and are named as such.
-    from .reporter_html import _issue_counts
-    ic = _issue_counts(narr)
-    p(f"Łączna liczba problemów: **{ic['total']}** "
-      f"({ic['critical']} kryt. / {ic['serious']} poważnych / {ic['minor']} drobnych), "
-      f"z {heur.get('total_findings', 0)} potwierdzonych zgłoszeń uczestników")
-
-    fi_avg = (stats.get("first_impression") or {}).get("avg_score")
-    if fi_avg is not None:
-        p(f"Średnia ocena pierwszego wrażenia: **{fi_avg}/5**")
-
-    a11y_avg = (stats.get("accessibility") or {}).get("avg_score")
-    if a11y_avg is not None:
-        p(f"Średnia ocena dostępności: **{a11y_avg}/5**")
-
-    vp = stats.get("viewport") or {}
-    p(f"Sesje z problemami responsywności: mobile {vp.get('mobile_overflow_sessions', 0)}/{n}, "
-      f"tablet {vp.get('tablet_overflow_sessions', 0)}/{n}")
-
-    # Methodology note
-    mn = narr.get("methodology_note")
-    if mn:
-        h(2, "Nota metodologiczna")
-        p(mn)
-
-    return "\n".join(lines)

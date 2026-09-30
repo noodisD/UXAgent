@@ -1,7 +1,7 @@
 """Report defects found by verifying the first live run on the current code
 (2026-09-26 hyundai, each confirmed by an independent check)."""
 from simulated_web_agent.main.reporter import (
-    _not_assessable, _order_a11y_instances, _render_aggregated_md, resolve_narrative,
+    _not_assessable, _order_a11y_instances, resolve_narrative,
 )
 from simulated_web_agent.main.results_api import _match_issues
 from simulated_web_agent.main.scoring import rationale_text
@@ -55,17 +55,3 @@ def test_the_comparison_matches_by_kind_and_content():
     assert persisting == [now[0]["text"]]
     assert fresh == [now[1]["text"]], "same Nielsen number, a different defect"
     assert gone == [prev[1]["text"]]
-
-
-def test_markdown_has_no_hnone_and_uses_each_questions_scale():
-    agg = {"website": "x.pl", "pagespeed": {"mobile": {"error": "timed out"}},
-           "narrative": {"executive_summary": "S.", "critical_issues": [
-               {"heuristic_id": None, "heuristic_name": "Dostępność (WCAG)", "examples": []}],
-               "serious_issues": [], "minor_issues": []},
-           "statistics": {"participant_count": 1, "heuristic": {}, "survey": {"questions": [
-               {"id": "synthetic_seq", "kind": "scale", "prompt": "Łatwość (SEQ)", "avg": 4.67, "n": 3, "max": 7},
-               {"id": "q9", "kind": "open", "prompt": "Czego brakowało?", "answers": ["Cennika"]}]}}}
-    md = _render_aggregated_md(agg)
-    assert "HNone" not in md and "—/5" not in md
-    assert "śr. 4.67 / 7" in md
-    assert "Pomiar nie powiódł się" in md

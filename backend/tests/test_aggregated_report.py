@@ -4,7 +4,7 @@ Tests for generate_aggregated_report() in reporter.py.
 Behavior under test:
   - reads ux_report.json from each store via store.read_ux_report()
   - calls LLM for narrative synthesis
-  - saves aggregated_report.json + .md into the runs/ parent directory
+  - saves aggregated_report.json into the runs/ parent directory (no Markdown: retired)
   - returns {} when no per-agent reports are available
 """
 import json
@@ -20,7 +20,7 @@ from simulated_web_agent.main.trace_store import TraceStore
 def _store_with_report(runs_dir: Path, idx: int, findings=None) -> TraceStore:
     """Create a TraceStore that already has a ux_report.json written."""
     store = TraceStore(runs_dir / f"run_{idx}")
-    store.write_ux_report(make_agent_report(findings=findings or []), "# md")
+    store.write_ux_report(make_agent_report(findings=findings or []))
     return store
 
 
@@ -41,7 +41,8 @@ _NARRATIVE = {
 
 @pytest.mark.asyncio
 async def test_aggregated_report_saved_to_runs_dir(tmp_path: Path):
-    """aggregated_report.json and .md must be written to the parent runs/ directory."""
+    """aggregated_report.json is written to the parent runs/ directory; the Markdown
+    report is retired and must not come back as a file nobody reads."""
     stores = [
         _store_with_report(tmp_path, 0, findings=[make_finding(severity="krytyczny")]),
         _store_with_report(tmp_path, 1, findings=[make_finding(severity="poważny")]),
@@ -57,7 +58,7 @@ async def test_aggregated_report_saved_to_runs_dir(tmp_path: Path):
 
     runs_dir = stores[0].trace_dir.parent
     assert (runs_dir / "aggregated_report.json").exists()
-    assert (runs_dir / "aggregated_report.md").exists()
+    assert not (runs_dir / "aggregated_report.md").exists()
 
     assert result["statistics"]["participant_count"] == 2
     assert result["task"] == "Kup buty"

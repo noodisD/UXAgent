@@ -503,11 +503,10 @@ class TraceStore:
     # UX report
     # ------------------------------------------------------------------
 
-    def write_ux_report(self, json_data: dict, md_text: str) -> None:
+    def write_ux_report(self, json_data: dict) -> None:
         (self.trace_dir / "ux_report.json").write_text(
             json.dumps(json_data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        (self.trace_dir / "ux_report.md").write_text(md_text, encoding="utf-8")
 
     def read_ux_report(self) -> dict | None:
         return self._read_json(self.trace_dir / "ux_report.json")
