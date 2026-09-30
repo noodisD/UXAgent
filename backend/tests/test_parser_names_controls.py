@@ -115,3 +115,41 @@ async def test_controls_made_of_screen_reader_text_keep_their_names_and_reach():
     assert any(i.startswith("zamknij") for i in ids), ids  # named from its own text
     assert any("przejd" in i for i in ids), "a focusable skip link stays a control"
     assert 'type="radio"' in res["html"], "a hidden radio behind a styled label stays"
+
+
+# A control with no text of its own is named by its label, the element its
+# aria-labelledby points at, or the <title> of its icon. None of the three was
+# read, so a labelled field and an icon button both reached the persona as a bare
+# "input" or "button" and were then reported as controls without a name.
+LABELLED = """<html><head><style>
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+           clip:rect(0,0,0,0); white-space:nowrap; border:0 }
+</style></head><body>
+<label for="first">Imię</label><input id="first" type="text">
+<label for="last">Nazwisko <span class="sr-only">Mandatory Field</span></label><input id="last" type="text">
+<label><input type="checkbox" name="consent"> Akceptuję regulamin</label>
+<span id="lbl">Zamknij okno</span><button aria-labelledby="lbl"><i></i></button>
+<button class="icon"><svg width="16" height="16"><title>Koszyk</title></svg></button>
+<button>Dalej</button>
+<input type="text" name="anon">
+</body></html>"""
+
+
+async def test_a_control_is_named_by_its_label_its_labelledby_or_its_icon_title():
+    ids = (await _parse(LABELLED))["clickable_elements"]
+    for wanted in ("imi", "nazwisko", "akceptuj_regulamin", "zamknij_okno", "koszyk", "dalej"):
+        assert any(i == wanted for i in ids), (wanted, ids)
+
+
+async def test_a_labels_screen_reader_only_text_does_not_reach_the_id():
+    """"Nazwisko <span class=sr-only>Mandatory Field</span>" is "nazwisko", not
+    "nazwisko_mandatory_f": the persona reads ids, and that text is what it
+    reported as an untranslated label."""
+    res = await _parse(LABELLED)
+    assert not any("mandatory" in i for i in res["clickable_elements"])
+    assert "Mandatory Field" not in res["html"]
+
+
+async def test_a_control_with_no_label_at_all_keeps_its_tag_name():
+    ids = (await _parse(LABELLED))["clickable_elements"]
+    assert "input" in ids, ids

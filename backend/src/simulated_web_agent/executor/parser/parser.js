@@ -38,6 +38,45 @@ const parse = () => {
     return img ? (img.getAttribute('alt') || '').trim() : '';
   };
 
+  // The rest of how a control gets its name when it shows no text of its own:
+  // the elements its aria-labelledby points at, the <label> of a form field
+  // (for= or wrapping), or the <title> of an icon drawn as an <svg>. All three
+  // are in the DOM the parser reads, and none of them was used, so a labelled
+  // field and an icon button both reached the persona as a bare "input" or
+  // "button" and were then reported as controls without a name.
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  // What a sighted person reads in an element: its text and its descendants',
+  // without screen-reader-only spans. A label's innerText includes them, and the
+  // test-drive form's "Imię <span class=sr-only>Mandatory Field</span>" became
+  // the id imi_mandatory_field — putting back in front of the persona the very
+  // text isScreenReaderOnlyText takes out.
+  const visibleText = (el) => {
+    let out = '';
+    for (const n of el.childNodes) {
+      if (n.nodeType === 3) {
+        out += n.textContent;
+      } else if (n.nodeType === 1) {
+        if (BLACKLISTED_TAGS.has(n.tagName.toLowerCase())) continue;
+        if (isScreenReaderOnlyText(n, window.getComputedStyle(n))) continue;
+        out += ' ' + visibleText(n) + ' ';
+      }
+    }
+    return out;
+  };
+  const labelText = (el) => {
+    const ids = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+    const byId = clean(ids.map((i) => {
+      const n = document.getElementById(i);
+      return n ? visibleText(n) : '';
+    }).join(' '));
+    if (byId) return byId;
+    const labels = el.labels
+      ? clean(Array.from(el.labels).map((l) => visibleText(l)).join(' ')) : '';
+    if (labels) return labels;
+    const t = el.querySelector && el.querySelector('svg > title, svg title');
+    return t ? clean(t.textContent) : '';
+  };
+
   // Text that is there for screen readers only (the .sr-only / visually-hidden
   // pattern: 1px, clipped, absolutely positioned). A sighted person never sees
   // it, but it passes every visibility test below and went to the persona as
@@ -258,6 +297,7 @@ const parse = () => {
     if (isClickable) {
       const base = slug((original.innerText || '').trim() ||
         (original.getAttribute('aria-label') || '').trim() ||
+        labelText(original) ||
         original.getAttribute('title') ||
         imageAlt(original) ||
         original.getAttribute('placeholder') ||
