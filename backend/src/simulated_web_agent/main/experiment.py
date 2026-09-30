@@ -587,6 +587,10 @@ _FONT_SIZE_JS = """
   const results = [];
   document.querySelectorAll('p, li, span, a, div, td, th, label, h1, h2, h3, h4, h5, h6').forEach(el => {
     if (!el.offsetParent) return;
+    // Only elements that hold text of their own. An empty icon span reports
+    // the 1px font its CSS gives it, and the report said text of 1px
+    // "prevents reading" — on a page whose body text is 16px.
+    if (!Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent.trim())) return;
     const size = parseFloat(window.getComputedStyle(el).fontSize);
     if (size > 0) results.push(size);
   });

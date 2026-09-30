@@ -242,9 +242,69 @@ async def dismiss_open_offcanvas(page) -> bool:
         return False
 
 
+_WATCH_CLICKS_JS = """sel => {
+  if (window.__uxClickWatch) window.__uxClickWatch.abort();
+  const ctl = new AbortController();
+  window.__uxClickWatch = ctl;
+  window.__uxClickSeen = false;
+  window.addEventListener('click', e => {
+    const t = e.target;
+    if (t && t.closest && t.closest(sel)) window.__uxClickSeen = true;
+  }, {capture: true, signal: ctl.signal});
+  return true;
+}"""
+
+
+async def _watch_clicks(page, selector: str) -> bool:
+    try:
+        return bool(await page.evaluate(_WATCH_CLICKS_JS, selector))
+    except Exception:
+        return False
+
+
+async def _click_missed(page) -> bool:
+    """True only when the page is still the one we armed and no click reached
+    the target. A navigation replaces the document, so the flag is gone
+    (undefined, not False) and the click is taken to have worked."""
+    try:
+        return (await page.evaluate("window.__uxClickSeen")) is False
+    except Exception:
+        return False
+
+
 async def click_semantic_element(page, semantic_id: str, timeout: int = 5000) -> None:
-    """Click the element with the given parser-semantic-id, recovering from
-    sticky-overlay interception.
+    """Click the element with the given parser-semantic-id, and make sure the
+    click reached it.
+
+    Playwright can report a click as done when it was not: on the hyundai
+    configurator at 390px the step bar moves while the pointer is released, the
+    browser then sends the click to a common ancestor, and "Wnętrze" did
+    nothing with no error. The persona wrote that the tabs do not respond, and
+    the report passed it on as a site defect. A click that did not reach its
+    target is now retried once at a settled, hit-tested point, and if that
+    misses too it is raised — an error the harness gate can see — instead of
+    returned as a success.
+    """
+    selector = f'[parser-semantic-id="{semantic_id}"]'
+    element = page.locator(selector)
+    if await element.count() == 0:
+        raise ValueError(f"Element '{semantic_id}' not found on page")
+    watching = await _watch_clicks(page, selector)
+    await _click_with_recovery(page, element, timeout)
+    if not (watching and await _click_missed(page)):
+        return
+    for rescroll in (False, True):
+        await _watch_clicks(page, selector)
+        if await _click_visible_point(page, element, rescroll=rescroll) and not await _click_missed(page):
+            return
+    raise RuntimeError(
+        f"Click on '{semantic_id}' did not reach the element: the page moved "
+        "under the pointer, and a retry at a fixed point did not land either."
+    )
+
+
+async def _click_with_recovery(page, element, timeout: int) -> None:
+    """Click, recovering from sticky-overlay interception.
 
     Playwright scrolls the target the minimal distance into the viewport, so
     on pages with a sticky header the element lands right at the top edge,
@@ -256,10 +316,6 @@ async def click_semantic_element(page, semantic_id: str, timeout: int = 5000) ->
     inside a closed hover flyout) still fail both attempts and the error
     propagates to the agent.
     """
-    selector = f'[parser-semantic-id="{semantic_id}"]'
-    element = page.locator(selector)
-    if await element.count() == 0:
-        raise ValueError(f"Element '{semantic_id}' not found on page")
     try:
         await element.click(timeout=timeout)
     except PlaywrightTimeoutError:

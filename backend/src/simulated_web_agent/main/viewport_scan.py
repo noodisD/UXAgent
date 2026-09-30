@@ -155,6 +155,11 @@ _TAP_TARGET_JS = r"""
     // the 1x1 px .sr-only pattern). Nobody taps them, and they were every one
     // of the Hyundai run's tap-target examples.
     if (r.width <= 2 || r.height <= 2) return;
+    // The same pattern with a real width: .sr-navigator is 100% wide but
+    // clipped to nothing, so "Skip to content" still counted as an 8px target.
+    const cs = getComputedStyle(el);
+    if (/^rect\(\s*[01](px)?\s*,?\s*[01](px)?\s*,?\s*[01](px)?\s*,?\s*[01](px)?\s*\)$/.test(cs.clip) ||
+        /^inset\((50|100)%\)$/.test(cs.clipPath)) return;
     if (isInlineInText(el)) return;
     targets.push({ el, r, cx: r.left + r.width / 2, cy: r.top + r.height / 2 });
   });
@@ -246,12 +251,17 @@ _CONTRAST_JS = r"""
     const bg = backdrop(el);
     if (!bg) { undetermined++; return; }
 
+    const r = ratio(lum(fg.rgb), lum(bg));
+    // Text the same colour as its backdrop is not the page's defect but ours:
+    // white text over a photo painted by a sibling layer, or a hidden carousel
+    // slide, has no opaque ancestor, so the walk above falls back to a white
+    // canvas and scores it 1.0. Counted as undetermined, never as a failure.
+    if (r < 1.05) { undetermined++; return; }
     checked++;
     const size = parseFloat(s.fontSize);
     const weight = parseInt(s.fontWeight, 10) || 400;
     const isLarge = size >= 24 || (size >= 18.66 && weight >= 700);
     const need = isLarge ? 3 : 4.5;
-    const r = ratio(lum(fg.rgb), lum(bg));
     if (r < need) {
       below++;
       // The same footer link fails on every page; a key lets aggregation count

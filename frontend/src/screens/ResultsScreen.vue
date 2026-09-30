@@ -320,7 +320,10 @@
                 <span class="heur-tag mono" :style="{ background: SEV[h.severity].chipBg, color: SEV[h.severity].chipFg }">{{ sevLabel(h.severity) }}</span>
                 <span v-if="h.severityScore !== undefined" class="sev-score mono">{{ h.severityScore }}</span>
                 <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
-                <span v-if="h.harnessSuspect" class="verify-chip mono" :title="t('pd.needsVerify.hint')">{{ t('pd.needsVerify') }}</span>
+                <!-- Every reason a finding is held back, as on the persona tab: only
+                     harnessSuspect was checked here, so a finding the verifier
+                     found unsupported sat in this list looking confirmed. -->
+                <span v-if="exclusionOf(h)" class="verify-chip mono" :title="t('excl.' + exclusionOf(h) + '.hint')">{{ t('excl.' + exclusionOf(h)) }}</span>
                 <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence" :title="h.confidenceCappedBy ? t('conf.capped.' + h.confidenceCappedBy) : undefined">{{ t('conf.' + h.confidence) }}</span>
                 <span class="finding-persona mono">{{ h.persona }}</span>
                 <button class="copy-btn" :class="{ copied: copiedIdx === i }" @click="copyFinding(h, i)">

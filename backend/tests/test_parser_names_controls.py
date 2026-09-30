@@ -82,3 +82,36 @@ async def test_content_really_below_an_unscrollable_page_is_still_dropped():
     </body></html>"""
     res = await _parse(html)
     assert "Na górze" in res["html"] and "Poza ekranem" not in res["html"]
+
+
+# "Mandatory Field" sits beside the "Model" label of the test-drive form as
+# visually-hidden text. The persona read it as an untranslated English label
+# and the report's only serious finding was built on it.
+SR_ONLY = """<html><head><style>
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+           clip:rect(0,0,0,0); white-space:nowrap; border:0 }
+.clip-path { position:absolute; clip-path:inset(50%); width:1px; height:1px; overflow:hidden }
+.styled-radio input { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0) }
+</style></head><body>
+<label>Model <span class="sr-only">Mandatory Field</span></label>
+<p>Cena od 89 900 zł <span class="clip-path">cena brutto</span></p>
+<button><span class="sr-only">Zamknij</span><i></i></button>
+<a class="sr-only" href="#main">Przejdź do treści</a>
+<div class="styled-radio"><label><input type="radio" name="c" value="b"><span class="sr-only">Czarny</span> Czarny</label></div>
+</body></html>"""
+
+
+async def test_screen_reader_only_text_is_not_page_text_for_the_persona():
+    res = await _parse(SR_ONLY)
+    assert "Mandatory Field" not in res["html"]
+    assert "cena brutto" not in res["html"]
+    assert ">Model" in res["html"].replace("> ", ">") or "Model" in res["html"]
+    assert "Cena od 89 900" in res["html"], "visible text stays"
+
+
+async def test_controls_made_of_screen_reader_text_keep_their_names_and_reach():
+    res = await _parse(SR_ONLY)
+    ids = res["clickable_elements"]
+    assert any(i.startswith("zamknij") for i in ids), ids  # named from its own text
+    assert any("przejd" in i for i in ids), "a focusable skip link stays a control"
+    assert 'type="radio"' in res["html"], "a hidden radio behind a styled label stays"

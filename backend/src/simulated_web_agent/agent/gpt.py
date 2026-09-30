@@ -269,6 +269,20 @@ def _parse_json_response(content: str) -> str:
         return json_str
     except Exception:
         pass
+    # 3.5 Flash-Lite fences its JSON in ``` and, now and then, writes the last
+    # string's closing quote escaped (\"]}). Left to json_repair, the string never
+    # ends, so the fence and the brackets were stored as page text — two steps of
+    # the 2026-09-27 run ended in '"]}```'. Strip the fence and un-escape that
+    # one quote first; only what still fails goes to the repair below.
+    import re
+
+    body = re.sub(r"^\s*```[a-zA-Z]*\s*|\s*```\s*$", "", content)
+    for candidate in (body, re.sub(r'\\"(\s*[\]}][\]}\s]*)$', r'"\1', body)):
+        try:
+            json.loads(candidate)
+            return candidate
+        except Exception:
+            continue
     # Repair path: json_repair locates and fixes the JSON (unescaped quotes,
     # trailing commas, truncation, ...). Re-validate before returning so callers
     # can always json.loads() the result.

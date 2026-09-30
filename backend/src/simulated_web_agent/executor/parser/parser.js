@@ -38,6 +38,29 @@ const parse = () => {
     return img ? (img.getAttribute('alt') || '').trim() : '';
   };
 
+  // Text that is there for screen readers only (the .sr-only / visually-hidden
+  // pattern: 1px, clipped, absolutely positioned). A sighted person never sees
+  // it, but it passes every visibility test below and went to the persona as
+  // page text: "Mandatory Field" printed beside the "Model" label was reported
+  // as an untranslated English label — the run's only serious finding, and
+  // false. The accessibility snapshot still has it (it is how a screen reader
+  // hears the field); only the persona's picture of the page drops it. Anything
+  // that can take focus is kept: hidden radios and checkboxes behind styled
+  // labels are controls, and a control's name is read from its own text.
+  const FOCUSABLE = 'a[href], button, input, select, textarea, summary, [tabindex], ' +
+    '[role="button"], [role="link"], [role="checkbox"], [role="radio"], ' +
+    '[role="option"], [role="tab"], [role="menuitem"], [contenteditable]';
+  const CLIP_TINY = /^rect\(\s*[01](px)?\s*,?\s*[01](px)?\s*,?\s*[01](px)?\s*,?\s*[01](px)?\s*\)$/;
+  const isScreenReaderOnlyText = (el, style) => {
+    if (style.position !== 'absolute' && style.position !== 'fixed') return false;
+    const clipped = CLIP_TINY.test(style.clip) || /^inset\((50|100)%\)$/.test(style.clipPath);
+    const r = el.getBoundingClientRect();
+    const tiny = r.width <= 1 && r.height <= 1 && style.overflow === 'hidden';
+    if (!clipped && !tiny) return false;
+    if (!(el.textContent || '').trim()) return false;
+    return !el.matches(FOCUSABLE) && !el.querySelector(FOCUSABLE);
+  };
+
   const ALLOWED_ATTR = new Set([
     'id', 'type', 'name', 'value', 'placeholder',
     'checked', 'disabled', 'readonly', 'required', 'maxlength',
@@ -202,10 +225,12 @@ const parse = () => {
     if (BLACKLISTED_TAGS.has(tag)) return null;
     if (!isVisible(original)) return null;
 
+    const computedStyle = window.getComputedStyle(original);
+    if (isScreenReaderOnlyText(original, computedStyle)) return null;
+
     let clone = document.createElement(original.tagName);
     copyAllowed(original, clone);
 
-    const computedStyle = window.getComputedStyle(original);
     if (computedStyle.pointerEvents !== 'auto') {
       clone.setAttribute('parser-pointer-events', computedStyle.pointerEvents);
     }

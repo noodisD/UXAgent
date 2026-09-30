@@ -158,3 +158,86 @@ async def test_an_element_covered_everywhere_is_not_clicked_through():
     finally:
         await browser.close()
         await pw.stop()
+
+
+# The strip moves the instant a link is pressed (scroll-linked UI), so the
+# pointer is released over its neighbour and the browser sends the click to the
+# common ancestor: nothing throws and the link never fires. This is how the
+# mobile "Wnętrze" click did nothing on the live run.
+SHIFTING_STRIP = """
+<!DOCTYPE html>
+<html><head><meta name="viewport" content="width=device-width"><style>
+body { margin:0 }
+#strip { overflow-x:auto; white-space:nowrap; width:390px }
+#strip a { display:inline-block; width:140px; line-height:56px; text-align:center; background:#eee }
+</style></head><body>
+<div id="strip">""" + "".join(
+    f'<a href="#" parser-semantic-id="s{i}" '
+    f'onclick="window.__clicked=(window.__clicked||[]).concat([{i}]);return false">Krok {i}</a>'
+    for i in range(7)) + """</div>
+<script>
+  let armed = true;
+  document.getElementById('strip').addEventListener('pointerdown', () => {
+    if (armed) { armed = false; document.getElementById('strip').scrollLeft += 100; }
+  });
+</script>
+</body></html>
+"""
+
+
+async def test_a_click_that_never_reached_its_target_is_retried_not_reported_as_done():
+    pw = await async_playwright().start()
+    browser = await pw.chromium.launch(headless=True)
+    try:
+        ctx = await browser.new_context(viewport={"width": 390, "height": 844},
+                                        is_mobile=True, has_touch=True)
+        page = await ctx.new_page()
+        await page.set_content(SHIFTING_STRIP)
+        await page.wait_for_timeout(300)
+        await click_semantic_element(page, "s2", timeout=1500)
+        assert await page.evaluate("window.__clicked") == [2]
+    finally:
+        await browser.close()
+        await pw.stop()
+
+
+async def test_a_click_that_cannot_land_is_an_error_not_a_success():
+    always_moving = SHIFTING_STRIP.replace("armed = false;", "armed = true;")
+    pw = await async_playwright().start()
+    browser = await pw.chromium.launch(headless=True)
+    try:
+        ctx = await browser.new_context(viewport={"width": 390, "height": 844},
+                                        is_mobile=True, has_touch=True)
+        page = await ctx.new_page()
+        await page.set_content(always_moving)
+        await page.wait_for_timeout(300)
+        with pytest.raises(RuntimeError, match="did not reach the element"):
+            await click_semantic_element(page, "s2", timeout=1500)
+        assert not await page.evaluate("window.__clicked")
+    finally:
+        await browser.close()
+        await pw.stop()
+
+
+async def test_a_click_that_navigates_is_not_clicked_again_on_the_new_page():
+    pw = await async_playwright().start()
+    browser = await pw.chromium.launch(headless=True)
+    try:
+        page = await browser.new_page(viewport={"width": 1024, "height": 768})
+        first = '<a href="/next" parser-semantic-id="go" style="display:block;height:40px">go</a>'
+        second = ('<body style="margin:0"><div style="height:800px">next</div><script>'
+                  "document.addEventListener('click', () => { window.__n = (window.__n || 0) + 1; });"
+                  "</script></body>")
+
+        async def serve(route):
+            body = second if route.request.url.endswith("/next") else first
+            await route.fulfill(body=body, content_type="text/html")
+
+        await page.route("http://example.test/**", serve)
+        await page.goto("http://example.test/")
+        await click_semantic_element(page, "go", timeout=2000)
+        await page.wait_for_url("**/next")
+        assert not await page.evaluate("window.__n"), "a navigation is a click that worked"
+    finally:
+        await browser.close()
+        await pw.stop()

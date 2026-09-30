@@ -1698,6 +1698,10 @@ async def generate_aggregated_report(
     # match the breakdown printed beneath it.
     if isinstance(narrative, dict) and "error" not in narrative:
         narrative["overall_ux_score"] = score_result["score"]
+        # The explanation too: the files take it from the breakdown at render
+        # time, but the dashboard shows the stored narrative, and the model's
+        # own prose ("3/3 partial" over a count of 2 of 3) disagreed with it.
+        narrative["score_rationale"] = rationale_text(score_result)
 
     _attach_issue_evidence(narrative, stats, measurements={
         "links": link_data, "pagespeed": pagespeed_data})
@@ -1768,6 +1772,10 @@ async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
         "You are a UX researcher. For EACH survey question (keyed by question id), "
         "synthesise WHY the agents answered the way they did, based on their stated "
         "reasoning. 2-4 sentences per question, in Polish. "
+        "Describe only why they answered as they did. Do NOT say whether the task was "
+        "completed, or whether anything blocked or prevented it: the answers do not "
+        "show that, and the outcome is measured elsewhere (a summary that said no one "
+        "met a barrier sat beside a participant who only partly finished). "
         'Respond with ONLY JSON: {"summaries": {"<question_id>": "<polish summary>", ...}}'
     )
     raw = await async_chat(

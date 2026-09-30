@@ -99,7 +99,10 @@ async def _fetch_strategy(url: str, strategy: str, api_key: str) -> dict:
 
 def _http_get(url: str) -> bytes:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    # The API sends nothing until the Lighthouse run ends, and a mobile run takes
+    # longer than 30 s: that limit cut the mobile measurement in both runs of
+    # 2026-09-26/27 while desktop (faster) came through.
+    with urllib.request.urlopen(req, timeout=120) as resp:
         return resp.read()
 
 

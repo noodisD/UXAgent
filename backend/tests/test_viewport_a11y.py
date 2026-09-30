@@ -146,7 +146,6 @@ async def test_low_contrast_text_is_flagged(store: TraceStore):
     ("#000000", 21.0),   # black on white — the maximum possible ratio
     ("#999999", 2.85),   # the canonical "too light grey"
     ("#767676", 4.54),   # the lightest grey that still passes AA on white
-    ("#ffffff", 1.0),    # white on white — invisible
 ])
 async def test_contrast_ratio_matches_the_wcag_formula(store: TraceStore,
                                                        hex_colour, expected):
@@ -160,6 +159,19 @@ async def test_contrast_ratio_matches_the_wcag_formula(store: TraceStore,
         assert c["below_threshold"] == 0
         return
     assert c["examples"][0]["ratio"] == pytest.approx(expected, abs=0.02)
+
+
+@pytest.mark.asyncio
+async def test_text_the_colour_of_its_backdrop_is_undetermined_not_a_failure(store: TraceStore):
+    """A ratio of 1.0 (white on white) is what the scan computes for white text
+    over a photo painted by a sibling layer, or on a hidden carousel slide: it
+    cannot see what is behind the text. Scored, it published hero banners as
+    contrast failures; it is counted as undetermined instead."""
+    findings = await _scan(store, _html(
+        '<p style="color:#ffffff;background:#ffffff;font-size:14px">Tekst</p>'))
+    c = _mobile(findings)["contrast"]
+    assert c["below_threshold"] == 0
+    assert c["undetermined"] >= 1
 
 
 @pytest.mark.asyncio
