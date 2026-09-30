@@ -55,7 +55,7 @@ _NODE = re.compile(
         '?                       # optional closing quote
         (?:\s*\[[^\]]*\])*       # attributes: [level=2] [selected] [disabled]
         '?                       # closing quote when it follows the attributes
-        \s*:?\s*$                # optional trailing colon
+        \s*(?::.*)?$             # optional colon, then inline text: `- link "X": text`
     """,
     re.VERBOSE,
 )
