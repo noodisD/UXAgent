@@ -50,7 +50,13 @@ def test_its_finding_stays_held_with_the_true_reason(tmp_path):
 def test_a_stuck_run_keeps_the_tool_failure_wording(tmp_path):
     f = _flag(_store(tmp_path, ["Slide 1"] * 4))
     assert excluded_from_report(f) and not f["repeated_with_progress"]
-    assert "awaria narzędzia, nie strony" in _gate_reason(f)
+    reason = _gate_reason(f)
+    # Stuck, not progressing: the reason says the click was repeated to no effect
+    # and that the trace cannot tell a dead element from a missed click. It does
+    # not use the progress wording ("nie awaria narzędzia").
+    assert "powtórzono wielokrotnie bez skutku" in reason
+    assert "czy narzędzie go nie trafia" in reason
+    assert "nie awaria narzędzia" not in reason
 
 
 def test_a_step_that_also_failed_keeps_the_tool_failure_wording(tmp_path):
@@ -58,3 +64,4 @@ def test_a_step_that_also_failed_keeps_the_tool_failure_wording(tmp_path):
                errors=[None, None, "Error executing action: Locator.click: Timeout 5000ms exceeded"])
     f = _flag(s, step=1)
     assert excluded_from_report(f) and not f["repeated_with_progress"]
+    assert "narzędzie zgłosiło błąd wykonania akcji" in _gate_reason(f)

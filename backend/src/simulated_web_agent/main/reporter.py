@@ -73,6 +73,42 @@ def _persona_label(report: dict) -> str:
     return trace_dir.replace("\\", "/").rstrip("/").split("/")[-1] if trace_dir else ""
 
 
+def _harness_reason(cause: dict | None) -> str:
+    """What stopped a finding counting, by the signal that marked its step.
+
+    One sentence used to cover every case — "prawdopodobna awaria narzędzia,
+    nie strony" — including a remark about page copy made on a step that merely
+    carried a blocked click. It claims the tool failed and says nothing of what
+    the trace shows. The signal is named instead, and the sentence says what the
+    trace cannot settle.
+    """
+    cause = cause if isinstance(cause, dict) else {}
+    code, detail, step = cause.get("code"), cause.get("detail") or "", cause.get("step")
+    at = f"w kroku {step}" if step is not None else "w tym kroku"
+    if code == "executor_error":
+        return (f"narzędzie zgłosiło błąd wykonania akcji {at} lub tuż przed nim"
+                f"{f' ({detail})' if detail else ''} — z zapisu nie da się odróżnić "
+                "skutku tego błędu od cechy strony")
+    if code == "consent":
+        return (f"{at} na ekranie był baner zgody, którego narzędzie nie zamknęło — "
+                "mógł zasłaniać stronę")
+    if code == "bot_wall":
+        return f"{at} strona była ekranem weryfikacji antybotowej, a nie serwisem"
+    if code == "perception_gap":
+        return (f"{at} opis strony był niemal pusty mimo dużej strony — narzędzie nie "
+                "odczytało jej treści")
+    if code == "fallback":
+        return (f"{at} uczestnik wycofał się po nieudanych próbach kliknięcia — "
+                "nie wiadomo, czy element nie działał, czy narzędzie go nie trafiło")
+    if code == "repeat":
+        return (f"{at} to samo kliknięcie powtórzono wielokrotnie bez skutku"
+                f"{f' („{detail}”)' if detail else ''} — nie wiadomo, czy element nie działa, "
+                "czy narzędzie go nie trafia")
+    if code == "claim_contradicted":
+        return "wniosek przeczy przebiegowi sesji albo dotyczy elementu, który się zaciął"
+    return "w tym kroku lub tuż przed nim wystąpiła usterka narzędzia"
+
+
 def _gate_reason(finding: dict) -> str:
     """Why this finding was demoted, in Polish — "" if it stands confirmed.
 
@@ -93,7 +129,7 @@ def _gate_reason(finding: dict) -> str:
                 "awaria narzędzia, ale zapis nie rozstrzyga, czy opisane zachowanie "
                 "jest wadą strony")
     if finding.get("harness_suspect"):
-        return "prawdopodobna awaria narzędzia, nie strony"
+        return _harness_reason(finding.get("harness_cause"))
     if finding.get("off_site"):
         return "dotyczy innej domeny niż badana"
     if finding.get("claim_verdict") == "unsupported":

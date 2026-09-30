@@ -159,28 +159,57 @@ def why_site_unseen(store: TraceStore) -> str | None:
     return None
 
 
+def _executor_error_detail(err: str) -> str:
+    """The executor's error in a few Polish words, for the reader of the report."""
+    e = err.lower()
+    if "intercepts pointer events" in e:
+        return "kliknięcie zablokowała inna warstwa strony"
+    if "timeout" in e:
+        return "element nie zareagował w limicie czasu"
+    if "not found" in e or "nie znaleziono" in e:
+        return "element nie został znaleziony na stronie"
+    return "akcja nie została wykonana"
+
+
 def harness_suspect_steps(store: TraceStore, progress_runs: bool = True) -> set[int]:
     """Step indices whose action is a harness interaction failure.
 
-    Four signatures, all deterministic:
-      1. a fallback action ("...nie działał mimo kilku prób...") — and the step
-         it retreated from, which is where the finding is usually anchored;
-      2. an (action, target) pair repeated >= _REPEAT_THRESHOLD times — a stuck
-         loop where the agent retried because the interaction had no effect;
-      3. a near-empty observation over a large raw page — a perception-capture
-         artifact ("The page is empty" while raw_html is tens of KB), i.e. the
-         perceiver failed, not the site;
-      4. the executor reported it could not perform the action at all;
-      5. a consent notice was on screen and never dismissed;
-      6. the page was a bot-detection challenge rather than the site.
+    See harness_suspect_causes for the six signatures. This is the set of steps;
+    that one also says which signature marked each."""
+    return set(harness_suspect_causes(store, progress_runs))
+
+
+def harness_suspect_causes(store: TraceStore, progress_runs: bool = True) -> dict[int, tuple[str, str]]:
+    """Step index -> (cause code, detail) for every step marked as a harness failure.
+
+    Six signatures, all deterministic, tried in this order (the first to mark a
+    step names it):
+      executor_error  the executor reported it could not perform the action at all;
+      consent         a consent notice was on screen and never dismissed;
+      bot_wall        the page was a bot-detection challenge rather than the site;
+      perception_gap  a near-empty observation over a large raw page — the perceiver
+                      failed on an overlay state, the page was not actually blank;
+      fallback        a fallback action ("...nie działał mimo kilku prób...") — and
+                      the step it retreated from, where the finding usually anchors;
+      repeat          an (action, target) pair repeated >= _REPEAT_THRESHOLD times —
+                      a stuck loop where the agent retried because nothing changed.
+
+    The cause is what lets the report say why a finding was held. Every one used
+    to read "prawdopodobna awaria narzędzia, nie strony", which overclaims: a
+    copy-text remark made on a step that carried a blocked click is held because
+    of the click, not because the remark is false.
     """
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
-    suspect: set[int] = set()
+    causes: dict[int, tuple[str, str]] = {}
 
-    # (4) Executor failures. observations[i] is the state recorded *before*
+    def mark(i: int, code: str, detail: str = "") -> None:
+        if i >= 0:
+            causes.setdefault(i, (code, detail))
+
+    # Executor failures. observations[i] is the state recorded *before*
     # action i (experiment.py appends at the top of the loop), so the error it
     # carries was produced by action i-1 — that is the step to blame. Step i is
-    # added too: the agent perceives the un-changed page there, and that is
+    # marked too: the agent perceives the un-changed page there, and that is
     # usually where the resulting finding anchors.
     #
     # This is the strongest harness-vs-site signal in the run and it was written
@@ -189,13 +218,13 @@ def harness_suspect_steps(store: TraceStore, progress_runs: bool = True) -> set[
     for i, obs in enumerate(store.read_observations() or []):
         if not isinstance(obs, dict):
             continue
-        err = str(obs.get("error") or "").lower()
-        if any(m in err for m in _EXECUTOR_ERROR_MARKERS):
-            if i - 1 >= 0:
-                suspect.add(i - 1)
-            suspect.add(i)
+        err = str(obs.get("error") or "")
+        if any(m in err.lower() for m in _EXECUTOR_ERROR_MARKERS):
+            detail = _executor_error_detail(err)
+            mark(i - 1, "executor_error", detail)
+            mark(i, "executor_error", detail)
 
-    # (5) A consent notice was on screen and would not go away, so every
+    # A consent notice was on screen and would not go away, so every
     # interaction from that point may have been intercepted by the overlay.
     # Nothing downstream could see this before: dismiss_cookie_banners returned
     # a bare bool and recorded nothing.
@@ -219,33 +248,35 @@ def harness_suspect_steps(store: TraceStore, progress_runs: bool = True) -> set[
                         if k > start and isinstance(states[k], dict)
                         and (states[k].get("dismissed") or states[k].get("present") is False)),
                        None)
-            suspect.update(range(start, n_steps if end is None else min(end + 1, n_steps)))
+            for k in range(start, n_steps if end is None else min(end + 1, n_steps)):
+                mark(k, "consent")
 
-    # (6) Bot-detection challenge pages. Anything the auditor concludes from a
+    # Bot-detection challenge pages. Anything the auditor concludes from a
     # screen that exists because we are automated is about us, not the site.
-    suspect.update(bot_wall_steps(store))
+    for k in bot_wall_steps(store):
+        mark(k, "bot_wall")
 
     for i in range(len(actions)):
         obs = store.read_observation_step_text(i).strip()
         if obs and len(obs) <= _ARTIFACT_OBS_MAX_CHARS:
             if store.raw_html_size(i) >= _ARTIFACT_RAW_MIN_BYTES:
-                suspect.add(i)
+                mark(i, "perception_gap")
 
     for i, a in enumerate(actions):
         desc = (a.get("description") or "").lower()
         if any(m in desc for m in _FALLBACK_MARKERS):
-            suspect.add(i)
-            if i - 1 >= 0:
-                suspect.add(i - 1)
+            mark(i, "fallback")
+            mark(i - 1, "fallback")
 
     # Consecutive runs of the same (action, target). With progress_runs=False,
     # a run whose page changed after every click is left out (see
     # progress_run_steps): only the wording of what it holds back differs.
-    for start, end, _target in _repeat_runs(actions):
+    for start, end, target in _repeat_runs(actions):
         if progress_runs or not _page_changed_throughout(store, start, end):
-            suspect.update(range(start, end))
+            for k in range(start, end):
+                mark(k, "repeat", str(target or ""))
 
-    return suspect
+    return causes
 
 
 def _repeat_runs(actions: list) -> list[tuple[int, int, str]]:
@@ -669,12 +700,31 @@ def _unresponsive_control(finding: dict, retried: dict[str, str]) -> str | None:
     return next((target for key, target in retried.items() if key in flat), None)
 
 
+def _cause_of(f: dict, causes: dict, suspected: bool, control, misquoted) -> dict | None:
+    """{"code", "detail", "step"} for why a harness-suspect finding is suspect."""
+    try:
+        step = int(f.get("step"))
+    except (TypeError, ValueError):
+        step = None
+    if step is not None and step in causes:
+        code, detail = causes[step]
+        return {"code": code, "detail": detail, "step": step}
+    if control is not None:
+        return {"code": "unresponsive_control", "detail": "", "step": step}
+    if misquoted:
+        return {"code": "quoted_not_on_page", "detail": "", "step": step}
+    # Not the cited step: the finding's words name an element stuck elsewhere,
+    # or its claim is contradicted by the session (search ran, content was lost).
+    return {"code": "claim_contradicted", "detail": "", "step": step}
+
+
 def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     """Stamp each finding with `harness_suspect` / `requires_human_check` when it
     is attributable to a harness interaction failure — either its cited step
     lands on one, or its evidence text names an element that was stuck in one.
     Returns the same list (findings mutated in place); non-dicts pass through."""
-    suspect = harness_suspect_steps(store)
+    causes = harness_suspect_causes(store)
+    suspect = set(causes)
     targets = _suspect_targets(store, suspect)
     # Steps where our own simplifier dropped the page's content. Only findings
     # that claim the content was missing are affected by it.
@@ -724,6 +774,9 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         # And which quoted words to look for on the page.
         f["quoted_not_on_page"] = misquoted
         f["harness_suspect"] = suspected
+        # Why, as far as the trace says: the signature that marked the cited
+        # step, or what matched the finding's text. None when it is not suspect.
+        f["harness_cause"] = _cause_of(f, causes, suspected, control, misquoted) if suspected else None
         # The control whose repeated clicks worked, when that is the only reason.
         f["repeated_with_progress"] = None
         if suspected and progress and control is None and not misquoted \
