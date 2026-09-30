@@ -31,7 +31,7 @@ Saves:  trace_dir/viewport_findings.json
 
 Who consumes it
 ---------------
-  - `reporter.py` — the per-agent report, the Markdown "Responsywność" section,
+  - `reporter.py` — the per-agent report, the "Responsywność" section of the HTML and Word reports,
     the aggregate overflow statistics, and the aggregate LLM prompt.
 
 The **dashboard deliberately does not.** `results_api` used to map these

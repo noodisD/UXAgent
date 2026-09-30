@@ -265,7 +265,7 @@
                     <span class="heur-tag mono" :style="{ background: SEV[h.severity].chipBg, color: SEV[h.severity].chipFg }">{{ sevLabel(h.severity) }}</span>
                     <span v-if="h.severityScore !== undefined" class="sev-score mono">{{ h.severityScore }}</span>
                     <span class="heur-name">H{{ h.id }} · {{ heuristicName(h.id) }}</span>
-                    <span v-if="exclusionOf(h)" class="verify-chip mono" :title="t('excl.' + exclusionOf(h) + '.hint')">{{ t('excl.' + exclusionOf(h)) }}</span>
+                    <span v-if="exclusionOf(h)" class="verify-chip mono" :title="holdTitle(h)">{{ t('excl.' + exclusionOf(h)) }}</span>
                     <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence" :title="h.confidenceCappedBy ? t('conf.capped.' + h.confidenceCappedBy) : undefined">{{ t('conf.' + h.confidence) }}</span>
                     <span v-if="!h.verified" class="unverified-badge">{{ t('ev.unverified') }}</span>
                   </div>
@@ -323,7 +323,7 @@
                 <!-- Every reason a finding is held back, as on the persona tab: only
                      harnessSuspect was checked here, so a finding the verifier
                      found unsupported sat in this list looking confirmed. -->
-                <span v-if="exclusionOf(h)" class="verify-chip mono" :title="t('excl.' + exclusionOf(h) + '.hint')">{{ t('excl.' + exclusionOf(h)) }}</span>
+                <span v-if="exclusionOf(h)" class="verify-chip mono" :title="holdTitle(h)">{{ t('excl.' + exclusionOf(h)) }}</span>
                 <span v-else-if="h.confidence" class="conf-chip mono" :class="h.confidence" :title="h.confidenceCappedBy ? t('conf.capped.' + h.confidenceCappedBy) : undefined">{{ t('conf.' + h.confidence) }}</span>
                 <span class="finding-persona mono">{{ h.persona }}</span>
                 <button class="copy-btn" :class="{ copied: copiedIdx === i }" @click="copyFinding(h, i)">
@@ -457,6 +457,13 @@ const mean = (vals: number[]) => vals.length ? vals.reduce((a, b) => a + b, 0) /
 // Why a finding is held back from the confirmed report (drives the chip). One
 // of the three gates: off-site page, claim unsupported by the trace, or a
 // harness interaction failure. null = a confirmed finding.
+// The chip's tooltip: what the kind of hold means, then the signal that
+// actually held this finding (the backend's Polish sentence, when it sent one).
+function holdTitle(h: any): string {
+  const kind = exclusionOf(h)
+  if (!kind) return ''
+  return [t('excl.' + kind + '.hint'), h?.holdReason].filter(Boolean).join(' — ')
+}
 function exclusionOf(h: any): 'offSite' | 'unsupported' | 'harness' | 'progress' | null {
   if (h?.offSite) return 'offSite'
   if (h?.claimVerdict === 'unsupported') return 'unsupported'
@@ -532,12 +539,13 @@ function shotUrl(personaId: string, step: number): string {
 // Backend-supplied extras (present once the run detail includes them)
 const comparison = computed(() => (data.value as any)?.comparison ?? null)
 // The earlier run's date in the interface language; the server's string is the
-// fallback for an older payload without the ISO value.
+// fallback for an older payload without the ISO value. UTC, as the server's own
+// date strings are: a run near midnight must not read as another day here.
 const comparisonDate = computed(() => {
   const c = comparison.value
   const d = c?.vsDateIso ? new Date(c.vsDateIso) : null
   return d && !isNaN(d.getTime())
-    ? d.toLocaleDateString(locale.value === 'pl' ? 'pl-PL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    ? d.toLocaleDateString(locale.value === 'pl' ? 'pl-PL' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
     : (c?.vsDate ?? '')
 })
 // Keyed by question id, joined by id. It used to be a positional array joined

@@ -29,7 +29,7 @@ from .persona_matrix import build_persona_task_matrix
 # ("nie mogę ocenić") sat in the dashboard's averages after the report had
 # stopped counting it. Importing the predicate and the aggregation, rather than
 # copying them, is what keeps the two from drifting apart again.
-from .reporter import _not_assessable, aggregate_statistics
+from .reporter import _gate_reason, _not_assessable, aggregate_statistics
 from .run import read_manifest
 from .severity import SEVERITY_EN, excluded_from_report, severity_score
 from .trace_store import TraceStore, parse_action as _parse_action
@@ -280,6 +280,9 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
                 # cited step's full observation? (supported/partial/unsupported)
                 "claimVerdict": h.get("claim_verdict"),
                 "claimVerdictReason": h.get("claim_verdict_reason"),
+                # Which signal held it, in words — the same sentence the report
+                # gives; the chip only names the kind of hold.
+                "holdReason": _redact(_gate_reason(h)),
                 # The cited page was outside the site under test.
                 "offSite": bool(h.get("off_site")),
                 "requiresRealUserValidation": bool(h.get("requires_real_user_validation", True)),
@@ -553,6 +556,12 @@ def _clip(text: str, limit: int = 160) -> str:
     return clip_words(text, limit)
 
 
+def _labelled(kind: str, text: str) -> str:
+    """An accessibility item says so: it is listed beside issues the report
+    counts, but a WCAG barrier is not one of those counts."""
+    return f"Dostępność: {text}" if kind.startswith("wcag:") and text else text
+
+
 def _comparable_issues(report: dict | None) -> list[dict]:
     """The critical and serious issues the report shows, with a kind and content.
 
@@ -580,7 +589,7 @@ def _comparable_issues(report: dict | None) -> list[dict]:
             if kind is None:
                 continue
             out.append({"kind": kind, "stems": _content_stems(body),
-                        "text": _clip(issue.get("impact") or issue.get("heuristic_name") or "")})
+                        "text": _labelled(kind, _clip(issue.get("impact") or issue.get("heuristic_name") or ""))})
 
     # The barriers the report lists in its accessibility section. The narrator
     # does not always repeat a verified WCAG finding among its critical and
@@ -603,7 +612,7 @@ def _comparable_issues(report: dict | None) -> list[dict]:
         if any(o["kind"] == kind for o in out):
             continue
         out.append({"kind": kind, "stems": _content_stems(body),
-                    "text": _clip(f.get("detail") or f.get("category") or "")})
+                    "text": _labelled(kind, _clip(f.get("detail") or f.get("category") or ""))})
     return out
 
 

@@ -38,9 +38,11 @@ HEURISTIC VIOLATION SUMMARY (grouped by heuristic, sorted by frequency):
 
 WAŻNE (grupy heurystyk): jedna heurystyka Nielsena może obejmować RÓŻNE wady — różne przykłady,
 różne strony, różni uczestnicy. `worst_severity`, `frequency` i `sessions_affected` opisują całą
-grupę, nie każdą wadę z osobna. Jeśli przykłady opisują różne wady, napisz je jako osobne problemy
-albo podaj wagę i zasięg każdej z nich z jej własnego przykładu (`severity`, `persona_name`) —
-nie przypisuj drobnej wadzie wagi najgorszego przykładu ani zasięgu wszystkich uczestników grupy.
+grupę, nie każdą wadę z osobna. Jeśli przykłady opisują różne wady, zostaw je w JEDNYM problemie tej
+heurystyki, ale w opisie wymień je osobno i podaj wagę oraz zasięg każdej z jej własnego przykładu
+(`severity`, `persona_name`) — nie przypisuj drobnej wadzie wagi najgorszego przykładu ani zasięgu
+wszystkich uczestników grupy. Nie twórz dwóch problemów z tym samym `heuristic_id`: dowody są
+dołączane do problemu według heurystyki, więc oba dostałyby te same.
 
 CROSS-HEURISTIC DEDUPLIKACJA (root_cause.py — deterministyczna, nie Twoja ocena):
 {root_cause_summary}
@@ -92,8 +94,9 @@ strony. Dlatego:
 - NIE twórz problemu o randze `critical_issues` ani `serious_issues` wyłącznie na podstawie
   ankiety lub refleksji. Każdy problem w tych dwóch kategoriach musi mieć pokrycie w
   `heuristic_summary` / `top_issues`.
-- Refleksja oznaczona `self_reported_only: true` opisuje awarię narzędzia, nie serwisu —
-  możesz ją najwyżej wspomnieć jako hipotezę do weryfikacji z prawdziwymi użytkownikami.
+- Refleksja oznaczona `self_reported_only: true` może opisywać awarię narzędzia, a nie wadę
+  serwisu (niepotwierdzone) — możesz ją najwyżej wspomnieć jako hipotezę do weryfikacji z
+  prawdziwymi użytkownikami.
 - Jeśli mimo to opisujesz problem bez pokrycia w zweryfikowanych wnioskach, ustaw w nim
   `"verified": false` i umieść go w `minor_issues`.
 Takich rzeczy NIE opisuj jako problemów strony, NIE umieszczaj wśród critical/serious/

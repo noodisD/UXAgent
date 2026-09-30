@@ -98,15 +98,15 @@ def _harness_reason(cause: dict | None) -> str:
         return (f"{at} opis strony był niemal pusty mimo dużej strony — narzędzie nie "
                 "odczytało jej treści")
     if code == "fallback":
-        return (f"{at} uczestnik wycofał się po nieudanych próbach kliknięcia — "
-                "nie wiadomo, czy element nie działał, czy narzędzie go nie trafiło")
+        return (f"{at} narzędzie wycofało uczestnika po powtarzających się nieudanych próbach "
+                "tej samej akcji — nie wiadomo, czy element nie działa, czy narzędzie go nie trafia")
     if code == "repeat":
-        return (f"{at} to samo kliknięcie powtórzono wielokrotnie bez skutku"
-                f"{f' („{detail}”)' if detail else ''} — nie wiadomo, czy element nie działa, "
-                "czy narzędzie go nie trafia")
+        return (f"{at} to samo działanie powtórzono wielokrotnie bez skutku — nie wiadomo, czy "
+                "element nie działa, czy narzędzie go nie trafia")
     if code == "claim_contradicted":
         return "wniosek przeczy przebiegowi sesji albo dotyczy elementu, który się zaciął"
-    return "w tym kroku lub tuż przed nim wystąpiła usterka narzędzia"
+    return ("możliwa usterka narzędzia w tym kroku lub tuż przed nim — zapis nie rozstrzyga, "
+            "czy wniosek z niej wynika")
 
 
 def _gate_reason(finding: dict) -> str:
@@ -157,18 +157,30 @@ def _control_label(finding: dict, key: str = "unresponsive_control") -> str:
     return " ".join(words[:2]).upper()
 
 
+def _named_in_accessibility_note(names: list) -> str:
+    """Says where a name that only assistive technology reads is reported."""
+    names = [n for n in names if n]
+    if not names:
+        return ""
+    cited = " i ".join(f"„{n}”" for n in names[:2])
+    if len(names) == 1:
+        head = (f"Nazwa {cited} jest nazwą dostępnościową kontrolki (zwykle niewidoczną dla "
+                "widzących) — wykrywana automatycznie jako nazwa nieopisowa w sekcji Dostępność.")
+    else:
+        head = (f"Nazwy {cited} są nazwami dostępnościowymi kontrolek (zwykle niewidocznymi dla "
+                "widzących) — wykrywane automatycznie jako nazwy nieopisowe w sekcji Dostępność.")
+    return f"{head} Jeśli wniosek dotyczy tekstu widocznego na stronie, sprawdź go ręcznie."
+
+
 def _human_check(finding: dict) -> str:
     """What a person should do to settle a finding the trace could not."""
     named = [n for n in (finding.get("named_in_accessibility") or []) if n]
-    if named:
-        # The name exists — as an accessible name, which only screen readers
-        # say. The deterministic check reports it; what stays open is a claim
-        # about text a sighted visitor would see.
-        cited = " i ".join(f"„{n}”" for n in named[:2])
-        return (f"Nazwa {cited} jest nazwą dostępnościową kontrolki (widzą ją tylko czytniki "
-                "ekranu) — opisano ją w sekcji Dostępność jako nazwę nieopisową. Jeśli wniosek "
-                "dotyczy tekstu widocznego na stronie, sprawdź go ręcznie: widzący użytkownik "
-                "tej nazwy nie zobaczy.")
+    base = _human_check_base(finding)
+    note = _named_in_accessibility_note(named)
+    return f"{base} {note}".strip() if note else base
+
+
+def _human_check_base(finding: dict) -> str:
     label = _control_label(finding)
     if label:
         return (f"Kliknij „{label}” w zwykłej przeglądarce i sprawdź, czy wybór "
@@ -187,6 +199,16 @@ def _human_check(finding: dict) -> str:
         return (f"Sprawdź, czy strona rzeczywiście pokazuje {cited} — w zapisanych "
                 "stronach tego tekstu nie ma. Jeśli nie pokazuje, pomiń ustalenie.")
     if finding.get("harness_suspect"):
+        code = (finding.get("harness_cause") or {}).get("code")
+        if code == "consent":
+            return ("Otwórz stronę w zwykłej przeglądarce i sprawdź, czy opisany problem "
+                    "występuje także po zamknięciu banera zgody.")
+        if code == "bot_wall":
+            return ("Otwórz stronę w zwykłej przeglądarce — ekran weryfikacji antybotowej "
+                    "dotyczy tylko zautomatyzowanych odwiedzin, nie zwykłych użytkowników.")
+        if code == "perception_gap":
+            return ("Otwórz stronę i sprawdź, czy opisana treść jest na niej widoczna — "
+                    "narzędzie mogło jej nie odczytać.")
         return "Powtórz tę interakcję ręcznie i sprawdź, czy strona reaguje."
     if finding.get("claim_verdict") in ("unsupported", "partial"):
         return ("Sprawdź na stronie, czy opisany problem występuje — zapis sesji "
@@ -857,7 +879,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # is pre-filled"). Dropped until now, leaving only the generic
             # "the record does not confirm it" — the part a specialist needs
             # to settle the item in a minute.
-            "verifier_reason": str(f.get("claim_verdict_reason") or "").strip(),
+            "verifier_reason": _redact(clip_words(str(f.get("claim_verdict_reason") or "").strip(), 400)),
             "check": _human_check(f),
         })
 
@@ -1516,7 +1538,7 @@ async def generate_aggregated_report(
 ) -> dict:
     """
     Load all per-agent reports, compute statistics, call large LLM for narrative,
-    save runs/aggregated_report.json + .md.
+    save runs/aggregated_report.json.
     """
     # Sessions that never saw the site are not participants (see
     # attribution.why_site_unseen). Left out whenever another session did see

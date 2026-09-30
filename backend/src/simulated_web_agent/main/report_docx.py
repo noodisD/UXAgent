@@ -188,7 +188,7 @@ def _add_measurement_sections(doc, agg: dict) -> None:
             ("Wysłali formularz", f"{forms.get('sessions_submitted_form', 0)}/{n}"),
         ])
         if forms.get("avg_fields_filled") is not None:
-            doc.add_paragraph(f"Średnio {avg_text(forms['avg_fields_filled'])} pól na sesję.")
+            doc.add_paragraph(f"Średnio {avg_text(forms['avg_fields_filled'])} pola na sesję.")
         _add_caption(doc, FORM_FUNNEL_NOTE)
 
 

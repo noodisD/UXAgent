@@ -3,9 +3,11 @@
 In the 2026-09-30 hyundai run two personas wrote, on the summary page, "brak
 prezentacji estymowanej raty miesięcznej" (filed under H2) and "brakuje
 kalkulatora rat" (filed under H7). Two minor issues and two score deductions for
-one missing thing. The rule is a named signature, like the search one: it needs
-a financing context AND an absence symptom, so it cannot merge two different
-defects by similarity."""
+one missing thing. The rule is a named signature, like the search one: an
+absence word must come right before the financing term ("brakuje … raty"), so it
+cannot merge two different defects by similarity. The first version asked only
+that a financing word and an absence word both occur in the text, and merged a
+broken calculator, a missing Next button and a missing period option into it."""
 from simulated_web_agent.main.root_cause import assign_root_causes
 
 NATALIA_H2 = {
@@ -63,3 +65,28 @@ def test_the_two_findings_become_one_row_in_the_prioritisation():
     assign_root_causes([a, t])
     rows = prioritize([a, t], {"Natalia": "partial", "Tomasz": "partial"})
     assert len(rows) == 1 and rows[0]["personas_affected"] == 2
+
+
+import pytest
+
+
+@pytest.mark.parametrize("text", [
+    "Kalkulator rat nie działa: po zmianie wkładu własnego brak jakiejkolwiek reakcji.",
+    "Raty miesięczne są prezentowane poprawnie, ale nie ma przycisku Dalej.",
+    "Kalkulator finansowania ma zbyt mało pól; brak opcji wyboru okresu.",
+])
+def test_a_financing_word_and_an_unrelated_absence_do_not_match(text):
+    f = {"heuristic_id": 4, "evidence": text, "recommendation": ""}
+    assign_root_causes([f])
+    assert "root_cause_id" not in f
+
+
+@pytest.mark.parametrize("text", [
+    "Strona nie podaje raty miesięcznej leasingu na karcie modelu.",
+    "Brak informacji o finansowaniu w podsumowaniu.",
+    "Bez prezentacji raty użytkownik nie oceni kosztu miesięcznego.",
+])
+def test_an_absence_that_governs_the_financing_term_matches(text):
+    f = {"heuristic_id": 2, "evidence": text, "recommendation": ""}
+    assign_root_causes([f])
+    assert f["root_cause_id"] == "financing_info_missing"

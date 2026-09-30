@@ -22,10 +22,18 @@ from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger(__name__)
 
-# Substrings of the harness fallback descriptions emitted when an element/method
-# "didn't work after several tries" (experiment.py). Their presence at a step is
-# direct proof the interaction failed on the harness side, not the site side.
-_FALLBACK_MARKERS = ("nie działał", "nie działała", "wybieram inną", "innej drogi")
+# The harness's own fallback description, emitted when an element "didn't work
+# after several tries" (experiment.py: "Ten element nie działał mimo kilku prób —
+# wracam i wybieram inną drogę."). Its presence at a step is direct proof the
+# interaction failed on the harness side, not the site side.
+#
+# Only that sentence. The markers used to be fragments of it ("nie działał",
+# "wybieram inną", "innej drogi"), so a persona's ordinary "Wersja Smart jest za
+# droga, wybieram inną wersję wyposażenia" marked its step a tool failure and held
+# every finding cited there. Over all 626 recorded actions the old fragments
+# matched 10, every one of them the harness's own sentence, so this changes
+# nothing on recorded data.
+_FALLBACK_MARKERS = ("nie działał mimo kilku prób",)
 
 # The same (action, target) repeated this many times *consecutively* is a stuck
 # loop: the agent retried back-to-back because nothing changed.
@@ -165,7 +173,11 @@ def _executor_error_detail(err: str) -> str:
     if "intercepts pointer events" in e:
         return "kliknięcie zablokowała inna warstwa strony"
     if "timeout" in e:
-        return "element nie zareagował w limicie czasu"
+        if "page.goto" in e or "navigat" in e:
+            return "strona nie załadowała się w limicie czasu"
+        if "locator" in e:
+            return "element nie zareagował w limicie czasu"
+        return "akcja przekroczyła limit czasu"
     if "not found" in e or "nie znaleziono" in e:
         return "element nie został znaleziony na stronie"
     return "akcja nie została wykonana"
@@ -780,7 +792,9 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         f["quoted_not_on_page"] = misquoted
         f["harness_suspect"] = suspected
         text_low = f"{f.get('evidence', '')} {f.get('recommendation', '')}".lower()
-        f["named_in_accessibility"] = [n for n in sorted(generic_names) if n in text_low] or None
+        f["named_in_accessibility"] = [
+            generic_names[n] for n in sorted(generic_names)
+            if re.search(rf"(?<!\w){re.escape(n)}(?!\w)", text_low)] or None
         # Why, as far as the trace says: the signature that marked the cited
         # step, or what matched the finding's text. None when it is not suspect.
         f["harness_cause"] = _cause_of(f, causes, suspected, control, misquoted) if suspected else None

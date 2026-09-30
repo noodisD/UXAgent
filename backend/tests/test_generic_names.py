@@ -126,9 +126,11 @@ def test_a_failed_model_call_stays_a_failure(tmp_path, monkeypatch):
 
 def test_the_session_reports_which_distinctive_names_its_pages_had(tmp_path):
     store = _store(tmp_path, [(PAGE_A, SUMMARY), (PAGE_B, INTERIOR)])
-    assert generic_names_in_session(store) == {"pasek zadań", "flyout"}
+    assert generic_names_in_session(store) == {"pasek zadań": "Pasek zadań", "flyout": "Flyout"}
     plain = _store(tmp_path / "x", [(PAGE_C, '- main:\n  - link "Link"\n')])
-    assert generic_names_in_session(plain) == set(), "'link' is not distinctive enough to match text"
+    assert generic_names_in_session(plain) == {}, "'link' is not distinctive enough to match text"
+    tip = _store(tmp_path / "y", [(PAGE_C, '- main:\n  - button "Tooltip"\n')])
+    assert generic_names_in_session(tip) == {}, "'tooltip' is an ordinary word in a UX remark"
 
 
 def test_a_held_finding_naming_it_is_pointed_at_the_accessibility_section(tmp_path):
@@ -139,8 +141,45 @@ def test_a_held_finding_naming_it_is_pointed_at_the_accessibility_section(tmp_pa
     other = {"heuristic_id": 2, "severity": "drobny", "step": 0,
              "evidence": "Cena jest nieczytelna.", "recommendation": "Powiększyć."}
     attribution.flag_harness_suspects(store, [finding, other])
-    assert finding["named_in_accessibility"] == ["pasek zadań"]
+    assert finding["named_in_accessibility"] == ["Pasek zadań"], "the name as the page spells it"
     assert other["named_in_accessibility"] is None
     check = _human_check(finding)
-    assert "w sekcji Dostępność" in check and "widzący użytkownik tej nazwy nie zobaczy" in check
+    assert "„Pasek zadań”" in check and "w sekcji Dostępność" in check
+    assert "zwykle niewidoczną dla widzących" in check, "hedged: a name can also be visible"
+    assert "widzący użytkownik tej nazwy nie zobaczy" not in check
     assert "pomiń" not in check.lower(), "it must not tell the reader to discard a real finding"
+
+
+def test_the_pointer_is_added_to_the_normal_check_not_put_in_its_place(tmp_path):
+    store = _store(tmp_path, [(PAGE_A, SUMMARY)])
+    finding = {"heuristic_id": 2, "severity": "drobny", "step": 0, "harness_suspect": True,
+               "evidence": "Etykieta „Pasek zadań” jest dziwna.", "recommendation": "Zmienić.",
+               "harness_cause": {"code": "consent", "detail": "", "step": 0}}
+    attribution.flag_harness_suspects(store, [finding])
+    check = _human_check({**finding, "harness_suspect": True,
+                          "harness_cause": {"code": "consent", "detail": "", "step": 0}})
+    assert "banera zgody" in check and "w sekcji Dostępność" in check
+
+
+def test_two_names_take_the_plural_and_a_longer_word_does_not_match(tmp_path):
+    store = _store(tmp_path, [(PAGE_A, SUMMARY), (PAGE_B, INTERIOR)])
+    both = {"heuristic_id": 2, "severity": "drobny", "step": 0,
+            "evidence": "Przyciski „Pasek zadań” i „Flyout” mają dziwne etykiety.", "recommendation": "Zmienić."}
+    longer = {"heuristic_id": 2, "severity": "drobny", "step": 0,
+              "evidence": "Animacja flyoutów jest za szybka.", "recommendation": "Zwolnić."}
+    attribution.flag_harness_suspects(store, [both, longer])
+    assert both["named_in_accessibility"] == ["Flyout", "Pasek zadań"]
+    assert longer["named_in_accessibility"] is None, "'flyoutów' is not the name 'Flyout'"
+    check = _human_check(both)
+    assert "Nazwy „Flyout” i „Pasek zadań” są nazwami dostępnościowymi" in check
+
+
+def test_the_finding_text_is_singular_on_one_page_and_counts_the_remainder(tmp_path):
+    (one,) = extract_generic_name_findings(_store(tmp_path, [(PAGE_A, SUMMARY)]))
+    assert "Problem występuje na jedynej odwiedzonej stronie." in one["detail"]
+    assert "z 1 odwiedzonych" not in one["detail"]
+    assert "widzący użytkownik" not in one["detail"], "no claim about what a sighted visitor sees"
+    names = ["Pasek zadań", "Flyout", "Taskbar", "Toggle", "Tooltip", "Przycisk", "Ikona"]
+    text = "- main:\n" + "".join(f'  - button "{n}"\n' for n in names)
+    (many,) = extract_generic_name_findings(_store(tmp_path / "m", [(PAGE_A, text)]))
+    assert "i 3 inne" in many["detail"] and ", i " not in many["detail"]

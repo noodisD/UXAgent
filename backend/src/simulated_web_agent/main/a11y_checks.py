@@ -312,7 +312,7 @@ _JARGON_NAMES = frozenset({
 # Names specific enough to recognise in a participant's sentence. "button" or
 # "link" would match nearly any text, so a finding is only pointed at those that
 # cannot.
-_DISTINCTIVE_NAMES = frozenset({"taskbar", "pasek zadań", "pasek zadan", "flyout", "tooltip"})
+_DISTINCTIVE_NAMES = frozenset({"taskbar", "pasek zadań", "pasek zadan", "flyout"})
 
 _ROLE_PL = {
     "button": "przycisk", "link": "link", "checkbox": "pole wyboru", "radio": "przycisk opcji",
@@ -330,14 +330,16 @@ def generic_name_reason(role: str, name: str) -> str | None:
     return None
 
 
-def generic_names_in_session(store: TraceStore) -> set[str]:
-    """The distinctive non-descriptive names (lower case) the session's pages had."""
-    found: set[str] = set()
+def generic_names_in_session(store: TraceStore) -> dict[str, str]:
+    """{lower-case name: the name as the page spells it} for the distinctive
+    non-descriptive names the session's pages had."""
+    found: dict[str, str] = {}
     for _step, text in _steps(store.read_a11y_snapshots()):
         if isinstance(text, str):
             for n in parse_aria_snapshot(text):
-                if generic_name_reason(n.role, n.name) and n.name.strip().lower() in _DISTINCTIVE_NAMES:
-                    found.add(n.name.strip().lower())
+                low = n.name.strip().lower()
+                if generic_name_reason(n.role, n.name) and low in _DISTINCTIVE_NAMES:
+                    found.setdefault(low, n.name.strip())
     return found
 
 
@@ -376,16 +378,18 @@ def extract_generic_name_findings(store: TraceStore) -> list[dict]:
     worst_total = sum(per_step[worst].values())
     pages_affected = len({_page(s) for s in per_step})
     items = per_step[worst].most_common()
-    shown = [f"„{name}” ({_ROLE_PL.get(role, role)}{f', {k}×' if k > 1 else ''})"
-             for (name, role), k in items[:4]]
+    listing = ", ".join(f"„{name}” ({_ROLE_PL.get(role, role)}{f', {k}×' if k > 1 else ''})"
+                        for (name, role), k in items[:4])
     if len(items) > 4:
-        shown.append(f"i {len(items) - 4} inne")
+        more = len(items) - 4
+        listing += f" i {more} {pl_plural(more, 'inna', 'inne', 'innych')}"
     sub = pl_plural(worst_total, "kontrolka ma", "kontrolki mają", "kontrolek ma")
     their = "jej" if worst_total == 1 else "ich"
+    spread = ("Problem występuje na jedynej odwiedzonej stronie." if len(all_pages) == 1 else
+              f"Problem występuje na {pages_affected} z {len(all_pages)} odwiedzonych stron.")
     detail = (f"Na najgorszej stronie (krok {worst}) {worst_total} {sub} nazwę, która nie opisuje "
-              f"{their} działania: {', '.join(shown)}. Problem występuje na {pages_affected} z "
-              f"{len(all_pages)} odwiedzonych stron. Widzący użytkownik tej nazwy nie zobaczy, "
-              "ale czytnik ekranu odczyta ją zamiast opisu funkcji.")
+              f"{their} działania: {listing}. {spread} Czytnik ekranu odczyta tę nazwę zamiast "
+              "opisu funkcji.")
     names: dict[tuple, set] = {}
     for step, counter in per_step.items():
         for key in counter:

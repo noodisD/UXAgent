@@ -55,8 +55,9 @@ AGG = {
 def test_html_uses_one_separator_and_counts_correctly():
     html = generate_html_report(AGG)
     assert "22,0%" in html and "22.0%" not in html
-    assert "Średnio 2,50 pól na sesję." in html
+    assert "Średnio 2,50 pola na sesję." in html
     assert "Wstrzymano wniosków: 1." in html
+    assert "2 sesje</div>" in html and "2 sesji</div>" not in html
     assert "3,00/5" in html and "3.0/5" not in html
 
 
@@ -64,5 +65,5 @@ def test_word_uses_one_separator_and_counts_correctly(tmp_path):
     doc = Document(build_docx(AGG, tmp_path, tmp_path / "r.docx"))
     text = "\n".join(p.text for p in doc.paragraphs)
     assert "Średnia maksymalna głębokość przewijania: 22,0% (zakres 10,0–40,0%, 2 sesje)" in text
-    assert "Średnio 2,50 pól na sesję." in text
+    assert "Średnio 2,50 pola na sesję." in text
     assert "Wstrzymano wniosków: 1." in text

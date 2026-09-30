@@ -1120,7 +1120,8 @@ def _render_scroll_depth(scroll: dict | None) -> str:
             + method))
     lo = pct_text(scroll.get("min_max_depth_pct", "—"))
     hi = pct_text(scroll.get("max_max_depth_pct", "—"))
-    sessions = scroll.get("sessions_with_depth_pct", "—")
+    k = scroll.get("sessions_with_depth_pct")
+    sessions = f"{k} {pl_plural(k, 'sesja', 'sesje', 'sesji')}" if isinstance(k, int) else "— sesji"
     pct = min(100, int(avg))
     color = "#008573" if pct >= 60 else ("#B07A00" if pct >= 30 else "#E60000")
     warning = ""
@@ -1138,7 +1139,7 @@ def _render_scroll_depth(scroll: dict | None) -> str:
         <div style="background:#e9ecef;border-radius:6px;height:14px;overflow:hidden;">
           <div style="width:{pct}%;background:{color};height:100%;border-radius:6px;"></div>
         </div>
-        <div style="font-size:12px;color:#6c757d;margin-top:4px;">zakres {lo}–{hi}% &nbsp;·&nbsp; {sessions} sesji</div>
+        <div style="font-size:12px;color:#6c757d;margin-top:4px;">zakres {lo}–{hi}% &nbsp;·&nbsp; {sessions}</div>
       </div>
     </div>
     {warning}
@@ -1220,7 +1221,7 @@ def _render_form_funnel(forms: dict | None) -> str:
         _step("Wysłali formularz", submitted, "#008573")
     )
     if avg_fields is not None:
-        body += f'<p style="font-size:13px;color:#6c757d;margin-top:12px;">Średnio {avg_text(avg_fields)} pól na sesję.</p>'
+        body += f'<p style="font-size:13px;color:#6c757d;margin-top:12px;">Średnio {avg_text(avg_fields)} pola na sesję.</p>'
     # "Dotarli do akcji submit 1/3" was a link click counted as a submission.
     # Say how submission is judged — and that personal-data forms are never
     # sent by design, or a 0 here reads as the site failing.

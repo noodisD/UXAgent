@@ -19,6 +19,8 @@ stale-result marker); everything else is left alone.
 """
 from __future__ import annotations
 
+import re
+
 from .session_goal_state import has_marker
 
 # --- search_stale_results ----------------------------------------------------
@@ -42,27 +44,39 @@ _STALE_RESULT_MARKERS = (
 # The same absence reported under two heuristics in the 2026-09-30 hyundai run:
 # H2 "brak prezentacji estymowanej raty miesięcznej" and H7 "brak kalkulatora
 # rat", by two personas on the summary page. Two issues, two score deductions,
-# one missing thing. Both a financing context AND an absence symptom are needed,
-# so "the rate calculator does not work" is left alone. Run over the 64
-# recorded findings it matches none of them, and both of those.
-_FINANCING_CONTEXT_MARKERS = (
-    "raty miesięcz", "ratę miesięcz", "rat miesięcz", "kalkulator rat", "kalkulatora rat",
-    "kalkulator finans", "kalkulatora finans", "symulator finans", "symulatora finans",
-    "raty leasing", "rat leasing",
+# one missing thing.
+#
+# An absence word must come BEFORE the financing term, at most three words
+# before it: "Brakuje prezentacji estymowanej raty miesięcznej", "nie podaje
+# raty", "bez informacji o finansowaniu". A context marker and an absence marker
+# anywhere in the same text was the first version, and it merged "Kalkulator rat
+# nie działa… brak jakiejkolwiek reakcji", "Raty są prezentowane poprawnie, ale
+# nie ma przycisku Dalej" and "Kalkulator ma zbyt mało pól; brak opcji wyboru
+# okresu" into one row titled as a missing rate. Run over the 64 recorded
+# findings it matches none of them, and both of the two real ones.
+_FIN_ABSENCE = (
+    r"(?<!\w)(?:brak\w*|nie\s+(?:podaje|prezentuje|pokazuje|wyświetla|oferuje)"
+    r"|bez\s+(?:prezentacji|informacji|podania|wskazania))"
 )
-_ABSENCE_MARKERS = (
-    "brak", "nie podaje", "nie prezentuje", "nie ma ", "bez prezentacji", "jedynie całkow",
-    "tylko całkow", "nie wyświetla", "nie pokazuje",
+_FIN_TERM = (
+    r"(?<!\w)(?:rat(?:y|ę|a|ą|om|ach|ami)?(?!\w)|kalkulator\w*|symulator\w*"
+    r"|finansowani\w*|leasing\w*)"
 )
+_FINANCING_MISSING = re.compile(rf"{_FIN_ABSENCE}(?:\s+\w+){{0,3}}?\s+{_FIN_TERM}", re.I)
 
-# (root_cause_id, Polish display name, context markers, symptom markers)
+
+def _financing_missing(text: str) -> bool:
+    return bool(_FINANCING_MISSING.search(text))
+
+
+# (root_cause_id, Polish display name, matcher(lower-cased text) -> bool)
 _SIGNATURES = (
     ("search_stale_results",
      "Wyszukiwarka nie aktualizuje wyników dla nowego zapytania",
-     _QUERY_CONTEXT_MARKERS, _STALE_RESULT_MARKERS),
+     lambda text: _matches(text, _QUERY_CONTEXT_MARKERS, _STALE_RESULT_MARKERS)),
     ("financing_info_missing",
-     "Brak raty miesięcznej lub kalkulatora finansowania w podsumowaniu",
-     _FINANCING_CONTEXT_MARKERS, _ABSENCE_MARKERS),
+     "Brak raty miesięcznej lub kalkulatora finansowania",
+     _financing_missing),
 )
 
 
@@ -82,8 +96,8 @@ def assign_root_causes(findings: list) -> list:
         f.pop("root_cause_id", None)
         f.pop("root_cause_name", None)
         text = f"{f.get('evidence', '')} {f.get('recommendation', '')}".lower()
-        for rc_id, rc_name, ctx_markers, symptom_markers in _SIGNATURES:
-            if _matches(text, ctx_markers, symptom_markers):
+        for rc_id, rc_name, matcher in _SIGNATURES:
+            if matcher(text):
                 f["root_cause_id"] = rc_id
                 f["root_cause_name"] = rc_name
                 break

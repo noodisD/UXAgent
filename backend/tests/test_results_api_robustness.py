@@ -90,3 +90,17 @@ def test_payload_outcome_matches_the_shared_definition(tmp_path):
         store = _outcome_store(tmp_path, f"pin{i}", eff, declared=declared)
         out = build_persona(store.trace_dir, {})
         assert out["outcome"] == _effective_outcome(store), f"case {i}"
+
+
+def test_a_held_finding_carries_the_sentence_that_held_it(tmp_path):
+    """The chip names the kind of hold; the tooltip says which signal held this one."""
+    store = TraceStore(tmp_path / "p3")
+    store.write_basic_info({"persona": "Persona: Z", "intent": "y"})
+    (store.trace_dir / "heuristic_findings.json").write_text(json.dumps([
+        {"heuristic_id": 1, "severity": "drobny", "harness_suspect": True,
+         "harness_cause": {"code": "consent", "detail": "", "step": 4}},
+        {"heuristic_id": 2, "severity": "drobny", "verified": True},
+    ]), encoding="utf-8")
+    held, confirmed = build_persona(store.trace_dir, {})["heuristics"]
+    assert "baner zgody" in held["holdReason"]
+    assert confirmed["holdReason"] == ""

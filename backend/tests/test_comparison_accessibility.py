@@ -4,7 +4,7 @@ It read only the narrative's critical and serious lists. In the 2026-09-27 run
 the test-drive combobox sat in the accessibility section alone, so the dashboard
 listed it as "resolved" against the run before while the report still carried
 it. (Measured on the two real runs: resolved -> persisting, 11 shared stems.)"""
-from simulated_web_agent.main.results_api import _comparable_issues, _match_issues
+from simulated_web_agent.main.results_api import _comparable_issues, _labelled, _match_issues
 
 DETAIL = ("Na stronie rezerwacji jazdy próbnej pole wyboru (combobox) nie ma "
           "dostępnej nazwy, więc czytnik ekranu nie zapowie, czego dotyczy pole")
@@ -62,3 +62,13 @@ def test_a_barrier_fixed_since_the_last_run_is_still_resolved():
     now = _report()
     fresh, persisting, gone = _match_issues(_comparable_issues(now), _comparable_issues(prev))
     assert len(gone) == 1 and not persisting and not fresh
+
+
+def test_an_accessibility_item_says_so_in_the_listing():
+    """The dashboard lists the two beside counted issues; a WCAG barrier is not one."""
+    now = _report(narrative_issues=[_wcag_issue()], findings=[_finding()])
+    (item,) = _comparable_issues(now)
+    assert item["text"].startswith("Dostępność: ")
+    assert _labelled("h:2", "Ceny się nie zgadzają") == "Ceny się nie zgadzają"
+    assert _labelled("rc:search_stale_results", "x") == "x"
+    assert _labelled("wcag:contrast", "") == "", "no bare prefix on an empty text"

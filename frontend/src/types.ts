@@ -84,6 +84,8 @@ export type HeuristicFinding = FindingEvidence & {
   /** claim-verifier truth gate vs the cited step's full observation */
   claimVerdict?: 'supported' | 'partial' | 'unsupported' | null
   claimVerdictReason?: string | null
+  /** why this finding is held back, from the signal that held it (Polish) */
+  holdReason?: string
   /** cited page was outside the site under test */
   offSite?: boolean
   severityScore?: number          // NN/g 0–4; 0 = false positive
