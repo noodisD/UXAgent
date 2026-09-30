@@ -36,6 +36,12 @@ FIRST IMPRESSION STATISTICS:
 HEURISTIC VIOLATION SUMMARY (grouped by heuristic, sorted by frequency):
 {heuristic_summary}
 
+WAŻNE (grupy heurystyk): jedna heurystyka Nielsena może obejmować RÓŻNE wady — różne przykłady,
+różne strony, różni uczestnicy. `worst_severity`, `frequency` i `sessions_affected` opisują całą
+grupę, nie każdą wadę z osobna. Jeśli przykłady opisują różne wady, napisz je jako osobne problemy
+albo podaj wagę i zasięg każdej z nich z jej własnego przykładu (`severity`, `persona_name`) —
+nie przypisuj drobnej wadzie wagi najgorszego przykładu ani zasięgu wszystkich uczestników grupy.
+
 CROSS-HEURISTIC DEDUPLIKACJA (root_cause.py — deterministyczna, nie Twoja ocena):
 {root_cause_summary}
 critical_count/serious_count/minor_count poniżej JUŻ uwzględniają tę deduplikację —

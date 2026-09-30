@@ -766,6 +766,11 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "page_quote": quote_from_page or "",
             "evidence": f.get("evidence", ""),
             "verified": bool(f.get("verified")),
+            # This example's own severity. A heuristic's group reports the worst
+            # of its findings and everyone who filed any of them, so two
+            # unrelated defects under one Nielsen number lent each other their
+            # severity and reach; the narrator had no way to tell them apart.
+            "severity": f.get("severity", ""),
         }
 
     # Everything the gate held back, with the reason and what a person should
