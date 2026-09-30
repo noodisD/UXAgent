@@ -159,6 +159,16 @@ def _control_label(finding: dict, key: str = "unresponsive_control") -> str:
 
 def _human_check(finding: dict) -> str:
     """What a person should do to settle a finding the trace could not."""
+    named = [n for n in (finding.get("named_in_accessibility") or []) if n]
+    if named:
+        # The name exists — as an accessible name, which only screen readers
+        # say. The deterministic check reports it; what stays open is a claim
+        # about text a sighted visitor would see.
+        cited = " i ".join(f"„{n}”" for n in named[:2])
+        return (f"Nazwa {cited} jest nazwą dostępnościową kontrolki (widzą ją tylko czytniki "
+                "ekranu) — opisano ją w sekcji Dostępność jako nazwę nieopisową. Jeśli wniosek "
+                "dotyczy tekstu widocznego na stronie, sprawdź go ręcznie: widzący użytkownik "
+                "tej nazwy nie zobaczy.")
     label = _control_label(finding)
     if label:
         return (f"Kliknij „{label}” w zwykłej przeglądarce i sprawdź, czy wybór "

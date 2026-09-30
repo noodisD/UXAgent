@@ -15,6 +15,20 @@ def clip_words(text, limit: int = 160) -> str:
     return text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:—-") + "…"
 
 
+def pl_plural(n: int, one: str, few: str, many: str) -> str:
+    """The Polish noun (or verb) form for a count: 1 / 2-4 (not 12-14) / the rest.
+
+    "1 wniosków nie trafiło" and "2 wniosków" were printed to clients; a fixed
+    genitive-plural form after the number is right only from five up.
+    """
+    n = abs(int(n))
+    if n == 1:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
 def view_key(url) -> str:
     """Identity of a page for counting distinct pages: host, path, and a
     single-page app's own route (#/summary), but not the query string.

@@ -725,6 +725,11 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     Returns the same list (findings mutated in place); non-dicts pass through."""
     causes = harness_suspect_causes(store)
     suspect = set(causes)
+    # Non-descriptive accessible names the pages had ("Pasek zadań", "Flyout"):
+    # the accessibility section reports them from the snapshots, so a held
+    # remark that names one can say where the substance is reported.
+    from .a11y_checks import generic_names_in_session
+    generic_names = generic_names_in_session(store)
     targets = _suspect_targets(store, suspect)
     # Steps where our own simplifier dropped the page's content. Only findings
     # that claim the content was missing are affected by it.
@@ -774,6 +779,8 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         # And which quoted words to look for on the page.
         f["quoted_not_on_page"] = misquoted
         f["harness_suspect"] = suspected
+        text_low = f"{f.get('evidence', '')} {f.get('recommendation', '')}".lower()
+        f["named_in_accessibility"] = [n for n in sorted(generic_names) if n in text_low] or None
         # Why, as far as the trace says: the signature that marked the cited
         # step, or what matched the finding's text. None when it is not suspect.
         f["harness_cause"] = _cause_of(f, causes, suspected, control, misquoted) if suspected else None

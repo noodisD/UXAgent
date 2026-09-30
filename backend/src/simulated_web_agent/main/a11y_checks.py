@@ -292,6 +292,118 @@ def extract_a11y_candidates(store: TraceStore) -> dict:
             "pages_scanned": pages_scanned}
 
 
+# Names that say nothing about what a control does. The accessibility scan only
+# asked whether a name EXISTS, so a price-info icon whose aria-label is
+# "Pasek zadań" ("Taskbar") and a gallery button named "Flyout" passed it, while
+# five of six participants in the 2026-09-30 hyundai run noticed them. Sighted
+# users never see these strings; a screen reader says them instead of the
+# control's purpose.
+#
+# Deliberately short, and only what was measured. Run over all 30,896 named
+# controls in the 18 recorded runs, these rules flag 788 instances: "Pasek
+# zadań" (753) and "Flyout" (35), nothing else. A technical-identifier rule
+# (camelCase, snake_case) and a role-word-in-the-name rule ("checkbox X") were
+# tried and matched nothing, so they are not here.
+_JARGON_NAMES = frozenset({
+    "taskbar", "pasek zadań", "pasek zadan", "flyout", "tooltip", "toggle",
+    "button", "przycisk", "link", "icon", "ikona", "image", "obraz",
+    "graphic", "grafika", "undefined", "null",
+})
+# Names specific enough to recognise in a participant's sentence. "button" or
+# "link" would match nearly any text, so a finding is only pointed at those that
+# cannot.
+_DISTINCTIVE_NAMES = frozenset({"taskbar", "pasek zadań", "pasek zadan", "flyout", "tooltip"})
+
+_ROLE_PL = {
+    "button": "przycisk", "link": "link", "checkbox": "pole wyboru", "radio": "przycisk opcji",
+    "combobox": "lista rozwijana", "textbox": "pole tekstowe", "searchbox": "pole wyszukiwania",
+    "switch": "przełącznik", "slider": "suwak", "menuitem": "pozycja menu", "tab": "zakładka",
+    "option": "opcja",
+}
+
+
+def generic_name_reason(role: str, name: str) -> str | None:
+    """"jargon" when a control's accessible name describes nothing, else None."""
+    n = (name or "").strip().lower()
+    if n and role in _NAMED_CONTROLS and n in _JARGON_NAMES:
+        return "jargon"
+    return None
+
+
+def generic_names_in_session(store: TraceStore) -> set[str]:
+    """The distinctive non-descriptive names (lower case) the session's pages had."""
+    found: set[str] = set()
+    for _step, text in _steps(store.read_a11y_snapshots()):
+        if isinstance(text, str):
+            for n in parse_aria_snapshot(text):
+                if generic_name_reason(n.role, n.name) and n.name.strip().lower() in _DISTINCTIVE_NAMES:
+                    found.add(n.name.strip().lower())
+    return found
+
+
+def extract_generic_name_findings(store: TraceStore) -> list[dict]:
+    """One accessibility finding for the controls whose name describes nothing.
+
+    Decided by code, not narrated by the model: the names are in the snapshots
+    and the stoplist is fixed, so the finding needs no LLM and cannot be worded
+    differently, dropped or duplicated by one. It is minor (drobny): the control
+    has a name, just not a useful one.
+    """
+    from collections import Counter
+
+    from .textutil import pl_plural
+
+    per_step: dict[int, Counter] = {}
+    all_pages: set[str] = set()
+
+    def _page(step):
+        try:
+            return store.url_at_step(step) or f"step {step}"
+        except Exception:
+            return f"step {step}"
+
+    for step, text in _steps(store.read_a11y_snapshots()):
+        if not isinstance(text, str):
+            continue
+        all_pages.add(_page(step))
+        for n in parse_aria_snapshot(text):
+            if generic_name_reason(n.role, n.name):
+                per_step.setdefault(step, Counter())[(n.name.strip(), n.role)] += 1
+    if not per_step:
+        return []
+
+    worst = max(per_step, key=lambda s: (sum(per_step[s].values()), -s))
+    worst_total = sum(per_step[worst].values())
+    pages_affected = len({_page(s) for s in per_step})
+    items = per_step[worst].most_common()
+    shown = [f"„{name}” ({_ROLE_PL.get(role, role)}{f', {k}×' if k > 1 else ''})"
+             for (name, role), k in items[:4]]
+    if len(items) > 4:
+        shown.append(f"i {len(items) - 4} inne")
+    sub = pl_plural(worst_total, "kontrolka ma", "kontrolki mają", "kontrolek ma")
+    their = "jej" if worst_total == 1 else "ich"
+    detail = (f"Na najgorszej stronie (krok {worst}) {worst_total} {sub} nazwę, która nie opisuje "
+              f"{their} działania: {', '.join(shown)}. Problem występuje na {pages_affected} z "
+              f"{len(all_pages)} odwiedzonych stron. Widzący użytkownik tej nazwy nie zobaczy, "
+              "ale czytnik ekranu odczyta ją zamiast opisu funkcji.")
+    names: dict[tuple, set] = {}
+    for step, counter in per_step.items():
+        for key in counter:
+            names.setdefault(key, set()).add(_page(step))
+    return [{
+        "category": "Nieopisowa nazwa kontrolki",
+        "severity": "drobny",
+        "topic": "generic_name",
+        "step": worst,
+        "url": store.url_at_step(worst),
+        "detail": detail,
+        "recommendation": ("Nadać tym kontrolkom nazwy opisujące ich działanie (aria-label albo "
+                           "widoczny tekst) zamiast nazw technicznych."),
+        "generic_names": [{"name": n, "role": r, "pages": len(p)} for (n, r), p in sorted(names.items())],
+        "deterministic": True,
+    }]
+
+
 # Topics the narrative writes WCAG issues about, keyed so a narrative issue can
 # be joined back to the measured finding it came from. The a11y prompt fixes the
 # vocabulary, so a short keyword list is more reliable here than fuzzy matching.
@@ -299,6 +411,7 @@ def extract_a11y_candidates(store: TraceStore) -> dict:
 # fixed only loosely: "Brak dostępnej nazwy dla kontrolki" matched nothing,
 # because the list had the words the other way round.
 _TOPIC_KEYWORDS = (
+    ("generic_name", ("nieopisow", "nie opisuje ich działania", "nie opisuje jej działania")),
     ("alt_text", ("alternatyw", "alt text", "atrybut alt", "atrybutu alt")),
     ("control_name", ("etykiet", "bez nazwy", "nazwy dostępnej", "dostępnej nazwy",
                       "nazwy kontrol", "nazwy dla kontrol", "accessible name")),

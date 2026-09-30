@@ -71,7 +71,7 @@ def avg_text(value) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
-from .textutil import clip_words, display_url  # noqa: E402  (shared with the Word renderer)
+from .textutil import clip_words, display_url, pl_plural  # noqa: E402,F401  (shared with the Word renderer)
 
 
 def pct_text(value) -> str:
@@ -83,20 +83,6 @@ def pct_text(value) -> str:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return "—" if value in (None, "") else str(value)
     return f"{value:.1f}".replace(".", ",")
-
-
-def pl_plural(n: int, one: str, few: str, many: str) -> str:
-    """The Polish noun (or verb) form for a count: 1 / 2-4 (not 12-14) / the rest.
-
-    "1 wniosków nie trafiło" and "2 wniosków" were printed to clients; a fixed
-    genitive-plural form after the number is right only from five up.
-    """
-    n = abs(int(n))
-    if n == 1:
-        return one
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return few
-    return many
 
 
 def evidence_quote(ex: dict, limit: int = 300) -> tuple[str, str]:
