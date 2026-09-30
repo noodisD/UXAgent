@@ -30,6 +30,7 @@ from .severity import (
 )
 from .a11y_checks import a11y_topic, measure_names, merge_pages
 from .evidence import page_quote, pages_contain, rendering_artifact
+from .textutil import clip_words, view_key
 from .scoring import (
     RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
     compute_ux_score, rationale_text,
@@ -498,7 +499,7 @@ def _order_a11y_instances(entry: dict) -> None:
         if page in seen or not i["detail"]:
             continue
         seen.add(page)
-        others.append({"detail": i["detail"][:300], "url": i["example"]["url"],
+        others.append({"detail": clip_words(i["detail"], 300), "url": i["example"]["url"],
                        "persona": i["persona"], "severity": i["severity"]})
     entry["other_instances"] = others[:3]
 
@@ -970,14 +971,21 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 continue
             d = device_detail.setdefault(label, {
                 "viewport": label, "pages_scanned": 0, "pages_with_overflow": 0,
+                "_views": set(), "_overflow_views": set(),
                 "tap_targets_below_min": 0, "contrast_failures": 0,
                 "small_font_examples": [], "wide_element_examples": [],
                 "_tap_keys": set(), "_contrast_keys": set(),
                 "_tap_page_max": 0, "_contrast_page_max": 0,
             })
-            d["pages_scanned"] += 1
+            # Distinct pages, not one per session: every participant's scan
+            # visits the same handful of pages, so three sessions of five pages
+            # printed "30 zeskanowanych podstron" and "overflow na 16 z 30".
+            view = view_key(v.get("url")) or f"?{len(d['_views'])}"
+            d["_views"].add(view)
+            d["pages_scanned"] = len(d["_views"])
             if v.get("horizontal_overflow"):
-                d["pages_with_overflow"] += 1
+                d["_overflow_views"].add(view)
+                d["pages_with_overflow"] = len(d["_overflow_views"])
             # Distinct failures, not a per-page sum. The same header and footer
             # sit on every page, so summing counted one footer colour six times
             # a page across every page and persona: Hyundai's single contrast

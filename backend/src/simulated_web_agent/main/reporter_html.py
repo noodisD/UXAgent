@@ -71,6 +71,9 @@ def avg_text(value) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
+from .textutil import clip_words, display_url  # noqa: E402  (shared with the Word renderer)
+
+
 def pct_text(value) -> str:
     """A percentage as the report prints it: one decimal, Polish comma ("22,0").
 
@@ -1688,10 +1691,10 @@ def _render_accessibility_detail(stats: dict) -> str:
         # — merged into this entry, never presented as its proof.
         measured += "".join(
             f'<div class="a11y-also"><b>Również:</b> {_esc(o.get("detail") or "")} '
-            f'<span class="a11y-where">{_esc(o.get("url") or "")}</span></div>'
+            f'<span class="a11y-where">{_esc(display_url(o.get("url") or ""))}</span></div>'
             for o in (f.get("other_instances") or [])[:3])
         bg, fg, border = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
-        where = ", ".join(f.get("urls") or [])[:160]
+        where = clip_words(", ".join(display_url(u) for u in (f.get("urls") or [])), 160)
         who = ", ".join(f.get("personas") or [])
         rows += f"""
         <div class="a11y-item" style="border-left-color:{border}">

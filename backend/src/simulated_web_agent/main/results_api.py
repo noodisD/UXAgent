@@ -548,12 +548,9 @@ def _issue_key(issue: dict) -> str | None:
 
 
 def _clip(text: str, limit: int = 160) -> str:
-    """Shorten to a word boundary with an ellipsis. A hard slice printed
-    "...ikony, które ni" to the dashboard."""
-    text = str(text or "").strip()
-    if len(text) <= limit:
-        return text
-    return text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:—-") + "…"
+    """Shorten to a word boundary with an ellipsis (see textutil.clip_words)."""
+    from .textutil import clip_words
+    return clip_words(text, limit)
 
 
 def _comparable_issues(report: dict | None) -> list[dict]:
