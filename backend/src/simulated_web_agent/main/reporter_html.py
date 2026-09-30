@@ -1287,6 +1287,31 @@ OBJECTIVES_NOTE = ("Poniższe relacje pochodzą od uczestników badania i opisuj
                    "trudności może wynikać z ograniczeń narzędzia, a nie z serwisu.")
 
 
+def held_claims_note(stats: dict, persona: str | None) -> str:
+    """What the gate held back from this participant, for their reflection card.
+
+    A reflection is written from the same session as the findings, so it can
+    repeat a claim the verifier set aside — one persona's "Mandatory Field"
+    blocker reached the client that way although the finding itself was held.
+    Matching the prose to the finding would be guesswork, so nothing is matched:
+    the card simply says what was held for this person and that any similar
+    remark in their summary is unconfirmed. "" when nothing was held.
+    """
+    items = [it for it in ((stats.get("heuristic") or {}).get("needs_verification_items") or [])
+             if persona and it.get("persona_name") == persona]
+    if not items:
+        return ""
+    parts = []
+    for it in items[:3]:
+        claim = str(it.get("evidence") or "").strip()
+        if len(claim) > 110:
+            claim = claim[:110].rsplit(" ", 1)[0] + "…"
+        parts.append(f"krok {it.get('step')}: „{claim}”")
+    return ("Wnioski tej osoby wstrzymane po weryfikacji (szczegóły w sekcji „Do weryfikacji "
+            f"przez człowieka”): {'; '.join(parts)}. Jeśli podobne uwagi pojawiają się w jej "
+            "podsumowaniu poniżej, traktuj je jako niepotwierdzone.")
+
+
 def _render_objectives(stats: dict) -> str:
     """What each participant was asked to do, and how far they got.
 
@@ -1331,6 +1356,9 @@ def _render_objectives(stats: dict) -> str:
         # reaches the client — which is exactly what both re-run reports did.
         unverified = (f'<div class="obj-caveat">{_esc(SELF_REPORTED_CAVEAT)}</div>'
                       if r.get("self_reported_only") else "")
+        held = held_claims_note(stats, r.get("persona"))
+        if held and not r.get("self_reported_only"):
+            unverified += f'<div class="obj-caveat">{_esc(held)}</div>'
         cards += f"""
         <div class="obj-card">
           <div class="obj-head">
@@ -1460,12 +1488,16 @@ def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
         title = (f"H{h_id}: {it.get('heuristic_name', '')}" if isinstance(h_id, int) and h_id
                  else it.get("heuristic_name", "") or "Wniosek")
         claimed = it.get("severity_claimed") or ""
+        seen = str(it.get("verifier_reason") or "").strip()
+        verifier_html = (f'<div class="nv-why"><b>Co pokazuje zapis sesji:</b> {_esc(seen)}</div>'
+                         if seen else "")
         cards += f"""
         <div class="nv-card">
           <div class="nv-head"><b>{_esc(title)}</b>
             <span class="nv-meta">zgłoszone jako {_esc(claimed)} · {_esc(it.get('persona_name', ''))}, krok {it.get('step')}</span></div>
           <div class="nv-claim">„{_esc(str(it.get('evidence', ''))[:300])}”</div>
           <div class="nv-why"><b>Dlaczego wstrzymane:</b> {_esc(it.get('reason', ''))}</div>
+          {verifier_html}
           <div class="nv-check"><b>Co sprawdzić:</b> {_esc(it.get('check', ''))}</div>
           {thumb}
         </div>"""

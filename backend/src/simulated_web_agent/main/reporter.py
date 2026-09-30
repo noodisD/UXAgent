@@ -937,6 +937,12 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "heuristic_name": HEURISTIC_NAMES.get(h_id, ""),
             "severity_claimed": f.get("severity", ""),
             "reason": _gate_reason(f),
+            # What the verifier read in the session that contradicts the claim
+            # ("model 'i20' appears just before 'Dane kontaktowe', so the field
+            # is pre-filled"). Dropped until now, leaving only the generic
+            # "the record does not confirm it" — the part a specialist needs
+            # to settle the item in a minute.
+            "verifier_reason": str(f.get("claim_verdict_reason") or "").strip(),
             "check": _human_check(f),
         })
 
@@ -1470,6 +1476,23 @@ def _group_counts(stats: dict) -> Counter:
                    if isinstance(r, dict))
 
 
+def _survey_legend(survey_stats: dict | None) -> str:
+    """"id = wording (scale)" for every question of this study's questionnaire.
+
+    The prompt carried a hand-written legend (q1=ease of finding products …)
+    from an earlier questionnaire. This one's ids are g1…g9, e1, e2 and the SEQ
+    runs 1-7, so every id in the data was either unexplained or explained wrongly.
+    """
+    lines = []
+    for q in (survey_stats or {}).get("questions") or []:
+        if not isinstance(q, dict) or not q.get("id"):
+            continue
+        scale = (f"skala {q.get('min', 1)}–{q.get('max', 5)}" if q.get("kind") == "scale"
+                 else "pytanie otwarte" if q.get("kind") == "open" else "")
+        lines.append(f"- {q['id']} = {q.get('prompt') or ''}" + (f" ({scale})" if scale else ""))
+    return "\n".join(lines) or "(brak pytań ankiety)"
+
+
 def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
                                  sources: dict | None = None) -> str:
     """Task-completion summary for the aggregate narrator, labelled by source.
@@ -1678,6 +1701,7 @@ async def generate_aggregated_report(
         minor_count=_group_counts(stats).get("drobny", 0),
         top_issues=top_issues,
         survey_summary=survey_summary,
+        survey_legend=_survey_legend(stats.get("survey")),
         computed_score=f"{score_result['score']:.1f}",
         score_breakdown=breakdown_text(score_result),
     )

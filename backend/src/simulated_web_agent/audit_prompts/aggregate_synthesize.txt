@@ -19,14 +19,16 @@ TASK: {task_description}
 
 WEBSITE: {website_url}
 
-TASK COMPLETION — MEASURED FROM THE SESSION TRACE (najmocniejszy dowód, nie samoocena):
+TASK COMPLETION (pierwsza linia poniżej mówi, czy wynik jest ZMIERZONY z zapisu sesji,
+czy tylko DEKLAROWANY przez model — zależy to od typu zadania):
 {outcome_distribution}
-To jest zmierzone ukończenie zadania (jaki etap ścieżki uczestnicy faktycznie osiągnęli),
-a nie ich subiektywna ocena. Traktuj to jako najsilniejszy pojedynczy sygnał przy ustalaniu
-overall_ux_score i executive_summary — mocniejszy niż ankieta/SEQ (samoocena) czy pierwsze
-wrażenie. Strona, na której znaczna część uczestników dotarła do koszyka/kasy, NIE jest oceną
-1–1.5, nawet jeśli droga była uciążliwa; opisz ją jako „wykonalne, ale z tarciem", a nie
-„niemożliwe". Jeśli zmierzone ukończenie i samoocena się rozchodzą, zaufaj zmierzonemu.
+Jeśli wynik jest ZMIERZONY (jaki etap ścieżki uczestnicy faktycznie osiągnęli), to najsilniejszy
+dowód w tym badaniu — mocniejszy niż ankieta/SEQ (samoocena) czy pierwsze wrażenie; opisując
+całość w executive_summary, trzymaj się tych liczb. Strona, na której znaczna część uczestników
+dotarła do koszyka/kasy, NIE jest „niemożliwa": opisz ją jako „wykonalne, ale z tarciem". Jeśli
+zmierzone ukończenie i samoocena się rozchodzą, zaufaj zmierzonemu. Jeśli wynik jest tylko
+DEKLAROWANY, to słabszy dowód niż zweryfikowane problemy — napisz wprost, że to deklaracja,
+nie pomiar. (Sama ocena liczbowa jest wyliczona z dowodów w kodzie, nie ustalasz jej.)
 
 FIRST IMPRESSION STATISTICS:
 {first_impression_stats}
@@ -107,9 +109,11 @@ Note — engaged_form = agent typed into at least one field; submitted_form = al
 MOST FREQUENT ISSUES (appearing in ≥50% of sessions):
 {top_issues}
 
-SURVEY QUESTIONNAIRE RESULTS (avg_scores = Likert 1–5 per question; open_answers = verbatim responses):
+SURVEY QUESTIONNAIRE RESULTS (each scale question has its own range, given in the legend below;
+open questions carry verbatim answers):
 {survey_summary}
-Note — question IDs: q1=ease of finding products, q2=clarity/readability, q3=ease of checking store availability/finding nearest store, q4=site speed, q5=biggest difficulty (open), q6=what could not be found (open).
+Question legend for THIS study (id = wording, scale):
+{survey_legend}
 
 ## Output format
 

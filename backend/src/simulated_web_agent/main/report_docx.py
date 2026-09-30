@@ -344,7 +344,7 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     if reflections:
         doc.add_heading("Realizacja zadania", level=1)
         from .reporter_html import (OBJECTIVES_NOTE, SELF_REPORTED_CAVEAT, _SOURCE_PL,
-                                    objective_outcome)
+                                    held_claims_note, objective_outcome)
         # The HTML's standing caveat: these are the participants' own accounts,
         # never checked against the trace. Without it the blockers read as fact.
         _add_caption(doc, OBJECTIVES_NOTE)
@@ -362,6 +362,10 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 _add_caption(doc, src)
             if r.get("self_reported_only"):
                 _add_caption(doc, SELF_REPORTED_CAVEAT)
+            else:
+                held = held_claims_note(stats, r.get("persona"))
+                if held:
+                    _add_caption(doc, held)
             if r.get("objective"):
                 _add_caption(doc, f"Cel: {r['objective']}")
             if r.get("summary"):
@@ -460,6 +464,11 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             p = doc.add_paragraph()
             p.add_run("Dlaczego wstrzymane: ").bold = True
             p.add_run(str(it.get("reason", "")))
+            seen = str(it.get("verifier_reason") or "").strip()
+            if seen:
+                p = doc.add_paragraph()
+                p.add_run("Co pokazuje zapis sesji: ").bold = True
+                p.add_run(seen)
             p = doc.add_paragraph()
             p.add_run("Co sprawdzić: ").bold = True
             p.add_run(str(it.get("check", "")))
