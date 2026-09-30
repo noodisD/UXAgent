@@ -70,9 +70,15 @@ RUN uv sync --frozen --no-dev --no-install-project
 #
 # Nothing here spoofs or patches anything. It is an ordinary Chrome with an
 # ordinary display; the only thing that changes is that the display exists.
+#
+# xauth and x11-xkb-utils are listed on purpose. Debian only *recommends* them
+# for xvfb, this install skips recommends, and playwright's own dependency list
+# has neither: xvfb-run stops with "xauth command not found", and Xvfb cannot
+# start without xkbcomp. The container then exited before it ever listened on
+# the port — the 2026-09-30 deploy (revision ux-agent-00014) failed on it.
 RUN .venv/bin/playwright install --with-deps chromium \
     && apt-get update \
-    && apt-get install -y --no-install-recommends xvfb \
+    && apt-get install -y --no-install-recommends xvfb xauth x11-xkb-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Application ──────────────────────────────────────────────────────────────
@@ -112,15 +118,18 @@ EXPOSE 8080
 # -a picks a free display number, which matters because a restarted container
 # can find the previous lock file still in place. A headless run is unaffected:
 # it simply never opens the display.
-CMD exec xvfb-run -a --server-args="-screen 0 1440x900x24" \
-    .venv/bin/gunicorn \
-    --bind "0.0.0.0:${PORT}" \
-    --workers 1 \
-    --threads 8 \
-    --timeout 0 \
-    --access-logfile - \
-    --error-logfile - \
-    simulated_web_agent.main.app:app
+#
+# The wrapper is tried once first, and the server starts without it if it
+# cannot run. A missing virtual display costs only the headed runs; the same
+# failure used to cost the whole service, because xvfb-run was the container's
+# command and the image could not be tested before it reached Cloud Run.
+CMD ARGS="--bind 0.0.0.0:${PORT} --workers 1 --threads 8 --timeout 0 --access-logfile - --error-logfile - simulated_web_agent.main.app:app"; \
+    if timeout 20 xvfb-run -a true >/dev/null 2>&1; then \
+        exec xvfb-run -a --server-args="-screen 0 1440x900x24" .venv/bin/gunicorn $ARGS; \
+    else \
+        echo "xvfb-run is not usable here: starting without a virtual display, headed runs will not work" >&2; \
+        exec .venv/bin/gunicorn $ARGS; \
+    fi
 
 # ── Deployment notes ─────────────────────────────────────────────────────────
 # Cloud Run:
