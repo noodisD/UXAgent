@@ -148,10 +148,14 @@ def _add_measurement_sections(doc, agg: dict) -> None:
             if avg is None:
                 doc.add_paragraph(SCROLL_UNMEASURABLE)
             else:
+                from .reporter_html import pct_text, pl_plural
+                k = scroll.get("sessions_with_depth_pct")
+                sessions = (f"{k} {pl_plural(k, 'sesja', 'sesje', 'sesji')}"
+                            if isinstance(k, int) else "— sesji")
                 doc.add_paragraph(
-                    f"Średnia maksymalna głębokość przewijania: {avg}% (zakres "
-                    f"{scroll.get('min_max_depth_pct', '—')}–{scroll.get('max_max_depth_pct', '—')}%, "
-                    f"{scroll.get('sessions_with_depth_pct', '—')} sesji)")
+                    f"Średnia maksymalna głębokość przewijania: {pct_text(avg)}% (zakres "
+                    f"{pct_text(scroll.get('min_max_depth_pct', '—'))}–"
+                    f"{pct_text(scroll.get('max_max_depth_pct', '—'))}%, {sessions})")
                 if avg < 30:
                     doc.add_paragraph(SCROLL_LOW_NOTE)
             _add_caption(doc, f"{scroll_coverage_text(scroll)} {_SCROLL_METHOD}".strip())
@@ -184,7 +188,7 @@ def _add_measurement_sections(doc, agg: dict) -> None:
             ("Wysłali formularz", f"{forms.get('sessions_submitted_form', 0)}/{n}"),
         ])
         if forms.get("avg_fields_filled") is not None:
-            doc.add_paragraph(f"Średnio {forms['avg_fields_filled']} pól na sesję.")
+            doc.add_paragraph(f"Średnio {avg_text(forms['avg_fields_filled'])} pól na sesję.")
         _add_caption(doc, FORM_FUNNEL_NOTE)
 
 
@@ -447,10 +451,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     if held_items or unconfirmed:
         doc.add_heading("Do weryfikacji przez człowieka", level=1)
         if held_items:
-            doc.add_paragraph(
-                f"{len(held_items)} wniosków nie trafiło do ocen i liczników, bo zapis sesji "
-                "nie pozwala ich potwierdzić. Nie znaczy to, że są fałszywe — każdy wymaga "
-                "krótkiej weryfikacji, opisanej poniżej.")
+            from .reporter_html import held_intro_text
+            doc.add_paragraph(held_intro_text(len(held_items)))
         if unconfirmed:
             doc.add_paragraph(unconfirmed)
         for it in held_items:
@@ -501,7 +503,7 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         for s in (fi.get("screenshots") or [])[:3]:
             caption = str(s.get("persona") or "")
             if s.get("score") is not None:
-                caption = f"{caption} · {s['score']}/5".lstrip(" ·")
+                caption = f"{caption} · {avg_text(s['score'])}/5".lstrip(" ·")
             _add_picture(doc, run_dir, s.get("screenshot"), caption)
         dims = [(label, (fi.get("dimension_avgs") or {}).get(key))
                 for key, label in _FI_DIM_LABELS.items()

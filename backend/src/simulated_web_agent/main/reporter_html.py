@@ -71,6 +71,43 @@ def avg_text(value) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
+def pct_text(value) -> str:
+    """A percentage as the report prints it: one decimal, Polish comma ("22,0").
+
+    The scroll depth printed "22.0%" beside averages printed "3,07" — the same
+    page, two decimal separators.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "—" if value in (None, "") else str(value)
+    return f"{value:.1f}".replace(".", ",")
+
+
+def pl_plural(n: int, one: str, few: str, many: str) -> str:
+    """The Polish noun (or verb) form for a count: 1 / 2-4 (not 12-14) / the rest.
+
+    "1 wniosków nie trafiło" and "2 wniosków" were printed to clients; a fixed
+    genitive-plural form after the number is right only from five up.
+    """
+    n = abs(int(n))
+    if n == 1:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def held_intro_text(k: int) -> str:
+    """The lead-in to the held-back list, worded so it is right for any count.
+
+    "{k} wniosków nie trafiło …" was printed for one item and for two. Agreeing
+    the noun, the verb and the pronouns with every count needs four forms per
+    sentence; putting the number after the noun does not need any.
+    """
+    return (f"Wstrzymano wniosków: {k}. Zapis sesji nie pozwala ich potwierdzić, więc nie "
+            "trafiły do ocen i liczników — nie znaczy to, że są fałszywe. Każdy wymaga "
+            "krótkiej weryfikacji przez człowieka, opisanej poniżej.")
+
+
 def _score_bar(score: float | None, max_score: float = 5.0) -> str:
     if score is None:
         return ""
@@ -722,7 +759,7 @@ def _render_first_impression(stats: dict, narr: dict) -> str:
         path = s.get("screenshot")
         if not path:
             continue
-        score = f" · {s['score']}/5" if s.get("score") is not None else ""
+        score = f" · {avg_text(s['score'])}/5" if s.get("score") is not None else ""
         shots += (f'<figure class="fi-shot"><a href="{_esc(path)}" target="_blank">'
                   f'<img src="{_esc(path)}" alt="pierwszy ekran — {_esc(s.get("persona") or "")}"/></a>'
                   f'<figcaption>{_esc(s.get("persona") or "")}{score}</figcaption></figure>')
@@ -1080,8 +1117,8 @@ def _render_scroll_depth(scroll: dict | None) -> str:
         return _section("Głębokość przewijania", (
             f'<p style="font-size:14px;">{_esc(SCROLL_UNMEASURABLE)}</p>'
             + method))
-    lo = scroll.get("min_max_depth_pct", "—")
-    hi = scroll.get("max_max_depth_pct", "—")
+    lo = pct_text(scroll.get("min_max_depth_pct", "—"))
+    hi = pct_text(scroll.get("max_max_depth_pct", "—"))
     sessions = scroll.get("sessions_with_depth_pct", "—")
     pct = min(100, int(avg))
     color = "#008573" if pct >= 60 else ("#B07A00" if pct >= 30 else "#E60000")
@@ -1093,7 +1130,7 @@ def _render_scroll_depth(scroll: dict | None) -> str:
     body = f"""
     <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:14px;">
       <div>
-        <div style="font-size:42px;font-weight:800;color:{color};">{avg}%</div>
+        <div style="font-size:42px;font-weight:800;color:{color};">{pct_text(avg)}%</div>
         <div style="font-size:12px;color:#6c757d;">Średnia maksymalna głębokość przewijania</div>
       </div>
       <div style="flex:1;min-width:180px;">
@@ -1182,7 +1219,7 @@ def _render_form_funnel(forms: dict | None) -> str:
         _step("Wysłali formularz", submitted, "#008573")
     )
     if avg_fields is not None:
-        body += f'<p style="font-size:13px;color:#6c757d;margin-top:12px;">Średnio {avg_fields} pól na sesję.</p>'
+        body += f'<p style="font-size:13px;color:#6c757d;margin-top:12px;">Średnio {avg_text(avg_fields)} pól na sesję.</p>'
     # "Dotarli do akcji submit 1/3" was a link click counted as a submission.
     # Say how submission is judged — and that personal-data forms are never
     # sent by design, or a 0 here reads as the site failing.
@@ -1501,9 +1538,7 @@ def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
           <div class="nv-check"><b>Co sprawdzić:</b> {_esc(it.get('check', ''))}</div>
           {thumb}
         </div>"""
-    intro = (f"{len(items)} wniosków nie trafiło do ocen i liczników, bo zapis sesji "
-             "nie pozwala ich potwierdzić. Nie znaczy to, że są fałszywe — każdy "
-             "wymaga krótkiej weryfikacji przez człowieka, opisanej poniżej.")
+    intro = held_intro_text(len(items))
     if not items:
         intro = ""
     note_html = f'<p class="sb-rules">{_esc(note)}</p>' if note else ""
