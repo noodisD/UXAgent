@@ -5,6 +5,8 @@ headings, a C-locale month ("26 Sep 2026") and issue texts sliced at 160
 characters mid-word."""
 import json
 
+import pytest
+
 from simulated_web_agent.main.results_api import _build_comparison, _clip
 
 
@@ -44,7 +46,12 @@ def test_the_payload_carries_keys_and_an_iso_date(tmp_path):
 
 
 def test_every_metric_key_has_a_label_in_both_languages():
+    import re
     from pathlib import Path
-    i18n = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "i18n.ts").read_text(encoding="utf-8")
+    path = Path(__file__).resolve().parents[2] / "frontend" / "src" / "i18n.ts"
+    if not path.exists():
+        pytest.skip("backend-only checkout: the dashboard's strings are not here")
+    i18n = path.read_text(encoding="utf-8")
     for key in ("score", "taskSuccess", "critical", "total"):
-        assert i18n.count(f"'cmp.m.{key}'") == 2, key
+        # either quote style; one entry per language
+        assert len(re.findall(rf"""['"]cmp\.m\.{key}['"]""", i18n)) == 2, key

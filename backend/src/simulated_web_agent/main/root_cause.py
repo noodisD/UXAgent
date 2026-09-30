@@ -59,7 +59,8 @@ _FIN_ABSENCE = (
     r"|bez\s+(?:prezentacji|informacji|podania|wskazania))"
 )
 _FIN_TERM = (
-    r"(?<!\w)(?:rat(?:y|ę|a|ą|om|ach|ami)?(?!\w)|kalkulator\w*|symulator\w*"
+    r"(?<!\w)(?:rat(?:y|ę|a|ą|om|ach|ami)?(?!\w)|racie(?!\w)"
+    r"|(?:kalkulator|symulator)\w*\s+(?:rat\w*|finansowani\w*|leasing\w*|kredyt\w*)"
     r"|finansowani\w*|leasing\w*)"
 )
 _FINANCING_MISSING = re.compile(rf"{_FIN_ABSENCE}(?:\s+\w+){{0,3}}?\s+{_FIN_TERM}", re.I)

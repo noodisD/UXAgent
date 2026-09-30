@@ -164,7 +164,7 @@ def test_the_html_section_prints_the_arithmetic():
     html = _render_score_breakdown({"score_breakdown": res})
     assert "Jak obliczono ocenę" in html
     assert "Punkt wyjścia" in html and "Ocena końcowa" in html
-    assert f"{res['score']:.1f}" in html
+    assert f"{res['score']:.1f}".replace(".", ",") in html
     assert "Nie wliczono do oceny" in html
 
 

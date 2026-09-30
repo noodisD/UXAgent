@@ -123,13 +123,13 @@ def test_what_to_check_follows_the_cause(code, expected):
     assert "Powtórz tę interakcję" not in _human_check(f)
 
 
-def test_the_verifier_reason_is_redacted_and_clipped_before_it_is_shown():
+def test_the_verifier_reason_is_clipped_before_it_is_shown(tmp_path):
     from simulated_web_agent.main.reporter import aggregate_statistics
     long_reason = "Zapis sesji nie zawiera tego tekstu. " * 40
     f = {"heuristic_id": 6, "severity": "drobny", "step": 0, "verified": False,
          "claim_verdict": "unsupported", "claim_verdict_reason": long_reason,
          "evidence": "x", "recommendation": "y"}
-    report = {"trace_dir": "x", "persona": "Persona: Ala", "first_impression": {},
+    report = {"trace_dir": str(tmp_path / "x"), "persona": "Persona: Ala", "first_impression": {},
               "heuristic_findings": [f], "accessibility": {"findings": []}, "survey_result": {"answers": []}}
     items = aggregate_statistics([report])["heuristic"]["needs_verification_items"]
     reasons = [i["verifier_reason"] for i in items if i.get("verifier_reason")]

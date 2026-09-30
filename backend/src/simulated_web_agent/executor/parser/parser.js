@@ -50,14 +50,25 @@ const parse = () => {
   // test-drive form's "Imię <span class=sr-only>Mandatory Field</span>" became
   // the id imi_mandatory_field — putting back in front of the persona the very
   // text isScreenReaderOnlyText takes out.
+  //
+  // And not what is hidden from everyone: display:none, the hidden attribute,
+  // aria-hidden (a required-field star, a tooltip) or an explicit
+  // visibility:hidden under a visible parent. A form's error message that is
+  // only shown on failure ("E-mail niepoprawny") sits inside the label, and
+  // became the id email_niepoprawny_ad.
   const visibleText = (el) => {
     let out = '';
+    const parentHidden = window.getComputedStyle(el).visibility === 'hidden';
     for (const n of el.childNodes) {
       if (n.nodeType === 3) {
         out += n.textContent;
       } else if (n.nodeType === 1) {
         if (BLACKLISTED_TAGS.has(n.tagName.toLowerCase())) continue;
-        if (isScreenReaderOnlyText(n, window.getComputedStyle(n))) continue;
+        const cs = window.getComputedStyle(n);
+        if (cs.display === 'none' || n.hasAttribute('hidden') ||
+            n.getAttribute('aria-hidden') === 'true' ||
+            (cs.visibility === 'hidden' && !parentHidden)) continue;
+        if (isScreenReaderOnlyText(n, cs)) continue;
         out += ' ' + visibleText(n) + ' ';
       }
     }
@@ -301,7 +312,7 @@ const parse = () => {
         original.getAttribute('title') ||
         imageAlt(original) ||
         original.getAttribute('placeholder') ||
-        tag);
+        tag) || tag;
       thisName = uniqueName(parentName ? `${parentName}.${base}` : base);
       for (const e of [clone, original]) {
         e.setAttribute('parser-semantic-id', thisName);

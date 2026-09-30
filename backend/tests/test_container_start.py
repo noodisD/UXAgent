@@ -40,9 +40,11 @@ def test_the_server_is_not_started_inside_a_wrapper_that_waits():
 
 def test_the_display_is_started_in_the_background():
     cmd = _start_command()
-    head, _, rest = cmd.partition("&")
-    assert head.strip().startswith("Xvfb :99"), "Xvfb first, backgrounded with &"
-    assert rest.strip().startswith(("\\", "export DISPLAY=:99")) or "export DISPLAY=:99" in rest
+    # " & " — the "&" inside "2>&1" is not the one that backgrounds it.
+    head, sep, rest = cmd.partition(" & ")
+    assert sep, "Xvfb must be backgrounded with &"
+    assert head.strip().startswith("Xvfb :99"), "Xvfb first"
+    assert rest.strip().startswith("export DISPLAY=:99"), "then the display for everything after it"
 
 
 needs_sh = pytest.mark.skipif(shutil.which("sh") is None, reason="needs a POSIX shell")

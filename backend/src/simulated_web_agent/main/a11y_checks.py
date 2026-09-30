@@ -353,14 +353,15 @@ def extract_generic_name_findings(store: TraceStore) -> list[dict]:
     """
     from collections import Counter
 
-    from .textutil import pl_plural
+    from .textutil import pl_plural, view_key
 
     per_step: dict[int, Counter] = {}
     all_pages: set[str] = set()
 
     def _page(step):
+        # The same page under two query strings (a share code) is one page.
         try:
-            return store.url_at_step(step) or f"step {step}"
+            return view_key(store.url_at_step(step)) or f"step {step}"
         except Exception:
             return f"step {step}"
 

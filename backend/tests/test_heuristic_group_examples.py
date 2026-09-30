@@ -7,13 +7,20 @@ untranslated label, a "null kW" price line) shared one row, so each took the
 other's severity and reach; the narrator saw only the row."""
 from pathlib import Path
 
+import tempfile
+from pathlib import Path
+
 from simulated_web_agent.main.reporter import aggregate_statistics
 from tests.conftest import make_agent_report, make_finding
 
 
+# A relative "runs/R/…" made aggregate_statistics create folders beside the real runs.
+TRACE_ROOT = Path(tempfile.mkdtemp(prefix="uxagent-test-"))
+
+
 def _report(name, *findings):
     r = make_agent_report(findings=list(findings))
-    r["trace_dir"] = f"runs/R/{name}"
+    r["trace_dir"] = str(TRACE_ROOT / name)
     r["persona"] = f"Persona: {name}"
     return r
 

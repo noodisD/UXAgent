@@ -23,6 +23,13 @@ from simulated_web_agent.main.trace_store import TraceStore
     ("Niedziałający przycisk umówienia jazdy testowej z poziomu konfiguratora.", True),
     # ordinary remarks about the site are not interaction trouble
     ("Czytelne karty wersji wyposażenia, które ułatwiły szybkie porównanie.", False),
+    # the words sit inside ordinary ones, or the remark is about content
+    ("Usprawnienie działania filtrów produktów.", False),
+    ("Naprawienie działania zakładek w konfiguratorze.", False),
+    ("Jedynie działające strzałki nawigacyjne.", False),
+    ("Brak informacji o racie uniemożliwia porównanie ofert.", False),
+    ("Brak etykiet z nazwami kolorów, co uniemożliwia pewny wybór.", False),
+    ("Baner uniemożliwia przejście do podsumowania.", True),
     ("Brak kalkulatora rat w podsumowaniu konfiguracji.", False),
     ("Przyciski w wyszukiwarce dealerów nie posiadają etykiet tekstowych.", False),
     ("Brak automatycznego przeniesienia modelu do formularza jazdy testowej.", False),
@@ -86,3 +93,21 @@ def test_a_mean_belongs_to_the_question_it_came_from():
     prompt = (Path(__file__).resolve().parents[1] / "src" / "simulated_web_agent"
               / "audit_prompts" / "aggregate_synthesize.txt").read_text(encoding="utf-8")
     assert "przypisuj WYŁĄCZNIE do pytania lub wymiaru, z którego pochodzi" in prompt
+
+
+def test_a_session_whose_only_trouble_is_a_consent_banner_is_not_a_tool_failure(tmp_path):
+    """Only executor errors, fallbacks and repeats mean the tool failed while it
+    acted; a banner left open says the page was covered, not that the account of
+    the page is an echo of the tool."""
+    store = TraceStore(tmp_path / "Ewa")
+    store.write_action_trace([json.dumps({"action": "click", "target": "a"}),
+                              json.dumps({"action": "click", "target": "b"})])
+    for _ in range(2):
+        store.append_observation({"tabs": [{"url": "https://x.pl/", "is_active": True}], "error": None})
+    store.write_objective_reflection({"outcome": "partial", "summary": "Częściowo.",
+                                      "blockers": ["Nakładające się warstwy interfejsu (divy) blokujące klikanie"],
+                                      "wins": [], "priorityFix": "Poprawić."})
+    report = {"trace_dir": str(store.trace_dir), "persona": "Persona: Ewa", "first_impression": {},
+              "heuristic_findings": [], "accessibility": {"findings": []}, "survey_result": {"answers": []}}
+    (row,) = aggregate_statistics([report], stores=[store])["objective_reflections"]
+    assert row["self_reported_only"] is False

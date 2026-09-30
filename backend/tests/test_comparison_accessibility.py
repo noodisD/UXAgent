@@ -72,3 +72,15 @@ def test_an_accessibility_item_says_so_in_the_listing():
     assert _labelled("h:2", "Ceny się nie zgadzają") == "Ceny się nie zgadzają"
     assert _labelled("rc:search_stale_results", "x") == "x"
     assert _labelled("wcag:contrast", "") == "", "no bare prefix on an empty text"
+
+
+def test_a_long_issue_text_in_the_comparison_is_cut_at_a_word():
+    """The clip is applied where the items are built, not only in its own helper."""
+    long = ("Na stronie rezerwacji jazdy próbnej pole wyboru nie ma dostępnej nazwy, więc czytnik "
+            "ekranu nie zapowie, czego dotyczy pole, a użytkownik nie wie, co wybiera ") * 3
+    now = _report(narrative_issues=[{**_wcag_issue(), "impact": long}], findings=[_finding(detail=long)])
+    (item,) = _comparable_issues(now)
+    text = item["text"].removeprefix("Dostępność: ")
+    assert text.endswith("…") and len(text) <= 161
+    assert text[:-1] == long[:len(text) - 1].rstrip(), "a prefix of the original"
+    assert long[len(text) - 1] == " ", "the cut falls on a space, not inside a word"

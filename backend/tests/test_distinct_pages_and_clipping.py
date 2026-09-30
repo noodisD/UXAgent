@@ -4,6 +4,9 @@ The 2026-09-30 hyundai report said "16 z 30 zeskanowanych podstron": three
 sessions of five pages each, every scan visiting the same five. It also printed
 lines cut mid-word ("…ni (https://…)") and 300-character addresses made of a
 configurator share-code."""
+import tempfile
+from pathlib import Path
+
 from docx import Document
 
 from simulated_web_agent.main.report_docx import build_docx
@@ -42,13 +45,18 @@ def test_a_report_address_is_readable():
     assert "configuratorLink" not in shown and len(shown) < 90
 
 
+# aggregate_statistics opens a TraceStore on each trace_dir, which creates it:
+# a relative "runs/R/…" put fake run folders beside the real ones.
+TRACE_ROOT = Path(tempfile.mkdtemp(prefix="uxagent-test-"))
+
+
 def _viewport(url, overflow=False):
     return {"url": url, "viewport": "mobile", "horizontal_overflow": overflow,
             "tap_targets": {}, "contrast": {}, "small_fonts": [], "wide_elements": []}
 
 
 def _session(name, urls):
-    return {"trace_dir": f"runs/R/{name}", "persona": f"Persona: {name}", "first_impression": {},
+    return {"trace_dir": str(TRACE_ROOT / name), "persona": f"Persona: {name}", "first_impression": {},
             "heuristic_findings": [], "accessibility": {"findings": []},
             "viewport_findings": [_viewport(u, overflow=u.endswith("konfigurator.html")) for u in urls],
             "survey_result": {"answers": []}}

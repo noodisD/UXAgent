@@ -19,6 +19,7 @@ from . import cancellation
 from ..executor.env import INPUT_REFUSAL_PREFIX, SCOPE_REFUSAL_PREFIX, WebAgentEnv
 from ..config import load_cfg
 from .abort import abandon_threshold
+from .loop_phrases import FORCED_BACK_ELEMENT, FORCED_BACK_METHOD
 from .model import AgentPolicy  # noqa
 from .trace_store import TraceStore, parse_action as _parse_action
 
@@ -817,7 +818,7 @@ async def _run_for_persona_and_intent(
                 log.warning("Forcing escape from action loop: %s", prev_action_key)
                 action = json.dumps({
                     "action": "back",
-                    "description": "Ta metoda nie działała mimo kilku prób — wracam, by spróbować innej drogi.",
+                    "description": FORCED_BACK_METHOD,
                 })
                 await policy.agent.memory.add_memory_piece(
                     Thought(
@@ -880,7 +881,7 @@ async def _run_for_persona_and_intent(
                 )
                 action = json.dumps({
                     "action": "back",
-                    "description": "Ten element nie działał mimo kilku prób — wracam i wybieram inną drogę.",
+                    "description": FORCED_BACK_ELEMENT,
                 })
 
             # Revisit guard: catches A-B-A-B product loops the consecutive

@@ -83,8 +83,13 @@ def redact_internals(text: str) -> str:
 # a recommended "naprawa struktury warstw (z-index)" were echoes of Playwright's
 # "<div> intercepts pointer events" and a retried click, and reached the client
 # as site facts because no word on the harness list appeared in them.
+#
+# Whole words: "nie działa" also sits inside "Usprawnie|nie działa|nia filtrów" and
+# "jedy|nie działa|jące strzałki", and a bare "uniemożliwia" opens "Brak informacji
+# o racie uniemożliwia porównanie ofert" — all ordinary remarks about content.
 _INTERACTION_TROUBLE = re.compile(
-    r"blokując|zablokow|uniemożliw|nie\s+działa|niedziała|nie\s+reagow|zapętl|zacina|zaciął|"
+    r"blokując|zablokow|uniemożliw\w*\s+(?:\w+\s+){0,2}(?:klik|przycisk|przejśc|przejść|nawigac)|"
+    r"(?<!\w)nie\s+działa|(?<!\w)niedziała|(?<!\w)nie\s+reagow|zapętl|zacina|zaciął|"
     r"błęd\w*\s+skrypt|błęd\w*\s+warstw|z-index|\bdiv|warstw\w*\s+(?:interfejs|strony)|"
     r"nakładając\w*\s+się|nie\s+dało\s+się\s+klikn",
     re.I)

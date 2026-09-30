@@ -33,6 +33,8 @@ from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
 
+from .textutil import decimal_text, pl_plural
+
 START = 5.0
 FLOOR = 1.0
 
@@ -376,25 +378,26 @@ def rationale_text(result: dict) -> str:
     """
     items = sorted((d for d in result.get("deductions") or [] if d.get("amount")),
                    key=lambda d: -abs(d["amount"]))
-    parts = [f"{d['label']} −{d['amount']:.2f}" if d["amount"] >= 0
-             else f"{d['label']} +{abs(d['amount']):.2f}" for d in items[:4]]
+    parts = [f"{d['label']} −{decimal_text(d['amount'], 2)}" if d["amount"] >= 0
+             else f"{d['label']} +{decimal_text(abs(d['amount']), 2)}" for d in items[:4]]
     more = len(items) - len(parts)
-    text = (f"Ocena {result['score']:.1f}/5: od {result['start']:.1f} odjęto "
-            f"{result['total_deduction']:.2f} pkt")
+    text = (f"Ocena {decimal_text(result['score'], 1)}/5: od {decimal_text(result['start'], 1)} odjęto "
+            f"{decimal_text(result['total_deduction'], 2)} pkt")
     if parts:
-        text += " — " + "; ".join(parts) + (f" i {more} mniejsze pozycje" if more > 0 else "")
+        rest = f" i {more} {pl_plural(more, 'mniejsza pozycja', 'mniejsze pozycje', 'mniejszych pozycji')}"
+        text += " — " + "; ".join(parts) + (rest if more > 0 else "")
     return text + ". Pełne rozbicie w sekcji „Jak obliczono ocenę”."
 
 
 def breakdown_text(result: dict) -> str:
     """The breakdown in plain text, for the aggregate prompt to explain."""
-    lines = [f"Punkt wyjścia: {result['start']:.1f}"]
+    lines = [f"Punkt wyjścia: {decimal_text(result['start'], 1)}"]
     for d in result["deductions"]:
         sign = "−" if d["amount"] >= 0 else "+"
-        lines.append(f"  {sign}{abs(d['amount']):.2f}  {d['label']} — {d['basis']}")
-    lines.append(f"Suma odliczeń: {result['total_deduction']:.2f}")
-    lines.append(f"Wynik: {result['start']:.1f} − {result['total_deduction']:.2f} = "
-                 f"{result['raw']:.2f} → {result['score']:.1f}"
+        lines.append(f"  {sign}{decimal_text(abs(d['amount']), 2)}  {d['label']} — {d['basis']}")
+    lines.append(f"Suma odliczeń: {decimal_text(result['total_deduction'], 2)}")
+    lines.append(f"Wynik: {decimal_text(result['start'], 1)} − {decimal_text(result['total_deduction'], 2)} = "
+                 f"{decimal_text(result['raw'], 2)} → {decimal_text(result['score'], 1)}"
                  + (" (minimum 1.0)" if result["floored"] else ""))
     for nc in result["not_counted"]:
         lines.append(f"Nie wliczono: {nc['label']} ({nc['reason']})")

@@ -29,6 +29,26 @@ def pl_plural(n: int, one: str, few: str, many: str) -> str:
     return many
 
 
+def decimal_text(value, digits: int = 1) -> str:
+    """A number as the report prints it: fixed decimals, Polish comma.
+
+    The score rationale printed "Ocena 3.0/5" and "−0.50" under a report whose
+    averages read "3,07" and whose percentages read "22,0".
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "—" if value in (None, "") else str(value)
+    return f"{value:.{digits}f}".replace(".", ",")
+
+
+def sessions_in(k) -> str:
+    """"w 1 sesji" / "w 2 sesjach" — the locative agrees with the count."""
+    try:
+        k = int(k)
+    except (TypeError, ValueError):
+        return "w sesjach"
+    return f"w {k} sesji" if k == 1 else f"w {k} sesjach"
+
+
 def view_key(url) -> str:
     """Identity of a page for counting distinct pages: host, path, and a
     single-page app's own route (#/summary), but not the query string.
@@ -40,7 +60,11 @@ def view_key(url) -> str:
     raw = str(url or "").strip()
     if not raw:
         return ""
-    parts = urlsplit(raw)
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        # "https://[domena]/x": a model-written placeholder, not an address.
+        return raw.split("#")[0].split("?")[0].lstrip("/") or raw
     route = parts.fragment if parts.fragment.startswith("/") else ""
     key = f"{parts.netloc}{parts.path}".rstrip("/")
     return f"{key}#{route}" if route else key

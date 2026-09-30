@@ -37,7 +37,7 @@ def test_a_confirmed_one_stays():
 
 def test_the_report_names_what_it_left_out():
     html = generate_html_report(_agg([dict(H1)]))
-    assert "Pominięto też 1 problem(y)" in html and "H1: Widoczność statusu systemu" in html
+    assert "Pominięto też 1 problem z podsumowania, dla którego" in html and "H1: Widoczność statusu systemu" in html
 
 
 def test_an_accessibility_issue_with_an_invented_id_finds_its_evidence():

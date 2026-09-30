@@ -17,7 +17,7 @@ def test_the_rationale_is_written_from_the_breakdown():
            "statistics": {"score_breakdown": bd, "heuristic": {}}}
     text = resolve_narrative(agg)["score_rationale"]
     assert text == rationale_text(bd)
-    assert text.startswith("Ocena 3.1/5: od 5.0 odjęto 1.94 pkt")
+    assert text.startswith("Ocena 3,1/5: od 5,0 odjęto 1,94 pkt")
     assert text.index("Interaktywny element") < text.index("Realizacja zadania"), "largest first"
 
 

@@ -105,7 +105,7 @@ async def test_screen_reader_only_text_is_not_page_text_for_the_persona():
     res = await _parse(SR_ONLY)
     assert "Mandatory Field" not in res["html"]
     assert "cena brutto" not in res["html"]
-    assert ">Model" in res["html"].replace("> ", ">") or "Model" in res["html"]
+    assert ">Model" in res["html"].replace("> ", ">"), "the visible label text stays"
     assert "Cena od 89 900" in res["html"], "visible text stays"
 
 
@@ -153,3 +153,39 @@ async def test_a_labels_screen_reader_only_text_does_not_reach_the_id():
 async def test_a_control_with_no_label_at_all_keeps_its_tag_name():
     ids = (await _parse(LABELLED))["clickable_elements"]
     assert "input" in ids, ids
+
+
+# What is hidden from everyone is not what a person reads in a label: a form's
+# error message shown only on failure, a tooltip, a required-field star. The first
+# version of the label naming took the label's whole text and gave
+# email_niepoprawny_ad; a non-Latin label (名前) left an id that was empty after
+# slugging and became "item" instead of the tag name.
+HIDDEN_IN_LABEL = """<html><head><style>.d-none{display:none}</style></head><body>
+<label for="a">Imię<style>.x{color:red}</style><script>var leak=1</script></label><input id="a" type="text">
+<label for="b">E-mail <span style="display:none">niepoprawny adres</span></label><input id="b" type="text">
+<label for="c">Miasto <span hidden>wpisz miasto</span></label><input id="c" type="text">
+<label for="d">Numer <span aria-hidden="true">tooltip pomoc</span></label><input id="d" type="text">
+<label for="e">Kod <span style="visibility:hidden">ukryty</span></label><input id="e" type="text">
+<label for="f">Telefon <span class="d-none">opcjonalnie</span></label><input id="f" type="text">
+<label for="g">Widoczne <span>pole</span></label><input id="g" type="text">
+</body></html>"""
+
+
+async def test_text_hidden_from_everyone_does_not_reach_a_control_id():
+    ids = (await _parse(HIDDEN_IN_LABEL))["clickable_elements"]
+    assert ids == ["imi", "e_mail", "miasto", "numer", "kod", "telefon", "widoczne_pole"], ids
+
+
+async def test_a_label_whose_slug_is_empty_keeps_the_tag_name():
+    html = """<html><body>
+<label for="g">名前</label><input id="g" type="text">
+<label for="h">*</label><input id="h" type="text"></body></html>"""
+    ids = (await _parse(html))["clickable_elements"]
+    assert ids == ["input", "input1"], ids
+    assert not any(i.startswith("item") for i in ids)
+
+
+async def test_a_controls_own_text_wins_over_its_label():
+    html = """<html><body><label for="b">Etykieta</label><button id="b">Własny tekst</button></body></html>"""
+    ids = (await _parse(html))["clickable_elements"]
+    assert len(ids) == 1 and ids[0].endswith("tekst") and "etykieta" not in ids[0], ids

@@ -1,8 +1,8 @@
 """The report counts issues in one unit: confirmed groups, as the cards do.
 
 severity_counts counts findings, so H1 filed as serious by two personas was
-"Serious: 2" in the narrator's prompt — which calls those numbers deduplicated
-above one serious card.
+"Serious: 2" in the narrator's prompt, which calls those numbers deduplicated —
+above a report that showed one serious card.
 """
 from simulated_web_agent.main.reporter import _group_counts
 

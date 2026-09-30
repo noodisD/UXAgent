@@ -457,12 +457,16 @@ const mean = (vals: number[]) => vals.length ? vals.reduce((a, b) => a + b, 0) /
 // Why a finding is held back from the confirmed report (drives the chip). One
 // of the three gates: off-site page, claim unsupported by the trace, or a
 // harness interaction failure. null = a confirmed finding.
-// The chip's tooltip: what the kind of hold means, then the signal that
-// actually held this finding (the backend's Polish sentence, when it sent one).
+// The chip's tooltip: what the kind of hold means, then — for a tool-suspect
+// hold, where it adds information — the signal that actually held this finding.
+// That sentence is Polish (the report's language), so the English interface
+// keeps the generic hint alone; the other kinds' hints already say the same.
 function holdTitle(h: any): string {
   const kind = exclusionOf(h)
   if (!kind) return ''
-  return [t('excl.' + kind + '.hint'), h?.holdReason].filter(Boolean).join(' — ')
+  const hint = t('excl.' + kind + '.hint')
+  return kind === 'harness' && locale.value === 'pl' && h?.holdReason
+    ? `${hint} — ${h.holdReason}` : hint
 }
 function exclusionOf(h: any): 'offSite' | 'unsupported' | 'harness' | 'progress' | null {
   if (h?.offSite) return 'offSite'

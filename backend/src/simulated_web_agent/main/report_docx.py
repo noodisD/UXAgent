@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from .textutil import clip_words, decimal_text, pl_plural, sessions_in
+
 log = logging.getLogger(__name__)
 
 # Havas red, as used by the HTML report.
@@ -169,8 +171,8 @@ def _add_measurement_sections(doc, agg: dict) -> None:
         if not broken:
             doc.add_paragraph("Nie wykryto uszkodzonych linków.")
         else:
-            doc.add_paragraph(f"{len(broken)} uszkodzony(ch) link(ów) w "
-                              f"{links.get('sessions_with_broken_links', 0)} sesjach:")
+            doc.add_paragraph(f"{len(broken)} {pl_plural(len(broken), 'uszkodzony link', 'uszkodzone linki', 'uszkodzonych linków')} "
+                              f"{sessions_in(links.get('sessions_with_broken_links', 0))}:")
             for u in broken[:10]:
                 doc.add_paragraph(str(u), style="List Bullet")
             if len(broken) > 10:
@@ -250,7 +252,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     score = narr.get("overall_ux_score")
     _add_kv_table(doc, [
         ("Uczestnicy", stats.get("participant_count", "—")),
-        ("Ocena ogólna", f"{score}/5" if score is not None else "—"),
+        ("Ocena ogólna", f"{decimal_text(score, 1) if isinstance(score, (int, float)) else score}/5"
+                         if score is not None else "—"),
         # The rendered issue lists, as in the HTML: counting only verified
         # Nielsen findings disagreed with the cards that follow.
         ("Problemy krytyczne", len(narr.get("critical_issues") or [])),
@@ -329,17 +332,17 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             cells = table.add_row().cells
             cells[0].text, cells[1].text, cells[2].text = a, b, c
 
-        _row("Punkt wyjścia", "", f"{breakdown['start']:.1f}")
+        _row("Punkt wyjścia", "", f"{decimal_text(breakdown['start'], 1)}")
         for d in breakdown.get("deductions") or []:
             amt = d.get("amount", 0)
             _row(str(d.get("label", "")), str(d.get("basis", "")),
-                 f"{'−' if amt >= 0 else '+'}{abs(amt):.2f}")
-        _row("Suma odliczeń", "", f"−{breakdown['total_deduction']:.2f}")
+                 f"{'−' if amt >= 0 else '+'}{decimal_text(abs(amt), 2)}")
+        _row("Suma odliczeń", "", f"−{decimal_text(breakdown['total_deduction'], 2)}")
         _row("Ocena końcowa",
-             f"{breakdown['start']:.1f} − {breakdown['total_deduction']:.2f} = "
-             f"{breakdown['raw']:.2f}, zaokrąglone"
+             f"{decimal_text(breakdown['start'], 1)} − {decimal_text(breakdown['total_deduction'], 2)} = "
+             f"{decimal_text(breakdown['raw'], 2)}, zaokrąglone"
              + (" (minimum 1,0)" if breakdown.get("floored") else ""),
-             f"{breakdown['score']:.1f}")
+             f"{decimal_text(breakdown['score'], 1)}")
         for n in breakdown.get("not_counted") or []:
             _add_caption(doc, f"Nie wliczono: {n.get('label')} — {n.get('reason')}")
 
@@ -468,7 +471,7 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             doc.add_heading(title, level=2)
             _add_caption(doc, f"zgłoszone jako {it.get('severity_claimed', '')} · "
                               f"{it.get('persona_name', '')}, krok {it.get('step')}")
-            doc.add_paragraph(f"„{str(it.get('evidence', ''))[:300]}”")
+            doc.add_paragraph(f"„{clip_words(it.get('evidence', ''), 300)}”")
             p = doc.add_paragraph()
             p.add_run("Dlaczego wstrzymane: ").bold = True
             p.add_run(str(it.get("reason", "")))

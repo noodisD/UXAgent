@@ -30,7 +30,7 @@ from .severity import (
 )
 from .a11y_checks import a11y_topic, measure_names, merge_pages
 from .evidence import page_quote, pages_contain, rendering_artifact
-from .textutil import clip_words, view_key
+from .textutil import clip_words, decimal_text, pl_plural, view_key
 from .scoring import (
     RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
     compute_ux_score, rationale_text,
@@ -93,10 +93,10 @@ def _harness_reason(cause: dict | None) -> str:
         return (f"{at} na ekranie był baner zgody, którego narzędzie nie zamknęło — "
                 "mógł zasłaniać stronę")
     if code == "bot_wall":
-        return f"{at} strona była ekranem weryfikacji antybotowej, a nie serwisem"
+        return f"{at} strona wyglądała na ekran weryfikacji antybotowej, a nie na serwis"
     if code == "perception_gap":
-        return (f"{at} opis strony był niemal pusty mimo dużej strony — narzędzie nie "
-                "odczytało jej treści")
+        return (f"{at} opis strony był niemal pusty, choć zapisana strona była duża — "
+                "narzędzie mogło nie odczytać jej treści")
     if code == "fallback":
         return (f"{at} narzędzie wycofało uczestnika po powtarzających się nieudanych próbach "
                 "tej samej akcji — nie wiadomo, czy element nie działa, czy narzędzie go nie trafia")
@@ -165,10 +165,12 @@ def _named_in_accessibility_note(names: list) -> str:
     cited = " i ".join(f"„{n}”" for n in names[:2])
     if len(names) == 1:
         head = (f"Nazwa {cited} jest nazwą dostępnościową kontrolki (zwykle niewidoczną dla "
-                "widzących) — wykrywana automatycznie jako nazwa nieopisowa w sekcji Dostępność.")
+                "widzących); skan dostępności zgłasza takie nazwy w sekcji Dostępność jako "
+                "nieopisowe, o ile je wykrył.")
     else:
         head = (f"Nazwy {cited} są nazwami dostępnościowymi kontrolek (zwykle niewidocznymi dla "
-                "widzących) — wykrywane automatycznie jako nazwy nieopisowe w sekcji Dostępność.")
+                "widzących); skan dostępności zgłasza takie nazwy w sekcji Dostępność jako "
+                "nieopisowe, o ile je wykrył.")
     return f"{head} Jeśli wniosek dotyczy tekstu widocznego na stronie, sprawdź go ręcznie."
 
 
@@ -205,7 +207,7 @@ def _human_check_base(finding: dict) -> str:
                     "występuje także po zamknięciu banera zgody.")
         if code == "bot_wall":
             return ("Otwórz stronę w zwykłej przeglądarce — ekran weryfikacji antybotowej "
-                    "dotyczy tylko zautomatyzowanych odwiedzin, nie zwykłych użytkowników.")
+                    "zwykle dotyczy tylko zautomatyzowanych odwiedzin.")
         if code == "perception_gap":
             return ("Otwórz stronę i sprawdź, czy opisana treść jest na niej widoczna — "
                     "narzędzie mogło jej nie odczytać.")
@@ -1385,15 +1387,21 @@ def _format_root_causes(root_causes: list) -> str:
     """Tell the narrator explicitly which heuristic_summary rows are the SAME
     underlying defect (root_cause.py), so it reports one confirmed cross-context
     issue instead of N independent severe failures for one bug."""
+    # Only a defect filed under several heuristics is a duplicate to merge; the
+    # financing rule also tags a lone finding, and "JEDNA przyczyna, zgłoszona
+    # pod 1 różnymi heurystykami … przez 1 uczestników" told the narrator nothing.
+    root_causes = [rc for rc in root_causes or [] if len(rc["heuristics_involved"]) >= 2]
     if not root_causes:
         return "(brak wykrytych powiązań między różnymi heurystykami)"
     lines = []
     for rc in root_causes:
         heur = ", ".join(f"H{h}" for h in rc["heuristics_involved"])
+        k = int(rc.get("personas_affected") or 0)
+        who = (f"potwierdzona niezależnie przez {k} uczestników" if k >= 2
+               else f"zgłoszona przez {k} {pl_plural(k, 'uczestnika', 'uczestników', 'uczestników')}")
         lines.append(
             f"- „{rc['name']}” — JEDNA przyczyna, zgłoszona pod {len(rc['heuristics_involved'])} "
-            f"różnymi heurystykami ({heur}), potwierdzona niezależnie przez "
-            f"{rc['personas_affected']} uczestników. Najwyższa istotność: {rc['worst_severity']}."
+            f"różnymi heurystykami ({heur}), {who}. Najwyższa istotność: {rc['worst_severity']}."
         )
     return ("Poniższe pozycje w PODSUMOWANIU NARUSZEŃ HEURYSTYK dotyczą TEJ SAMEJ "
             "przyczyny źródłowej mimo różnych numerów heurystyk — traktuj każdą "
@@ -1687,7 +1695,7 @@ async def generate_aggregated_report(
         top_issues=top_issues,
         survey_summary=survey_summary,
         survey_legend=_survey_legend(stats.get("survey")),
-        computed_score=f"{score_result['score']:.1f}",
+        computed_score=decimal_text(score_result["score"], 1),
         score_breakdown=breakdown_text(score_result),
     )
 
@@ -1929,14 +1937,22 @@ def _measured_basis(issue: dict, stats: dict, perf_line: dict | None,
         return ""
     if "link" in text or "odnośnik" in text:
         broken = (m.get("links") or {}).get("broken_urls") or []
-        return (f"test linków: {len(broken)} uszkodzony(ch) — " + ", ".join(broken[:3])) if broken else ""
+        if not broken:
+            return ""
+        many = pl_plural(len(broken), "uszkodzony link", "uszkodzone linki", "uszkodzonych linków")
+        return f"test linków: {len(broken)} {many} — " + ", ".join(broken[:3])
     if any(w in text for w in ("responsyw", "mobiln", "dotyk", "przewijani", "kontrast")):
         devices = [d for d in ((stats.get("viewport") or {}).get("devices") or []) if isinstance(d, dict)]
-        hits = [f"{d.get('viewport')}: {d.get('tap_targets_below_min', 0)} małych celów dotykowych, "
-                f"{d.get('contrast_failures', 0)} błędów kontrastu, "
-                f"{d.get('pages_with_overflow', 0)} stron z przewijaniem poziomym"
-                for d in devices if (d.get("tap_targets_below_min") or d.get("contrast_failures")
-                                     or d.get("pages_with_overflow"))]
+        def _counted(d):
+            taps, contrast, overflow = (int(d.get(k) or 0) for k in (
+                "tap_targets_below_min", "contrast_failures", "pages_with_overflow"))
+            return (f"{d.get('viewport')}: "
+                    f"{taps} {pl_plural(taps, 'mały cel dotykowy', 'małe cele dotykowe', 'małych celów dotykowych')}, "
+                    f"{contrast} {pl_plural(contrast, 'błąd kontrastu', 'błędy kontrastu', 'błędów kontrastu')}, "
+                    f"{overflow} {pl_plural(overflow, 'strona z przewijaniem poziomym', 'strony z przewijaniem poziomym', 'stron z przewijaniem poziomym')}")
+        hits = [_counted(d) for d in devices
+                if (d.get("tap_targets_below_min") or d.get("contrast_failures")
+                    or d.get("pages_with_overflow"))]
         return "skan urządzeń — " + "; ".join(hits) if hits else ""
     return ""
 

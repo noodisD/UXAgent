@@ -18,22 +18,24 @@ import logging
 import re
 
 from .evidence import _QUOTED, _visible_text
+from .loop_phrases import FORCED_BACK_MARKERS
 from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger(__name__)
 
-# The harness's own fallback description, emitted when an element "didn't work
-# after several tries" (experiment.py: "Ten element nie działał mimo kilku prób —
-# wracam i wybieram inną drogę."). Its presence at a step is direct proof the
-# interaction failed on the harness side, not the site side.
+# The harness's own fallback descriptions, emitted when it forces the agent back
+# after several failed tries (loop_phrases.py; experiment.py writes them). Their
+# presence at a step is direct proof the interaction failed on the harness side,
+# not the site side.
 #
-# Only that sentence. The markers used to be fragments of it ("nie działał",
-# "wybieram inną", "innej drogi"), so a persona's ordinary "Wersja Smart jest za
-# droga, wybieram inną wersję wyposażenia" marked its step a tool failure and held
-# every finding cited there. Over all 626 recorded actions the old fragments
-# matched 10, every one of them the harness's own sentence, so this changes
-# nothing on recorded data.
-_FALLBACK_MARKERS = ("nie działał mimo kilku prób",)
+# Whole phrases of those sentences, both of them — the loop-breaker says "Ta
+# metoda nie działała…", the circuit breaker "Ten element nie działał…". The
+# markers used to be fragments ("nie działał", "wybieram inną", "innej drogi"),
+# so a persona's ordinary "Wersja Smart jest za droga, wybieram inną wersję
+# wyposażenia" marked its step a tool failure and held every finding cited there.
+# Tightened to one sentence it then stopped recognising the other. Over all 626
+# recorded actions the old fragments matched 10, every one a harness sentence.
+_FALLBACK_MARKERS = FORCED_BACK_MARKERS
 
 # The same (action, target) repeated this many times *consecutively* is a stuck
 # loop: the agent retried back-to-back because nothing changed.

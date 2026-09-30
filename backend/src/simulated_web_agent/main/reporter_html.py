@@ -71,7 +71,9 @@ def avg_text(value) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
-from .textutil import clip_words, display_url, pl_plural  # noqa: E402,F401  (shared with the Word renderer)
+from .textutil import (  # noqa: E402,F401  (shared with the Word renderer)
+    clip_words, decimal_text, display_url, pl_plural, sessions_in,
+)
 
 
 def pct_text(value) -> str:
@@ -94,18 +96,22 @@ def evidence_quote(ex: dict, limit: int = 300) -> tuple[str, str]:
     model, often in English, and is not a quotation from the site.
     """
     page_text = (ex.get("page_quote") or "").strip()
-    text = (page_text or ex.get("observation_quote") or "")[:limit]
+    text = clip_words(page_text or ex.get("observation_quote") or "", limit)
     label = "Tekst ze strony" if page_text else "Opis strony w zapisie sesji (automatyczny)"
     return label, text
 
 
 def held_intro_text(k: int) -> str:
-    """The lead-in to the held-back list, worded so it is right for any count.
+    """The lead-in to the held-back list.
 
-    "{k} wniosków nie trafiło …" was printed for one item and for two. Agreeing
-    the noun, the verb and the pronouns with every count needs four forms per
-    sentence; putting the number after the noun does not need any.
+    "{k} wniosków nie trafiło …" was printed for one item and for two. The count
+    goes after the noun ("Wstrzymano wniosków: 2"), which agrees for any number,
+    and the sentences after it are singular for one item and plural for more.
     """
+    if k == 1:
+        return ("Wstrzymano wniosków: 1. Zapis sesji nie pozwala go potwierdzić, więc nie "
+                "trafił do ocen i liczników — nie znaczy to, że jest fałszywy. Wymaga "
+                "krótkiej weryfikacji przez człowieka, opisanej poniżej.")
     return (f"Wstrzymano wniosków: {k}. Zapis sesji nie pozwala ich potwierdzić, więc nie "
             "trafiły do ocen i liczników — nie znaczy to, że są fałszywe. Każdy wymaga "
             "krótkiej weryfikacji przez człowieka, opisanej poniżej.")
@@ -484,6 +490,8 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
     sc = {"krytyczny": counts["critical"], "poważny": counts["serious"],
           "drobny": counts["minor"]}
     overall = narr.get("overall_ux_score") or fi_avg
+    overall_txt = (decimal_text(overall, 1) if isinstance(overall, (int, float))
+                   and not isinstance(overall, bool) else (overall or "—"))
 
     score_color = _score_color(overall)
     website = _esc(agg.get("website", ""))
@@ -495,7 +503,7 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
   <div class="subtitle">{task}</div>
   <div class="header-meta">
     <div class="meta-item">
-      <span class="val">{overall if overall else "—"}<span style="font-size:18px;font-weight:700;color:rgba(255,255,255,.45);">/5</span></span>
+      <span class="val">{overall_txt}<span style="font-size:18px;font-weight:700;color:rgba(255,255,255,.45);">/5</span></span>
       <span class="lbl">Ocena UX</span>
     </div>
     <div class="meta-item">
@@ -1173,7 +1181,7 @@ def _render_broken_links(links: dict | None) -> str:
         more = f"<li style='color:#6c757d;font-size:12px;'>…i {len(broken_urls) - 10} więcej</li>" if len(broken_urls) > 10 else ""
         status_html = f"""
         <p style="color:#E60000;font-weight:700;margin-bottom:8px;">
-          ✗ {len(broken_urls)} uszkodzony(ch) link(ów) w {sessions_broken} sesjach
+          ✗ {len(broken_urls)} {pl_plural(len(broken_urls), "uszkodzony link", "uszkodzone linki", "uszkodzonych linków")} {sessions_in(sessions_broken)}
         </p>
         <ul style="list-style:none;padding-left:0;">{items}{more}</ul>"""
 
@@ -1452,7 +1460,7 @@ def _render_score_breakdown(stats: dict) -> str:
         return ""
     rows = f"""
         <tr class="sb-start"><td>Punkt wyjścia</td><td></td>
-            <td class="sb-amt">{b['start']:.1f}</td></tr>"""
+            <td class="sb-amt">{decimal_text(b['start'], 1)}</td></tr>"""
     for d in b.get("deductions") or []:
         amt = d.get("amount", 0)
         sign = "−" if amt >= 0 else "+"
@@ -1460,15 +1468,15 @@ def _render_score_breakdown(stats: dict) -> str:
         <tr><td><span class="sb-kind">{_esc(_DEDUCTION_KIND_PL.get(d.get('kind'), ''))}</span>
                 {_esc(d.get('label', ''))}</td>
             <td class="sb-basis">{_esc(d.get('basis', ''))}</td>
-            <td class="sb-amt">{sign}{abs(amt):.2f}</td></tr>"""
+            <td class="sb-amt">{sign}{decimal_text(abs(amt), 2)}</td></tr>"""
     floored = " (ograniczone do minimum 1,0)" if b.get("floored") else ""
     rows += f"""
         <tr class="sb-sum"><td>Suma odliczeń</td><td></td>
-            <td class="sb-amt">−{b['total_deduction']:.2f}</td></tr>
+            <td class="sb-amt">−{decimal_text(b['total_deduction'], 2)}</td></tr>
         <tr class="sb-final"><td>Ocena końcowa</td>
-            <td class="sb-basis">{b['start']:.1f} − {b['total_deduction']:.2f} =
-                {b['raw']:.2f}, zaokrąglone{floored}</td>
-            <td class="sb-amt">{b['score']:.1f}</td></tr>"""
+            <td class="sb-basis">{decimal_text(b['start'], 1)} − {decimal_text(b['total_deduction'], 2)} =
+                {decimal_text(b['raw'], 2)}, zaokrąglone{floored}</td>
+            <td class="sb-amt">{decimal_text(b['score'], 1)}</td></tr>"""
 
     left_out = "".join(
         f"<li><b>{_esc(n.get('label', ''))}</b> — {_esc(n.get('reason', ''))}</li>"
@@ -1500,7 +1508,12 @@ def _unconfirmed_note(narr: dict | None) -> str:
         return ""
     names = "; ".join((f"H{i['heuristic_id']}: " if isinstance(i.get("heuristic_id"), int) else "")
                       + str(i.get("heuristic_name") or "") for i in items)
-    return (f"Pominięto też {len(items)} problem(y) z podsumowania, dla których żadne "
+    if len(items) == 1:
+        return (f"Pominięto też 1 problem z podsumowania, dla którego żadne ustalenie nie "
+                f"zostało potwierdzone — {names}. Jego źródłowe wnioski są na liście "
+                "poniżej albo nie przeszły weryfikacji.")
+    many = pl_plural(len(items), "problem", "problemy", "problemów")
+    return (f"Pominięto też {len(items)} {many} z podsumowania, dla których żadne "
             f"ustalenie nie zostało potwierdzone — {names}. Ich źródłowe wnioski są "
             "na liście poniżej albo nie przeszły weryfikacji.")
 
@@ -1534,7 +1547,7 @@ def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
         <div class="nv-card">
           <div class="nv-head"><b>{_esc(title)}</b>
             <span class="nv-meta">zgłoszone jako {_esc(claimed)} · {_esc(it.get('persona_name', ''))}, krok {it.get('step')}</span></div>
-          <div class="nv-claim">„{_esc(str(it.get('evidence', ''))[:300])}”</div>
+          <div class="nv-claim">„{_esc(clip_words(it.get('evidence', ''), 300))}”</div>
           <div class="nv-why"><b>Dlaczego wstrzymane:</b> {_esc(it.get('reason', ''))}</div>
           {verifier_html}
           <div class="nv-check"><b>Co sprawdzić:</b> {_esc(it.get('check', ''))}</div>
@@ -1681,7 +1694,7 @@ def _render_accessibility_detail(stats: dict) -> str:
             f'<span class="a11y-where">{_esc(display_url(o.get("url") or ""))}</span></div>'
             for o in (f.get("other_instances") or [])[:3])
         bg, fg, border = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
-        where = clip_words(", ".join(display_url(u) for u in (f.get("urls") or [])), 160)
+        where = clip_words(", ".join(dict.fromkeys(display_url(u) for u in (f.get("urls") or []))), 160)
         who = ", ".join(f.get("personas") or [])
         rows += f"""
         <div class="a11y-item" style="border-left-color:{border}">

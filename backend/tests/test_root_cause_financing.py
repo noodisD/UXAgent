@@ -90,3 +90,29 @@ def test_an_absence_that_governs_the_financing_term_matches(text):
     f = {"heuristic_id": 2, "evidence": text, "recommendation": ""}
     assign_root_causes([f])
     assert f["root_cause_id"] == "financing_info_missing"
+
+
+@pytest.mark.parametrize("text", [
+    # seven words between the absence and the term: two different remarks in one sentence
+    "Brak przycisku Wstecz na ekranie wyboru koloru przy kalkulatorze rat, który działa poprawnie.",
+    "Brak kalkulatora spalania paliwa w konfiguratorze.",
+    "Brak symulatora wnętrza 3D.",
+    "Brakuje przycisku Dalej przy kalkulatorze.",
+])
+def test_the_absence_must_govern_the_financing_term_within_three_words(text):
+    f = {"heuristic_id": 4, "evidence": text, "recommendation": ""}
+    assign_root_causes([f])
+    assert "root_cause_id" not in f
+
+
+@pytest.mark.parametrize("text", [
+    "Strona nie pokazuje symulatora leasingu dla firm.",
+    "Brak informacji o racie miesięcznej.",
+    "Brakuje kalkulatora kredytu na karcie modelu.",
+    "Bez informacji o finansowaniu klient nie oceni kosztu.",
+    "Brak opcji leasingu w podsumowaniu.",
+])
+def test_each_financing_alternative_matches_when_the_absence_governs_it(text):
+    f = {"heuristic_id": 7, "evidence": text, "recommendation": ""}
+    assign_root_causes([f])
+    assert f["root_cause_id"] == "financing_info_missing"
