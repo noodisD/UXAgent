@@ -114,22 +114,27 @@ EXPOSE 8080
 # would be invisible to /progress served by the other.
 # --timeout 0 disables the worker kill: reading a large run's trace can take a
 # while, and the audit threads must not be reaped mid-run.
-# Wrapped in xvfb-run so a run with headless unticked has a display to draw on.
-# -a picks a free display number, which matters because a restarted container
-# can find the previous lock file still in place. A headless run is unaffected:
-# it simply never opens the display.
+# gunicorn is started exactly as in the last image that deployed (0faedd1), as
+# the container's main process. The virtual display for headed runs is started
+# BESIDE it, in the background, and nothing waits for it.
 #
-# The wrapper is tried once first, and the server starts without it if it
-# cannot run. A missing virtual display costs only the headed runs; the same
-# failure used to cost the whole service, because xvfb-run was the container's
-# command and the image could not be tested before it reached Cloud Run.
-CMD ARGS="--bind 0.0.0.0:${PORT} --workers 1 --threads 8 --timeout 0 --access-logfile - --error-logfile - simulated_web_agent.main.app:app"; \
-    if timeout 20 xvfb-run -a true >/dev/null 2>&1; then \
-        exec xvfb-run -a --server-args="-screen 0 1440x900x24" .venv/bin/gunicorn $ARGS; \
-    else \
-        echo "xvfb-run is not usable here: starting without a virtual display, headed runs will not work" >&2; \
-        exec .venv/bin/gunicorn $ARGS; \
-    fi
+# From 5d2690f the server was started inside `xvfb-run`, which waits for Xvfb
+# to report ready before it starts its command. Every deploy since then failed
+# the same way: Cloud Run's startup probe never found port 8080 open (revisions
+# ux-agent-00014 and -00015, 2026-09-30). gunicorn opens the port before it
+# loads the app, so a closed port for four minutes means gunicorn never
+# started — the wait in front of it never ended. With Xvfb backgrounded, a
+# display that fails or hangs costs only the headed runs, never the service.
+CMD Xvfb :99 -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & \
+    export DISPLAY=:99; \
+    exec .venv/bin/gunicorn \
+    --bind "0.0.0.0:${PORT}" \
+    --workers 1 \
+    --threads 8 \
+    --timeout 0 \
+    --access-logfile - \
+    --error-logfile - \
+    simulated_web_agent.main.app:app
 
 # ── Deployment notes ─────────────────────────────────────────────────────────
 # Cloud Run:
