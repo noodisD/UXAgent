@@ -30,6 +30,8 @@ from .severity import (
 )
 from .a11y_checks import a11y_topic, measure_names, merge_pages
 from .evidence import page_quote, pages_contain, rendering_artifact
+from .obstacles import repeated_obstacles
+from .recurring import group_recurring_reports
 from .textutil import clip_words, decimal_text, pl_plural, view_key
 from .scoring import (
     RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
@@ -902,6 +904,10 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         worst_severity = max(group, key=severity_rank).get("severity", "drobny")
         verified_group = [f for f in group if f.get("verified")]
         examples = [_example(f) for f in (verified_group or group)[:3]]
+        # The narrator names the examples that bear out each issue it writes
+        # (evidence_ids); without ids it could only be handed all of them.
+        for i, example in enumerate(examples, 1):
+            example["id"] = f"H{h_id}-e{i}"
         heuristic_summary.append({
             "heuristic_id": h_id,
             "heuristic_name": HEURISTIC_NAMES.get(h_id, ""),
@@ -1174,6 +1180,8 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         # What each persona set out to do and how it went. The report's spine:
         # without it every audit reads the same regardless of the objective.
         "objective_reflections": objective_reflections,
+        # Elements that took the agent's clicks in several sessions (obstacles.py).
+        "repeated_obstacles": repeated_obstacles(stores, n),
         "heuristic": {
             "total_findings": len(confirmed_findings),
             "severity_counts": {
@@ -1732,6 +1740,17 @@ async def generate_aggregated_report(
         log.exception("[reporter] survey summaries failed (non-fatal): %s", e)
         survey_summaries = {}
 
+    # Difficulties several participants described on their own (recurring.py). A
+    # model proposes the groups and the code keeps only what each participant's own
+    # text bears out; a failure here costs this section, never the report.
+    try:
+        stats["recurring_reports"] = await group_recurring_reports(
+            stats.get("objective_reflections") or [], stats.get("participant_count") or n,
+            async_chat)
+    except Exception as e:
+        log.exception("[reporter] recurring reports failed (non-fatal): %s", e)
+        stats["recurring_reports"] = []
+
     aggregated = {
         "statistics": stats,
         "narrative": narrative,
@@ -1824,6 +1843,27 @@ async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
     return {qid: str(summaries.get(qid, "")) for qid in order}
 
 
+def _examples_for_issue(issue: dict, examples: list) -> tuple[list, list]:
+    """(examples to show as this issue's proof, examples of the same heuristic left out).
+
+    A heuristic group can hold different defects: in the 2026-10-01 run H7 held "no
+    booking calendar" (one participant) and "no leasing calculator" (another), and
+    the issue text described only the calendar — under a screenshot of the
+    configurator summary. Lexical overlap cannot tell these apart (recorded runs
+    gave an unrelated example the same score as a relevant one), so the narrator,
+    who knows what it wrote, names the ids. An issue without valid ids shows every
+    example, exactly as before; nothing recorded is affected.
+    """
+    ids = issue.get("evidence_ids")
+    if not isinstance(ids, list) or not examples:
+        return examples, []
+    wanted = {str(i).strip() for i in ids if isinstance(i, (str, int)) and str(i).strip()}
+    chosen = [ex for ex in examples if isinstance(ex, dict) and ex.get("id") in wanted]
+    if not chosen:
+        return examples, []
+    return chosen, [ex for ex in examples if isinstance(ex, dict) and ex not in chosen]
+
+
 def _attach_issue_evidence(narrative: dict, stats: dict, measurements: dict | None = None) -> None:
     """Deterministically join per-heuristic evidence examples onto narrative issues.
 
@@ -1860,7 +1900,13 @@ def _attach_issue_evidence(narrative: dict, stats: dict, measurements: dict | No
             h_num = _heuristic_id(issue)
             group = by_h.get(h_num) if h_num else by_h.get(issue.get("heuristic_id"))
             if group:
-                issue["examples"] = group.get("examples", [])
+                shown, others = _examples_for_issue(issue, group.get("examples", []))
+                issue["examples"] = shown
+                # What the group holds that the issue's own text does not describe:
+                # listed as such, never shown as proof of the wrong claim.
+                issue["other_observations"] = [
+                    {"persona_name": ex.get("persona_name", ""), "step": ex.get("step"),
+                     "evidence": ex.get("evidence", "")} for ex in others]
                 issue["verified"] = bool(group.get("verified"))
             elif _is_wcag_issue(issue):
                 # WCAG issues carry heuristic_id null, so the join above could

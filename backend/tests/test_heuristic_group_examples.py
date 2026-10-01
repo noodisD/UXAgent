@@ -5,8 +5,6 @@ By-heuristic rollups report the worst severity of the group and every person who
 filed anything in it. In the 2026-09-27 hyundai run two unrelated H2 findings (an
 untranslated label, a "null kW" price line) shared one row, so each took the
 other's severity and reach; the narrator saw only the row."""
-from pathlib import Path
-
 import tempfile
 from pathlib import Path
 

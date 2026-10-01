@@ -452,12 +452,20 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 label, quote = evidence_quote(ex)
                 if quote:
                     _add_caption(doc, f"{label}: „{quote}”")
+            others = [o for o in (issue.get("other_observations") or []) if isinstance(o, dict)]
+            if others:
+                _add_caption(doc, "Inne obserwacje w tej heurystyce (inna wada niż opisana powyżej):")
+                for o in others:
+                    _add_caption(doc, f"{o.get('persona_name', '')}, krok {o.get('step')} — "
+                                      f"„{clip_words(o.get('evidence', ''), 160)}”")
 
     # ── Held for a human ─────────────────────────────────────────────────
     held_items = (stats.get("heuristic") or {}).get("needs_verification_items") or []
     from .reporter_html import _unconfirmed_note
     unconfirmed = _unconfirmed_note(narr)
-    if held_items or unconfirmed:
+    obstacles = [o for o in (stats.get("repeated_obstacles") or []) if isinstance(o, dict)]
+    recurring = [t for t in (stats.get("recurring_reports") or []) if isinstance(t, dict)]
+    if held_items or unconfirmed or obstacles or recurring:
         doc.add_heading("Do weryfikacji przez człowieka", level=1)
         if held_items:
             from .reporter_html import held_intro_text
@@ -484,6 +492,18 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             p.add_run("Co sprawdzić: ").bold = True
             p.add_run(str(it.get("check", "")))
             _add_picture(doc, run_dir, it.get("screenshot"), f"krok {it.get('step')}")
+        if recurring:
+            from .reporter_html import RECURRING_INTRO, theme_text
+            doc.add_heading("Opisywane przez wielu uczestników", level=2)
+            doc.add_paragraph(RECURRING_INTRO)
+            for t in recurring:
+                doc.add_paragraph(theme_text(t), style="List Bullet")
+        if obstacles:
+            from .reporter_html import OBSTACLES_INTRO, obstacle_text
+            doc.add_heading("Powtarzające się przeszkody w klikaniu", level=2)
+            doc.add_paragraph(OBSTACLES_INTRO)
+            for o in obstacles:
+                doc.add_paragraph(obstacle_text(o), style="List Bullet")
 
     # ── Recommendations ──────────────────────────────────────────────────
     recs = narr.get("priority_recommendations") or []

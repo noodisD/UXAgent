@@ -71,6 +71,8 @@ def avg_text(value) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
+from .obstacles import OBSTACLES_INTRO, obstacle_text  # noqa: E402,F401
+from .recurring import INTRO as RECURRING_INTRO, theme_text  # noqa: E402,F401
 from .textutil import (  # noqa: E402,F401  (shared with the Word renderer)
     clip_words, decimal_text, display_url, pl_plural, sessions_in,
 )
@@ -275,6 +277,8 @@ body {
 .obj-note { font-size: 12.5px; color: #5a5f66; background: #f6f7f9; border-left: 3px solid #c9ced6; border-radius: 4px; padding: 8px 12px; margin: 0 0 14px; }
 .obj-caveat { font-size: 12px; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; padding: 6px 10px; margin: 6px 0 2px; }
 .unverified-badge { font-size: 11px; font-weight: 700; color: #8a6d00; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 5px; padding: 2px 8px; white-space: nowrap; }
+.other-obs { font-size: 12px; color: #6c757d; margin-top: 10px; }
+.other-obs ul { margin: 4px 0 0 18px; padding: 0; }
 .evidence { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; background: rgba(255,255,255,.6); border-radius: 6px; padding: 10px; }
 .ev-thumb { width: 140px; height: auto; border: 1px solid #dee2e6; border-radius: 4px; display: block; }
 .ev-meta { flex: 1; min-width: 0; }
@@ -710,6 +714,14 @@ def _render_issues_group(title: str, issues: list) -> str:
                 {f'<div class="ev-quote"><span class="ev-quote-l">{quote_label}:</span> „{quote}”</div>' if quote else ''}
               </div>
             </div>"""
+        others = [o for o in (issue.get("other_observations") or []) if isinstance(o, dict)]
+        if others:
+            lines = "".join(
+                f'<li>{_esc(o.get("persona_name", ""))}, krok {o.get("step")} — '
+                f'„{_esc(clip_words(o.get("evidence", ""), 160))}”</li>' for o in others)
+            evidence_html += (
+                '<div class="other-obs"><b>Inne obserwacje w tej heurystyce</b> — dotyczą innej '
+                f'wady niż opisana powyżej, więc bez zrzutu ekranu:<ul>{lines}</ul></div>')
         cards += f"""
         <div class="issue-card" style="background:{bg};border-left-color:{border};">
           <div class="issue-header">
@@ -1529,7 +1541,9 @@ def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
     """
     items = (stats.get("heuristic") or {}).get("needs_verification_items") or []
     note = _unconfirmed_note(narr)
-    if not items and not note:
+    obstacles = [o for o in (stats.get("repeated_obstacles") or []) if isinstance(o, dict)]
+    recurring = [t for t in (stats.get("recurring_reports") or []) if isinstance(t, dict)]
+    if not items and not note and not obstacles and not recurring:
         return ""
     cards = ""
     for it in items:
@@ -1558,7 +1572,16 @@ def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
         intro = ""
     note_html = f'<p class="sb-rules">{_esc(note)}</p>' if note else ""
     intro_html = f'<p class="sb-rules">{_esc(intro)}</p>' if intro else ""
-    return _section("Do weryfikacji przez człowieka", f'{intro_html}{note_html}{cards}')
+    extra = ""
+    if recurring:
+        rows = "".join(f"<li>{_esc(theme_text(t))}</li>" for t in recurring)
+        extra += ('<div class="nv-sub" style="font-weight:700;margin-top:16px;">Opisywane przez wielu '
+                  f'uczestników</div><p class="sb-rules">{_esc(RECURRING_INTRO)}</p><ul>{rows}</ul>')
+    if obstacles:
+        rows = "".join(f"<li>{_esc(obstacle_text(o))}</li>" for o in obstacles)
+        extra += ('<div class="nv-sub" style="font-weight:700;margin-top:16px;">Powtarzające się '
+                  f'przeszkody w klikaniu</div><p class="sb-rules">{_esc(OBSTACLES_INTRO)}</p><ul>{rows}</ul>')
+    return _section("Do weryfikacji przez człowieka", f'{intro_html}{note_html}{cards}{extra}')
 
 
 def _render_heuristic_legend(stats: dict) -> str:

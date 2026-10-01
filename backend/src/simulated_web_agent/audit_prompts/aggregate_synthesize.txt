@@ -44,6 +44,13 @@ heurystyki, ale w opisie wymień je osobno i podaj wagę oraz zasięg każdej z 
 wszystkich uczestników grupy. Nie twórz dwóch problemów z tym samym `heuristic_id`: dowody są
 dołączane do problemu według heurystyki, więc oba dostałyby te same.
 
+WAŻNE (dowody): każdy przykład w `heuristic_summary` ma `id` (np. H7-e2). W polu `evidence_ids`
+każdego problemu wpisz id przykładów, które ilustrują DOKŁADNIE wadę opisaną w jego `impact` — nie
+więcej niż 3. Jeśli opisujesz kilka wad tej samej heurystyki, wpisz id przykładów każdej z nich.
+Nie wpisuj przykładu opisującego INNĄ wadę: raport pokazuje zrzut ekranu pod problemem jako jego
+dowód, więc zrzut innej wady byłby fałszywym dowodem. Dla problemów dostępności (WCAG),
+wydajności i innych bez przykładów w `heuristic_summary` zostaw pole puste.
+
 CROSS-HEURISTIC DEDUPLIKACJA (root_cause.py — deterministyczna, nie Twoja ocena):
 {root_cause_summary}
 critical_count/serious_count/minor_count poniżej JUŻ uwzględniają tę deduplikację —
@@ -150,7 +157,8 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
       "heuristic_name": "Widoczność statusu systemu",
       "frequency": "hipoteza syntetyczna: zaobserwowano u 8 z 10 symulowanych person",
       "impact": "Po wysłaniu zapytania w wyszukiwarce uczestnicy nie widzieli żadnego potwierdzenia ani wskaźnika ładowania.",
-      "recommendation": "Dodać widoczny wskaźnik ładowania i komunikat potwierdzający po wysłaniu zapytania."
+      "recommendation": "Dodać widoczny wskaźnik ładowania i komunikat potwierdzający po wysłaniu zapytania.",
+      "evidence_ids": ["H1-e1"]
     }}
   ],
   "serious_issues": [],
