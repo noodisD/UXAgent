@@ -37,7 +37,9 @@ from .scoring import (
 )
 from .attribution import harness_suspect_causes, restates_a_gated_finding
 from .iso_metrics import current_effectiveness, effective_outcome
-from .redaction import clean as _redact, describes_interaction_trouble, mentions_harness_fault
+from .redaction import (
+    clean as _redact, clean_narrative, describes_interaction_trouble, mentions_harness_fault,
+)
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -1714,6 +1716,7 @@ async def generate_aggregated_report(
     # explain it; if it returned something else anyway, the headline must still
     # match the breakdown printed beneath it.
     if isinstance(narrative, dict) and "error" not in narrative:
+        narrative = clean_narrative(narrative)
         narrative["overall_ux_score"] = score_result["score"]
         # The explanation too: the files take it from the breakdown at render
         # time, but the dashboard shows the stored narrative, and the model's
@@ -1763,6 +1766,7 @@ async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
     wrong question. The LLM already replies keyed by id; keep it that way.
     """
     per_question: dict[str, list[str]] = {}
+    numbers: dict[str, list[float]] = {}
     order: list[str] = []
     for r in reports:
         if _is_truncated_session(r):
@@ -1778,15 +1782,27 @@ async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
             per_question[qid].append(
                 f"odpowiedź: {a.get('value', '')} | uzasadnienie: {str(a.get('reason', ''))[:400]}"
             )
+            try:
+                numbers.setdefault(qid, []).append(float(a.get("value")))
+            except (TypeError, ValueError):
+                pass
 
     if not order:
         return []
 
-    payload = {qid: per_question[qid] for qid in order}
+    # The mean goes with the answers: "ocenili pozytywnie" was written under a
+    # question whose answers averaged 3,17 of 5 — the model read the reasons, not
+    # the numbers beside them.
+    payload = {qid: ({"średnia": round(sum(numbers[qid]) / len(numbers[qid]), 2),
+                      "odpowiedzi": per_question[qid]} if numbers.get(qid) else per_question[qid])
+               for qid in order}
     system = (
         "You are a UX researcher. For EACH survey question (keyed by question id), "
         "synthesise WHY the agents answered the way they did, based on their stated "
         "reasoning. 2-4 sentences per question, in Polish. "
+        "Where a mean is given (\"średnia\"), the tone must agree with it: do not call "
+        "answers positive or high when the mean is in the lower half of the scale or near "
+        "its middle (about 3 of 5, about 4 of 7) — say the opinions were mixed. "
         "Describe only why they answered as they did. Do NOT state as fact that buttons, "
         "links or pages malfunctioned (did not respond, looped, blocked clicks, script "
         "errors): participants sometimes describe the automation failing, so report such "
@@ -2017,6 +2033,10 @@ def resolve_narrative(agg: dict) -> dict:
     narr = agg.get("narrative") or {}
     if not narr or "error" in narr or not narr.get("executive_summary"):
         narr = _narrative_from_stats(stats)
+    # Also here, not only when the narrative is written: runs stored before this
+    # was cleaned (and a model that ignores the prompt) still render without the
+    # tool's field names in the client's prose.
+    narr = clean_narrative(narr)
     # Every render path — HTML, PDF, Word, the LLM-failure fallback — shows the
     # computed score when there is one, so the headline can never disagree with
     # the breakdown printed under it. Runs made before scoring.py have no

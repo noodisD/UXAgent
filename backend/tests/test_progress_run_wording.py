@@ -65,3 +65,76 @@ def test_a_step_that_also_failed_keeps_the_tool_failure_wording(tmp_path):
     f = _flag(s, step=1)
     assert excluded_from_report(f) and not f["repeated_with_progress"]
     assert "narzędzie zgłosiło błąd wykonania akcji" in _gate_reason(f)
+
+
+# --- a fact the page shows is not held for a click pattern near it ----------------------
+#
+# Joanna's "silnik … 'null kW (null KM)'" was visible in the step's own screenshot
+# and was held as "needs a human" only because "Następny krok" had been clicked three
+# times in a row nearby (each click advanced the wizard). In the run before, the same
+# defect found by a persona whose clicks were not repeated counted as confirmed.
+
+def _claim(store, evidence, step=1, recommendation="Naprawić."):
+    f = {"heuristic_id": 2, "severity": "poważny", "step": step, "evidence": evidence,
+         "recommendation": recommendation}
+    return attribution.flag_harness_suspects(store, [f])[0]
+
+
+PAGES = ["Silnik A", "Silnik: null kW (null KM)", "Silnik C", "Silnik D"]
+
+
+def test_a_visible_fact_quoted_from_the_step_is_confirmed_not_held(tmp_path):
+    f = _claim(_store(tmp_path, PAGES),
+               "Parametry silnika wyświetlają się jako 'null kW (null KM)' — błąd pobierania danych.")
+    assert not excluded_from_report(f)
+    assert f["harness_suspect"] is False and f["requires_human_check"] is False
+    assert f["repeated_with_progress"] is None and f["harness_cause"] is None
+    assert f["page_fact_quotes"] == ["null kW (null KM)"]
+
+
+def test_the_same_quote_on_another_step_stays_held(tmp_path):
+    f = _claim(_store(tmp_path, PAGES),
+               "Parametry silnika wyświetlają się jako 'null kW (null KM)'.", step=2)
+    assert excluded_from_report(f) and f["page_fact_quotes"] is None
+
+
+def test_a_claim_about_what_a_click_did_stays_held(tmp_path):
+    pages = ["Slide 1 of 7 Mirage Green", "Slide 2 of 7 Mirage Green", "Slide 3 of 7", "Slide 4 of 7"]
+    f = _claim(_store(tmp_path, pages),
+               "Po kliknięciu wskaźnik 'Slide 2 of 7' się zmienił, ale nazwa 'Mirage Green' nie.")
+    assert excluded_from_report(f) and f["page_fact_quotes"] is None
+
+
+def test_a_claim_naming_the_repeated_control_stays_held(tmp_path):
+    f = _claim(_store(tmp_path, PAGES), "Przycisk 'Next' prowadzi na stronę 'Silnik: null kW'.")
+    assert excluded_from_report(f) and f["page_fact_quotes"] is None
+
+
+def test_a_name_that_is_only_an_attribute_is_not_a_visible_fact(tmp_path):
+    s = TraceStore(tmp_path)
+    for i, body in enumerate(PAGES):
+        extra = '<span aria-label="Pasek zadań"></span>' if i == 1 else ""
+        s.write_simp_html(i, f'<div>{body}{extra}<button parser-semantic-id="next"><span>Next</span></button></div>')
+    s.write_action_trace([json.dumps({"action": "click", "target": "next"})] * 3)
+    for _ in PAGES:
+        s.append_observation({"tabs": [{"url": "https://x.pl/#/e"}], "error": None})
+    f = _claim(s, "Przycisk ma etykietę 'Pasek zadań', co brzmi nienaturalnie.")
+    assert excluded_from_report(f) and f["page_fact_quotes"] is None
+
+
+def test_a_stuck_run_is_not_released_by_a_quote(tmp_path):
+    """Release is for runs that changed the page; a run that did nothing stays held."""
+    f = _claim(_store(tmp_path, ["Silnik: null kW (null KM)"] * 4),
+               "Parametry silnika wyświetlają się jako 'null kW (null KM)'.")
+    assert excluded_from_report(f) and f["page_fact_quotes"] is None
+
+
+def test_re_flagging_clears_the_release(tmp_path):
+    """The stamp is idempotent: a finding re-flagged after its evidence changed is held again."""
+    s = _store(tmp_path, PAGES)
+    f = _claim(s, "Parametry silnika wyświetlają się jako 'null kW (null KM)'.")
+    assert f["page_fact_quotes"]
+    f["evidence"] = "Parametry silnika wyświetlają się jako 'brak danych o mocy'."
+    attribution.flag_harness_suspects(s, [f])
+    assert f["page_fact_quotes"] is None and excluded_from_report(f)
+

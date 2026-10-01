@@ -94,6 +94,8 @@ strony. Dlatego:
 - NIE twórz problemu o randze `critical_issues` ani `serious_issues` wyłącznie na podstawie
   ankiety lub refleksji. Każdy problem w tych dwóch kategoriach musi mieć pokrycie w
   `heuristic_summary` / `top_issues`.
+- Nie cytuj nazw pól danych ani kluczy z powyższych zestawień (np. mobile_overflow,
+  tap_targets_below_min) — opisuj je zwykłymi słowami.
 - Refleksja oznaczona `self_reported_only: true` może opisywać awarię narzędzia, a nie wadę
   serwisu (niepotwierdzone) — możesz ją najwyżej wspomnieć jako hipotezę do weryfikacji z
   prawdziwymi użytkownikami.

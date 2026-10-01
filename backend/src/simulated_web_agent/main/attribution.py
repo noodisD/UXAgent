@@ -320,6 +320,55 @@ def _step_text(store: TraceStore, step: int) -> str | None:
         return None
 
 
+# A claim about what an action DID — "after clicking, the name did not change",
+# "the button resets the choice". Those depend on the click, so the repeated clicks
+# around the step bear on them and they stay held. A claim about what the page
+# SHOWS ("the engine card reads 'null kW (null KM)'") does not.
+_ACTION_CLAIM = re.compile(
+    r"klikn|naciśn|wciśn|po\s+(?:wybraniu|zmianie|przej\w+|powrocie|wyborze)|zaktualizowa|"
+    r"zmieni(?:ł|ła|ło|ły|ć)\b|przeni(?:ós|es)|cofa|resetu|wraca|nieaktywn|zablokowa|"
+    r"nie\s+(?:reaguj|działa|zmieni|aktualizu)",
+    re.I)
+
+
+def _finding_quotes(finding: dict) -> list[str]:
+    """The page text a finding quotes in its evidence, cleaned for comparison."""
+    text = " ".join(str(finding.get(k) or "") for k in ("evidence", "description", "issue"))
+    out = []
+    for q in _QUOTED.findall(text):
+        q = _TRAILING_ELLIPSIS_RE.sub("", q.strip()).strip(" .,:;")
+        # A URL or path is not page text; the site shows it in the address bar.
+        if len(q) >= 4 and not q.startswith(("/", "http", "www.")) and q not in out:
+            out.append(q)
+    return out
+
+
+def quotes_visible_at_step(store: TraceStore, finding: dict) -> list[str]:
+    """The finding's quotes, when every one is VISIBLE text of the page at its own step.
+
+    Visible text, not an attribute: "Pasek zadań" is on the page as an aria-label a
+    sighted visitor never sees, and a finding calling it a visible label is not
+    confirmed by it being there. [] when the finding quotes nothing, cites no step,
+    or any quote is missing from the page.
+    """
+    quotes = _finding_quotes(finding)
+    try:
+        step = int(finding.get("step"))
+    except (TypeError, ValueError):
+        return []
+    if not quotes:
+        return []
+    texts = [_step_text(store, step)]
+    try:
+        raw = store.read_raw_html(step)
+    except Exception:
+        raw = None
+    if raw:
+        texts.append(_visible_text(raw))
+    page = _squeeze(_html.unescape(" ".join(t for t in texts if t)))
+    return quotes if page and all(_squeeze(q) in page for q in quotes) else []
+
+
 def _page_changed_throughout(store: TraceStore, start: int, end: int) -> bool:
     """Did the page's visible text change after every action of the run?"""
     texts = [_step_text(store, k) for k in range(start, end + 1)]
@@ -792,6 +841,7 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         f["unresponsive_control"] = control
         # And which quoted words to look for on the page.
         f["quoted_not_on_page"] = misquoted
+        f["page_fact_quotes"] = None
         f["harness_suspect"] = suspected
         text_low = f"{f.get('evidence', '')} {f.get('recommendation', '')}".lower()
         f["named_in_accessibility"] = [
@@ -812,6 +862,23 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
                 text = f"{f.get('evidence', '')} {f.get('recommendation', '')}"
                 f["repeated_with_progress"] = next(
                     (t for t in set(progress.values()) if t.lower() in text.lower()), None)
+        # Held only because three identical clicks happened near its step — and
+        # what it claims is a fact the page showed at that step, in text a visitor
+        # sees: the repeated clicks cannot have put it there. The engine card's
+        # "null kW (null KM)" was visible in the step's own screenshot and was
+        # held as "needs a human" anyway, in a run where the same defect, found by
+        # a persona whose clicks were not repeated, counted as confirmed.
+        if f["repeated_with_progress"]:
+            from .redaction import describes_interaction_trouble
+            claim = f"{f.get('evidence', '')} {f.get('recommendation', '')}"
+            facts = quotes_visible_at_step(store, f)
+            if (facts and not _ACTION_CLAIM.search(claim)
+                    and not describes_interaction_trouble(claim)
+                    and str(f["repeated_with_progress"]).lower() not in claim.lower()):
+                f["page_fact_quotes"] = facts
+                f["harness_suspect"] = f["requires_human_check"] = False
+                f["harness_cause"] = f["repeated_with_progress"] = None
+                suspected = False
         # Two keys, not one, and they are not synonyms even though this writer
         # sets both from the same bool:
         #   harness_suspect      — we caused it, so it is probably not a defect.

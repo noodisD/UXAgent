@@ -63,6 +63,11 @@ _SEVERITY_PL = {"krytyczny": "krytyczny", "poważny": "poważny", "drobny": "dro
 _CONFIDENCE_PL = {"high": "wysoka", "medium": "średnia", "low": "niska"}
 
 
+def _g(value) -> str:
+    """A weight or factor as the report prints it: no trailing zeros, Polish comma."""
+    return f"{value:g}".replace(".", ",")
+
+
 def alt_text_share(images: dict | None) -> float | None:
     """The share of images whose missing name loses something.
 
@@ -159,12 +164,12 @@ def _issue_lines(stats: dict, participants: int) -> list[dict]:
             # The reach factor is spelled out: "zasięg 1/3 (0.67)" read to every
             # reviewer as an arithmetic error, because the 0.5 floor that turns
             # a third into two thirds was nowhere on the page.
-            "basis": (f"problem {_SEVERITY_PL.get(sev, sev)} ({base}) × zasięg "
+            "basis": (f"problem {_SEVERITY_PL.get(sev, sev)} ({_g(base)}) × zasięg "
                       f"{affected}/{n}"
                       + (f" — zgłosił {reported}, na stronie widoczne u {affected}"
                          if reported < affected else "")
-                      + f" (0.5 + 0.5 × {share:.2f} = {reach:.2f}) × "
-                      f"pewność {_CONFIDENCE_PL.get(conf, conf)} ({cf})"),
+                      + f" (0,5 + 0,5 × {decimal_text(share, 2)} = {decimal_text(reach, 2)}) × "
+                      f"pewność {_CONFIDENCE_PL.get(conf, conf)} ({_g(cf)})"),
             "heuristic_id": h_id,
         })
     return lines
@@ -206,7 +211,7 @@ def _task_line(outcomes: dict, sources: dict, held: set | None = None) -> dict |
     # "Declared" is the model's verdict on the participant's run, not the
     # participant's own rating — the survey is that, and it can disagree
     # (Krzysztof rated his confidence 7/7 and was declared "failed").
-    factor = f"{RULES['declared_factor']:g}"
+    factor = _g(RULES["declared_factor"])
     counted = sum(counts.values())
     measured_note = (f"ocena deklarowana (werdykt modelu, niezmierzony) — waga ×{factor}"
                      if declared == counted
@@ -216,8 +221,8 @@ def _task_line(outcomes: dict, sources: dict, held: set | None = None) -> dict |
         "kind": "task",
         "label": "Realizacja zadania",
         "amount": round(total, 2),
-        "basis": (f"nieosiągnięty: {counts['failed']}/{n} (po {RULES['task']['failed']:g}), "
-                  f"częściowo: {counts['partial']}/{n} (po {RULES['task']['partial']:g}); "
+        "basis": (f"nieosiągnięty: {counts['failed']}/{n} (po {_g(RULES['task']['failed'])}), "
+                  f"częściowo: {counts['partial']}/{n} (po {_g(RULES['task']['partial'])}); "
                   f"{measured_note}"),
     }
 
@@ -243,7 +248,7 @@ def _accessibility_lines(stats: dict) -> list[dict]:
             "severity": sev,
             "label": f"Dostępność: {f.get('category')}",
             "amount": round(base, 2),
-            "basis": f"skan automatyczny, {sev} ({base}){note}",
+            "basis": f"skan automatyczny, {sev} ({_g(base)}){note}",
         })
     return lines
 
@@ -285,7 +290,7 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
             "kind": "adjustment",
             "label": "Limit dla drobnych problemów",
             "amount": -round(minor_total - RULES["minor_cap"], 2),
-            "basis": f"łączna kara za drobne problemy ograniczona do {RULES['minor_cap']:g}",
+            "basis": f"łączna kara za drobne problemy ograniczona do {_g(RULES['minor_cap'])}",
         })
 
     # Participants whose verdict rests on a held-back finding. Only a declared
@@ -324,20 +329,25 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
     gated = int(sev_counts.get("needs_verification") or 0)
     if gated:
         not_counted.append({
-            "label": f"{gated} wniosków wykluczonych przez weryfikację",
+            "label": (f"{gated} "
+                      f"{pl_plural(gated, 'wniosek wykluczony', 'wnioski wykluczone', 'wniosków wykluczonych')}"
+                      " przez weryfikację"),
             "reason": "nieudana interakcja narzędzia, brak potwierdzenia w zapisie "
                       "sesji lub inna domena — nie są dowodem o stronie",
         })
     if held:
         not_counted.append({
-            "label": f"Wynik zadania {len(held)} uczestnika(ów)",
+            "label": (f"Wynik zadania {len(held)} "
+                      f"{pl_plural(len(held), 'uczestnika', 'uczestników', 'uczestników')}"),
             "reason": "werdykt opiera się na wniosku wstrzymanym do weryfikacji — "
                       "liczenie go obciążyłoby ocenę tym samym niepotwierdzonym "
                       "twierdzeniem drugi raz",
         })
     if abandoned:
         not_counted.append({
-            "label": f"Wynik zadania {len(abandoned)} uczestnika(ów), których sesja została przerwana",
+            "label": (f"Wynik zadania {len(abandoned)} "
+                      + ("uczestnika, którego sesja została przerwana" if len(abandoned) == 1
+                         else "uczestników, których sesja została przerwana")),
             "reason": "narzędzie przerwało sesję po kilku identycznych próbach bez zmiany "
                       "strony — z zapisu nie wynika, czy zawiodła strona, czy narzędzie; "
                       "do sprawdzenia ręcznie",

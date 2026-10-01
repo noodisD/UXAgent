@@ -418,8 +418,15 @@ def extract_generic_name_findings(store: TraceStore) -> list[dict]:
 _TOPIC_KEYWORDS = (
     ("generic_name", ("nieopisow", "nie opisuje ich działania", "nie opisuje jej działania")),
     ("alt_text", ("alternatyw", "alt text", "atrybut alt", "atrybutu alt")),
+    # "brakuje nazwy dla 2 przycisków" and "bez przypisanej nazwy" were missing: the
+    # same defect class (a control with no accessible name) was one topic when the
+    # model wrote "bez nazwy dostępnej" and none when it wrote "brakuje nazwy dla…",
+    # so the 2026-10-01 report listed unnamed buttons twice — as their own finding
+    # and again under the combobox's — and deducted twice.
     ("control_name", ("etykiet", "bez nazwy", "nazwy dostępnej", "dostępnej nazwy",
-                      "nazwy kontrol", "nazwy dla kontrol", "accessible name")),
+                      "nazwy kontrol", "nazwy dla kontrol", "accessible name",
+                      "brakuje nazwy", "brak nazwy", "brak nazw", "przypisanej nazwy",
+                      "bez nazw")),
     ("landmark", ("orientacyjn", "landmark")),
     ("small_text", ("czcionk", "12px", "12 px", "rozmiar tekstu")),
     ("contrast", ("kontrast",)),

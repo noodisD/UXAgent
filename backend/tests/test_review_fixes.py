@@ -158,3 +158,112 @@ def test_the_perception_and_bot_wall_sentences_do_not_claim_more_than_the_trace_
 def test_the_accessibility_pointer_says_the_scan_reports_it_if_it_found_it():
     note = _human_check({"named_in_accessibility": ["Pasek zadań"], "claim_verdict": "unsupported"})
     assert "o ile je wykrył" in note, "it does not promise an entry the scan may not have produced"
+
+
+# --- the 2026-10-01 rerun: what the report still got wrong -------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "Brak nazw dla przycisków. Na najgorszej stronie brakuje nazwy dla 2 przycisków.",
+    "Brak nazwy pola wyboru (combobox).",
+    "Zidentyfikowano 3 przyciski bez przypisanej nazwy dostępnej dla czytników ekranu.",
+    "Pole jest bez przypisanej nazwy dla czytnika ekranu.",
+])
+def test_every_way_of_saying_a_control_has_no_name_is_one_topic(text):
+    from simulated_web_agent.main.a11y_checks import a11y_topic
+    assert a11y_topic(text) == "control_name"
+
+
+def test_unnamed_buttons_and_an_unnamed_combobox_are_one_finding_not_two(tmp_path):
+    """The 2026-10-01 report listed unnamed buttons as their own finding AND again under
+    the combobox's ("Również: 3 przyciski bez nazwy"), and deducted for both."""
+    from tests.test_a11y_instances import _session
+    from simulated_web_agent.main.reporter import aggregate_statistics
+
+    def finding(category, detail, url):
+        return {"category": category, "severity": "poważny", "detail": detail, "url": url,
+                "step": 1, "verified": True, "recommendation": "Nadać nazwę."}
+
+    a, ra = _session(tmp_path, "a", "desktop", "Anna", finding(
+        "Brak nazw dla przycisków",
+        "Na najgorszej stronie (krok 23) brakuje nazwy dla 2 przycisków.", "https://x.pl/dealer"))
+    b, rb = _session(tmp_path, "b", "desktop", "Basia", finding(
+        "Brak nazw dla pól wyboru (combobox)",
+        "Na najgorszej stronie (krok 25) brakuje nazwy dla 1 pola wyboru (combobox).", "https://x.pl/form"))
+    findings = aggregate_statistics([ra, rb], stores=[a, b])["accessibility"]["findings"]
+    assert len(findings) == 1 and findings[0]["topic"] == "control_name"
+    assert len(findings[0]["instances"]) == 2
+
+
+def test_the_narrative_does_not_carry_the_tools_field_names():
+    from simulated_web_agent.main.reporter import resolve_narrative
+    from simulated_web_agent.main.redaction import clean_narrative
+    text = "Nie zaobserwowano wylewania się treści (mobile_overflow) ani problemów z przewijaniem (tablet_overflow)."
+    assert clean_narrative(text) == "Nie zaobserwowano wylewania się treści ani problemów z przewijaniem."
+    assert clean_narrative("etykieta 'open_tooltip' w przycisku") == "etykieta 'open_tooltip' w przycisku", \
+        "a page's own label in quotes is evidence, not ours"
+    nested = clean_narrative({"a": ["x (mobile_overflow)"], "b": {"c": "y (tap_targets_below_min)"}, "n": 3})
+    assert nested == {"a": ["x"], "b": {"c": "y"}, "n": 3}
+    agg = {"narrative": {"executive_summary": "S.", "overall_ux_score": 3, "critical_issues": [],
+                         "serious_issues": [], "minor_issues": [],
+                         "responsiveness_assessment": text}, "statistics": {}}
+    assert "mobile_overflow" not in resolve_narrative(agg)["responsiveness_assessment"]
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Wyskakujący na początku sesji pop-up blokujący szybki dostęp do informacji ofertowych.", False),
+    ("Nakładające się warstwy interfejsu (divy) blokujące klikanie w przyciski", True),
+    ("Okno udostępniania blokuje przyciski konfiguratora.", True),
+])
+def test_a_popup_that_blocks_the_view_is_not_a_blocked_click(text, expected):
+    from simulated_web_agent.main.redaction import describes_interaction_trouble
+    assert describes_interaction_trouble(text) is expected
+
+
+@pytest.mark.asyncio
+async def test_the_survey_summary_is_given_the_mean_beside_the_answers():
+    """"Ocenili pozytywnie" was written under a question whose answers averaged 3,17 of 5."""
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    from simulated_web_agent.main.reporter import _summarize_survey
+    answers = [{"question_id": "g1", "value": str(v), "reason": "r"} for v in (2, 3, 3, 3, 4, 4)]
+    answers.append({"question_id": "e1", "value": "Brak raty", "reason": ""})
+    chat = AsyncMock(return_value=json.dumps({"summaries": {"g1": "x", "e1": "y"}}))
+    with patch("simulated_web_agent.main.reporter.async_chat", new=chat):
+        await _summarize_survey([{"survey_result": {"answers": answers}}])
+    messages = chat.call_args.args[0]
+    payload = json.loads(messages[1]["content"])
+    assert payload["g1"]["średnia"] == 3.17 and len(payload["g1"]["odpowiedzi"]) == 6
+    assert isinstance(payload["e1"], list), "an open question has no mean"
+    assert "the tone must agree with it" in messages[0]["content"]
+
+
+def test_the_arithmetic_is_in_the_reports_number_format_and_plurals_agree():
+    from tests.test_scoring import _issue, _stats
+    from simulated_web_agent.main.scoring import compute_ux_score
+    res = compute_ux_score(_stats(prioritization=[_issue(1, "poważny", 1, n=6, conf="medium")],
+                                  gated=4, participants=6),
+                           outcomes={"a": "success"}, outcome_sources={"a": "declared"})
+    basis = res["deductions"][0]["basis"]
+    assert "problem poważny (0,5) × zasięg 1/6 (0,5 + 0,5 × 0,17 = 0,58) × pewność średnia (0,75)" in basis
+    assert not re.search(r"\d\.\d", basis), basis
+    labels = [n["label"] for n in res["not_counted"]]
+    assert "4 wnioski wykluczone przez weryfikację" in labels
+    for gated, expected in ((1, "1 wniosek wykluczony"), (5, "5 wniosków wykluczonych")):
+        again = compute_ux_score(_stats(gated=gated), outcomes={"a": "success"},
+                                 outcome_sources={"a": "declared"})
+        assert any(n["label"].startswith(expected) for n in again["not_counted"]), expected
+
+
+@pytest.mark.parametrize("n, expected", [(1, "Wynik zadania 1 uczestnika"), (2, "Wynik zadania 2 uczestników"),
+                                         (5, "Wynik zadania 5 uczestników")])
+def test_held_participants_are_counted_in_the_right_form(n, expected):
+    from tests.test_scoring import _stats
+    from simulated_web_agent.main.scoring import compute_ux_score
+    ids = [f"p{i}" for i in range(n)]
+    stats = _stats(participants=n)
+    stats["objective_reflections"] = [{"persona_dir": d, "self_reported_only": True} for d in ids]
+    res = compute_ux_score(stats, outcomes={d: "failed" for d in ids},
+                           outcome_sources={d: "declared" for d in ids})
+    assert any(x["label"] == expected for x in res["not_counted"]), [x["label"] for x in res["not_counted"]]
+

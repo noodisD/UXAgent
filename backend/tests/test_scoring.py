@@ -174,7 +174,7 @@ def test_the_reach_floor_is_on_the_page():
     """"zasięg 1/3 (0.67)" read to every reviewer as an arithmetic error: the 0.5
     floor that turns a third into two thirds was not shown."""
     res = compute_ux_score(_stats(prioritization=[_issue(9, "poważny", 1)]))
-    assert "0.5 + 0.5 × 0.33 = 0.67" in res["deductions"][0]["basis"]
+    assert "0,5 + 0,5 × 0,33 = 0,67" in res["deductions"][0]["basis"]
 
 
 def test_the_header_counts_the_cards_it_sits_above():

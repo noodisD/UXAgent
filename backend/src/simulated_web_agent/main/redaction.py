@@ -88,7 +88,7 @@ def redact_internals(text: str) -> str:
 # "jedy|nie działa|jące strzałki", and a bare "uniemożliwia" opens "Brak informacji
 # o racie uniemożliwia porównanie ofert" — all ordinary remarks about content.
 _INTERACTION_TROUBLE = re.compile(
-    r"blokując|zablokow|uniemożliw\w*\s+(?:\w+\s+){0,2}(?:klik|przycisk|przejśc|przejść|nawigac)|"
+    r"blokuj\w*\s+(?:\w+\s+){0,2}(?:klik|przycisk|kontrol|interakcj)|zablokow|uniemożliw\w*\s+(?:\w+\s+){0,2}(?:klik|przycisk|przejśc|przejść|nawigac)|"
     r"(?<!\w)nie\s+działa|(?<!\w)niedziała|(?<!\w)nie\s+reagow|zapętl|zacina|zaciął|"
     r"błęd\w*\s+skrypt|błęd\w*\s+warstw|z-index|\bdiv|warstw\w*\s+(?:interfejs|strony)|"
     r"nakładając\w*\s+się|nie\s+dało\s+się\s+klikn",
@@ -119,3 +119,21 @@ def clean(node):
     if isinstance(node, dict):
         return {k: clean(v) for k, v in node.items()}
     return node
+
+
+# A data field's name in parentheses — "(mobile_overflow)" — is the prompt's
+# vocabulary leaking into the client's prose. Parentheses only: a page's own label
+# quoted in a finding ("open_tooltip") is in quotes and is evidence, not ours.
+_FIELD_NAME_IN_PARENS = re.compile(r"\s*\(\s*[a-z]+(?:_[a-z0-9]+)+\s*\)")
+
+
+def clean_narrative(node):
+    """The aggregate model's prose with this tool's vocabulary taken out, shape intact."""
+    if isinstance(node, str):
+        return _FIELD_NAME_IN_PARENS.sub("", redact_internals(node))
+    if isinstance(node, list):
+        return [clean_narrative(v) for v in node]
+    if isinstance(node, dict):
+        return {k: clean_narrative(v) for k, v in node.items()}
+    return node
+
