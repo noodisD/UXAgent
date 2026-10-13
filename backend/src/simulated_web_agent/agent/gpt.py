@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+import re
 import time
 from typing import Any, Dict
 
@@ -23,6 +25,36 @@ _GEMINI_FLASH = "vertex_ai/gemini-3.8-flash"
 _GEMINI_FLASH_LITE = "vertex_ai/gemini-3.5-flash-lite"
 # Pro has no GA 3.x release yet: "gemini-3.1-pro" is a 404, the preview is not.
 _GEMINI_PRO = "vertex_ai/gemini-3.1-pro-preview"
+
+
+# Request labels on every Vertex call, so Google Cloud billing attributes the usage
+# to this service (Billing -> Reports -> group by label "name-of-service"). Override
+# with UXAGENT_VERTEX_LABELS='{"key": "value"}'; "{}" turns them off.
+DEFAULT_VERTEX_LABELS = {"name-of-service": "csaapps_ux-agent_general"}
+# Vertex's rule: lowercase letters, digits, "_" and "-"; a key starts with a letter;
+# at most 63 characters. One bad label would make every request fail with a 400,
+# so what does not fit is dropped (and said) rather than sent.
+_LABEL_KEY = re.compile(r"^[a-z][a-z0-9_-]{0,62}$")
+_LABEL_VALUE = re.compile(r"^[a-z0-9_-]{0,63}$")
+
+
+def vertex_labels() -> Dict[str, str]:
+    raw = os.environ.get("UXAGENT_VERTEX_LABELS")
+    labels: Any = DEFAULT_VERTEX_LABELS
+    if raw is not None and raw.strip():
+        try:
+            labels = json.loads(raw)
+        except ValueError:
+            print("UXAGENT_VERTEX_LABELS is not JSON; using the default label")
+    if not isinstance(labels, dict):
+        return dict(DEFAULT_VERTEX_LABELS)
+    out = {}
+    for k, v in labels.items():
+        if isinstance(k, str) and isinstance(v, str) and _LABEL_KEY.match(k) and _LABEL_VALUE.match(v):
+            out[k] = v
+        else:
+            print(f"Vertex label {k!r}={v!r} ignored: not a valid label")
+    return out
 
 
 chat_router = Router(
@@ -343,6 +375,10 @@ async def async_chat(
         candidate = provider + "_lite"
         if any(m["model_name"] == candidate for m in router.model_list):
             router_model = candidate
+    if provider == "gemini" and "labels" not in call_kwargs:
+        labels = vertex_labels()
+        if labels:
+            call_kwargs["labels"] = labels
     if json_mode and provider not in ("aws",):
         call_kwargs["response_format"] = {"type": "json_object"}
     # Bounded call: LiteLLM's implicit request timeout is 600s, which let hung
