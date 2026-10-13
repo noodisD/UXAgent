@@ -55,6 +55,24 @@ class LogApiCall:
         logger.info(f"API Call time: {time.time() - self.start_time}")
 
 
+def observation_text(value) -> str:
+    """The perceiver's answer as one string.
+
+    The prompt asks for {"observations": ["<text>"]}, but the lite model now and
+    then returns the text split into a list of sentences or nested one level
+    deeper. The step loop writes this value to disk as text, so a list ended the
+    whole session with `TypeError: data must be str, not list` — two of six
+    participants in the 2026-10-13 hyundai run, both a few steps after opening
+    the configurator summary, and the report blamed the site for it."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return chr(10).join(t for t in (observation_text(v) for v in value) if t)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    return "" if value is None else str(value)
+
+
 class Agent:
     memory: Memory
     persona: str
@@ -98,9 +116,9 @@ class Agent:
             result = await async_chat(request, json_mode=True, max_tokens=16000, model="lite")
             result = json.loads(result)
             print(result)
-            self.observation = result["observations"][0]
+            self.observation = observation_text(result["observations"][0])
             await self.memory.add_memory_piece(
-                Observation(result["observations"][0], self.memory, environment)
+                Observation(self.observation, self.memory, environment)
             )
 
     # Prompt payload budget: memory grows every step; without a cap the

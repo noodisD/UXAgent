@@ -126,7 +126,11 @@ class TraceStore:
             json.dump(obs, f)
             f.write("\n")
 
-    def write_observation_step_text(self, step: int, text: str) -> None:
+    def write_observation_step_text(self, step: int, text) -> None:
+        # Never let a trace write end a session: whatever the perceiver returned
+        # is recorded as text (agent.observation_text normalises it upstream).
+        if not isinstance(text, str):
+            text = json.dumps(text, ensure_ascii=False, default=str)
         (self.trace_dir / "observation_trace" / f"observation_trace_{step}.txt").write_text(
             text, encoding="utf-8"
         )

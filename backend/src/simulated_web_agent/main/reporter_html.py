@@ -1359,7 +1359,13 @@ _SOURCE_PL = {
     "observed": "zmierzone z zapisu sesji",
     "session": "przerwane przez narzędzie po kilku identycznych próbach bez zmiany strony",
     "declared": "werdykt modelu, niezmierzony",
+    "error": "sesja przerwana awarią narzędzia — wynik nie jest oceną serwisu",
 }
+
+SESSION_ERROR_NOTE = ("Sesja urwała się po {steps} krokach z powodu awarii narzędzia, a nie "
+                      "problemu serwisu, więc nie wiadomo, czy uczestnik osiągnąłby cel. Nie liczy "
+                      "się do oceny ani do średnich z ankiety; poniżej tylko to, co zaobserwował "
+                      "przed przerwaniem.")
 
 
 def objective_outcome(r: dict) -> str:
@@ -1427,6 +1433,11 @@ def _render_objectives(stats: dict) -> str:
         for k, v in sorted(counts.items())
     )
 
+    # One task for the whole run is said once, not under every participant: six
+    # copies of the same fifteen lines pushed the results off the page.
+    objectives = {str(r.get("objective") or "") for r in rows}
+    shared_objective = len(objectives) == 1 and "" not in objectives
+
     cards = ""
     for r in rows:
         label, fg, bg = _OUTCOME_PL.get(objective_outcome(r), ("—", "#444", "#f1f2f4"))
@@ -1448,6 +1459,12 @@ def _render_objectives(stats: dict) -> str:
         held = held_claims_note(stats, r.get("persona"))
         if held and not r.get("self_reported_only"):
             unverified += f'<div class="obj-caveat">{_esc(held)}</div>'
+        if r.get("session_error"):
+            unverified += (f'<div class="obj-caveat">'
+                           f'{_esc(SESSION_ERROR_NOTE.format(steps=r["session_error"].get("steps", "?")))}</div>')
+        task_html = ("" if shared_objective else
+                     f'<div class="obj-task">{_esc(r.get("objective") or "")}</div>')
+        summary_html = f'<p class="obj-summary">{_esc(r.get("summary"))}</p>' if r.get("summary") else ""
         cards += f"""
         <div class="obj-card">
           <div class="obj-head">
@@ -1456,8 +1473,8 @@ def _render_objectives(stats: dict) -> str:
           </div>
           {source_html}
           {unverified}
-          <div class="obj-task">{_esc(r.get("objective") or "")}</div>
-          <p class="obj-summary">{_esc(r.get("summary") or "")}</p>
+          {task_html}
+          {summary_html}
           <div class="obj-cols">
             <div><div class="obj-col-h" style="color:#b3352f">Co przeszkadzało</div>
               <ul class="obj-list">{blockers or "<li>—</li>"}</ul></div>
@@ -1475,8 +1492,9 @@ def _render_objectives(stats: dict) -> str:
     # which ones proved unreliable (see attribution.restates_a_gated_finding),
     # but saying plainly what this section IS costs nothing and is always true.
     note = f'<p class="obj-note">{_esc(OBJECTIVES_NOTE)}</p>' 
+    shared = (f'<div class="obj-task">{_esc(next(iter(objectives)))}</div>' if shared_objective else "")
     return _section("Realizacja zadania",
-                     f'{note}<div class="obj-tally">{tally}</div>{cards}')
+                     f'{note}{shared}<div class="obj-tally">{tally}</div>{cards}')
 
 
 _DEDUCTION_KIND_PL = {

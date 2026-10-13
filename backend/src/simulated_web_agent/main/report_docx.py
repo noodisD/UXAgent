@@ -364,11 +364,15 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     reflections = stats.get("objective_reflections") or []
     if reflections:
         doc.add_heading("Realizacja zadania", level=1)
-        from .reporter_html import (OBJECTIVES_NOTE, SELF_REPORTED_CAVEAT, _SOURCE_PL,
-                                    held_claims_note, objective_outcome)
+        from .reporter_html import (OBJECTIVES_NOTE, SELF_REPORTED_CAVEAT, SESSION_ERROR_NOTE,
+                                    _SOURCE_PL, held_claims_note, objective_outcome)
         # The HTML's standing caveat: these are the participants' own accounts,
         # never checked against the trace. Without it the blockers read as fact.
         _add_caption(doc, OBJECTIVES_NOTE)
+        goals = {str(r.get("objective") or "") for r in reflections}
+        shared_goal = len(goals) == 1 and "" not in goals
+        if shared_goal:
+            _add_caption(doc, f"Cel: {next(iter(goals))}")
         for r in reflections:
             outcome = objective_outcome(r)
             doc.add_heading(
@@ -387,7 +391,9 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 held = held_claims_note(stats, r.get("persona"))
                 if held:
                     _add_caption(doc, held)
-            if r.get("objective"):
+            if r.get("session_error"):
+                _add_caption(doc, SESSION_ERROR_NOTE.format(steps=r["session_error"].get("steps", "?")))
+            if r.get("objective") and not shared_goal:
                 _add_caption(doc, f"Cel: {r['objective']}")
             if r.get("summary"):
                 doc.add_paragraph(str(r["summary"]))

@@ -95,6 +95,20 @@ _INTERACTION_TROUBLE = re.compile(
     re.I)
 
 
+_SESSION_CRASH = re.compile(
+    r"bł[ąę]d\w*\s+(?:\w+\s+)?(?:techniczn|krytyczn)|(?:techniczn|krytyczn)\w*\s+bł[ąę]d|"
+    r"awari|crash|usterk\w*\s+techniczn|"
+    r"(?:przerw|zrywa|zerwa|zakończ)\w*\s+(?:\w+\s+){0,2}(?:sesj|działani)|"
+    r"sesj\w*\s+(?:\w+\s+){0,2}(?:przerwan|przerwał|zerwan)", re.I)
+
+
+def describes_session_crash(text: str) -> bool:
+    """True when a participant's account blames a technical failure for the end
+    of their session. Used only for a session the harness itself recorded as
+    crashed: there the sentence describes our crash, not the site."""
+    return bool(isinstance(text, str) and text and _SESSION_CRASH.search(text))
+
+
 def describes_interaction_trouble(text: str) -> bool:
     """True when free text says an interaction did not work (clicks blocked,
     controls dead, a loop). Only evidence of something, never proof: pair it

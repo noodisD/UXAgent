@@ -228,6 +228,11 @@ def effective_outcome(store: TraceStore) -> tuple[str, str]:
     session = store.read_session_result() or {}
     if str(session.get("ended_reason") or "") == "persona_abandoned":
         return "persona_abandoned", "session"
+    # The tool crashed under the participant (a parse error, a failed write).
+    # Whether they would have reached the goal is unknown, and "failed" would
+    # charge the site for it: the 2026-10-13 run scored a crash as a failed task.
+    if str(session.get("ended_reason") or "") == "error":
+        return "unknown", "error"
     eff = current_effectiveness(store)
     if eff.get("outcome_source") == "observed" and eff.get("observed_outcome"):
         return str(eff["observed_outcome"]), "observed"

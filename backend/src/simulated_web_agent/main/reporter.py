@@ -40,7 +40,8 @@ from .scoring import (
 from .attribution import harness_suspect_causes, restates_a_gated_finding
 from .iso_metrics import current_effectiveness, effective_outcome
 from .redaction import (
-    clean as _redact, clean_narrative, describes_interaction_trouble, mentions_harness_fault,
+    clean as _redact, clean_narrative, describes_interaction_trouble, describes_session_crash,
+    mentions_harness_fault,
 )
 from .trace_store import TraceStore
 
@@ -178,6 +179,13 @@ def _named_in_accessibility_note(names: list) -> str:
     return f"{head} Jeśli wniosek dotyczy tekstu widocznego na stronie, sprawdź go ręcznie."
 
 
+def _states_a_page_fact(finding: dict) -> bool:
+    """True when the finding says what the page shows, not what an action did."""
+    from .attribution import _ACTION_CLAIM
+    claim = f"{finding.get('evidence', '')} {finding.get('recommendation', '')}"
+    return not _ACTION_CLAIM.search(claim) and not describes_interaction_trouble(claim)
+
+
 def _human_check(finding: dict) -> str:
     """What a person should do to settle a finding the trace could not."""
     named = [n for n in (finding.get("named_in_accessibility") or []) if n]
@@ -195,6 +203,15 @@ def _human_check_base(finding: dict) -> str:
         return "Dotyczy innej domeny niż badana — zwykle do pominięcia."
     # Already the label the page shows (attribution reads it from the page).
     progressed = str(finding.get("repeated_with_progress") or "").strip()
+    if progressed and _states_a_page_fact(finding):
+        # "Click it a few times" answers a claim about the click. A claim about a
+        # name or an alt text is settled by looking at the page, not by clicking:
+        # two such findings (an English alt text, a "Flyout" label) were held with
+        # the instruction to click "Następny krok", which has nothing to do with them.
+        return ("Sprawdź w zwykłej przeglądarce, czy opisany element wygląda na stronie tak, "
+                "jak w ustaleniu — dla nazw i opisów alternatywnych użyj narzędzi deweloperskich "
+                "(zakładka Elements). Zapis sesji go nie potwierdza: opis nie jest tekstem "
+                "widocznym na stronie.")
     if progressed:
         return (f"Kliknij „{progressed}” kilka razy w zwykłej przeglądarce i sprawdź, "
                 "czy strona zachowuje się tak, jak opisano. Strona reagowała na każde "
@@ -427,6 +444,8 @@ def _is_truncated_session(report: dict) -> bool:
     """True when the session ended after too few steps to trust its survey."""
     sr = report.get("session_result") or {}
     steps = sr.get("steps_taken")
+    if sr.get("ended_reason") == "error":
+        return True
     return isinstance(steps, int) and steps < MIN_VALID_SESSION_STEPS
 
 
@@ -757,6 +776,18 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         # objectives section shows the same outcome (iso_metrics.effective_outcome).
         if store is not None:
             entry["effective_outcome"], entry["outcome_source"] = effective_outcome(store)
+            _session = store.read_session_result() or {}
+            if _session.get("ended_reason") == "error":
+                # The tool crashed this session. The participant's account of why
+                # it ended describes OUR failure, so it must not reach the client
+                # as a site problem or as "the most important fix"; what they did
+                # and saw before the crash stands.
+                entry["session_error"] = {"steps": _session.get("steps_taken")}
+                entry["summary"] = ""
+                entry["blockers"] = [b for b in entry["blockers"] if not describes_session_crash(b)
+                                     and not describes_interaction_trouble(b)]
+                if describes_session_crash(entry["priority_fix"]) or describes_interaction_trouble(entry["priority_fix"]):
+                    entry["priority_fix"] = ""
         objective_reflections.append(entry)
 
     # Heuristic findings aggregation — annotate each finding with its persona
@@ -1140,7 +1171,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             excluded_surveys.append({
                 "persona_dir": str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1],
                 "steps_taken": sr.get("steps_taken"),
-                "reason": f"sesja przerwana po {sr.get('steps_taken')} krokach — ankieta wykluczona ze średnich",
+                "reason": (f"sesja przerwana awarią narzędzia po {sr.get('steps_taken')} krokach — ankieta wykluczona ze średnich"
+                           if sr.get("ended_reason") == "error" else
+                           f"sesja przerwana po {sr.get('steps_taken')} krokach — ankieta wykluczona ze średnich"),
             })
             continue
         survey = r.get("survey_result") or {}
