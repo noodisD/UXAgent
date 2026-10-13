@@ -48,8 +48,92 @@ def _squeeze(text: str) -> str:
     return re.sub(r"\s+", "", str(text or "")).lower()
 
 
+_QUOTED_NAME = re.compile(r"['‘\"“]([^'’\"”]{3,60})['’\"”]")
+_STEM_LEN = 4
+# Words that open or pad a control's description and say nothing about its subject.
+_ROUTE_STOP = frozenset("""jest nie się oraz dla przy przez które który która został kliknięcie
+próba proba formularz strona stronie strony""".split())
+
+
+def _actions_with_failures(store) -> list[tuple[dict, bool]]:
+    try:
+        actions = store.read_action_trace() or []
+        observations = store.read_observations() or []
+    except Exception:
+        return []
+    out = []
+    for k, raw in enumerate(actions):
+        try:
+            a = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except (TypeError, ValueError):
+            continue
+        after = observations[k + 1] if k + 1 < len(observations) else {}
+        failed = str((after or {}).get("error") or "").startswith("Error executing action")
+        out.append((a, failed))
+    return out
+
+
+def route_summary(store, last: int = 14) -> list[str]:
+    """The participant's last steps, each marked when its click failed (for the aggregate prompt)."""
+    out = []
+    for k, (a, failed) in enumerate(_actions_with_failures(store)):
+        what = str(a.get("description") or f"{a.get('action', '')} {a.get('target', '')}").strip()
+        out.append(f"{k}: {what[:90]}{' (nieudane)' if failed else ''}")
+    return out[-last:]
+
+
+def failed_click_names(store) -> list[str]:
+    """Names of the controls whose click failed in this session, as the persona called them."""
+    names = []
+    for a, failed in _actions_with_failures(store):
+        if not failed or a.get("action") != "click":
+            continue
+        m = _QUOTED_NAME.search(str(a.get("description") or ""))
+        name = m.group(1).strip() if m else str(a.get("target") or "").replace("_", " ").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _stems(text: str) -> set:
+    return {w[:_STEM_LEN] for w in re.findall(r"[a-ząćęłńóśźż]{4,}", str(text or "").lower())
+            if w not in _ROUTE_STOP}
+
+
+def annotate_routes(themes: list, reflections: list) -> list:
+    """Say where a theme's participants first tried another way and failed.
+
+    The 2026-10-13 run: all six participants "agreed" the test-drive form did not
+    carry the configured model, yet every one had reached it through the menu,
+    two of them after the summary-screen button the task named timed out under an
+    overlay. The agreement was about a route nobody was asked to test. A model
+    asked to notice this did not; the failed clicks are in the trace, so the
+    note is built from them: for each participant in a theme, the controls whose
+    click failed AND whose name shares at least two word stems with the theme.
+    """
+    by_name = {str(r.get("persona")): r for r in reflections or [] if isinstance(r, dict)}
+    out = []
+    for theme in themes or []:
+        subject = _stems(theme.get("theme", "") + " " + " ".join((theme.get("phrases") or {}).values()))
+        hit_people, controls = [], []
+        for who in theme.get("participants") or []:
+            mine = [n for n in (by_name.get(who) or {}).get("failed_clicks") or []
+                    if len(_stems(n) & subject) >= 2]
+            if mine:
+                hit_people.append(who)
+                controls += [n for n in mine if n not in controls]
+        note = ""
+        if hit_people:
+            cited = ", ".join(f"„{c}”" for c in controls[:2])
+            note = (f"{len(hit_people)} z {len(theme['participants'])} tych uczestników najpierw "
+                    f"bezskutecznie próbowało {cited} i weszło tam inną drogą (np. z menu), więc "
+                    "zgodność nie dotyczy drogi, którą zakładało zadanie — sprawdź ją osobno.")
+        out.append({**theme, "route_note": note})
+    return out
+
+
 def _own_text(reflection: dict) -> str:
-    parts = [reflection.get("summary"), reflection.get("priorityFix")]
+    parts = [reflection.get("summary"), reflection.get("priorityFix") or reflection.get("priority_fix")]
     parts.extend(reflection.get("blockers") or [])
     return " ".join(str(p) for p in parts if p)
 
@@ -64,7 +148,7 @@ def prompt_payload(reflections: list) -> list[dict]:
         if not blockers:
             continue
         rows.append({"persona": str(r["persona"]), "trudnosci": blockers,
-                     "najwazniejsza_poprawka": str(r.get("priorityFix") or "")})
+                     "najwazniejsza_poprawka": str(r.get("priorityFix") or r.get("priority_fix") or "")})
     return rows
 
 
@@ -122,4 +206,6 @@ INTRO = (
 def theme_text(theme: dict) -> str:
     """One theme as a sentence: what, how many, and each participant's own words."""
     who = "; ".join(f"{name}: „{phrase}”" for name, phrase in (theme.get("phrases") or {}).items())
-    return (f"{theme['theme']} — {len(theme['participants'])} z {theme['of']} uczestników. {who}")
+    note = str(theme.get("route_note") or "").strip()
+    return (f"{theme['theme']} — {len(theme['participants'])} z {theme['of']} uczestników. {who}"
+            + (f" Uwaga o drodze: {note}" if note else ""))

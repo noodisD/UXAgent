@@ -149,6 +149,9 @@ Note — engaged_form = agent typed into at least one field; submitted_form = al
 MOST FREQUENT ISSUES (appearing in ≥50% of sessions):
 {top_issues}
 
+DROGI UCZESTNIKÓW (ostatnie kroki każdego; „(nieudane)" oznacza kliknięcie, które się nie powiodło):
+{participant_routes}
+
 SURVEY QUESTIONNAIRE RESULTS (each scale question has its own range, given in the legend below;
 open questions carry verbatim answers):
 {survey_summary}
@@ -195,6 +198,10 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
 
 Rules:
 - REGUŁA JĘZYKOWA (obowiązkowa): NIGDY nie podawaj częstotliwości jako procentu „użytkowników" (np. „72% użytkowników porzuci koszyk"). Odnoś się do „symulowanych person" lub „przebiegów"; traktuj częstotliwości jako hipotezy syntetyczne, nie statystykę populacyjną.
+- first_impression_assessment (rzetelność liczb): każdą średnią przypisz dokładnie do wymiaru, którego dotyczy (jasność celu, widoczność nawigacji, wezwanie do działania, hierarchia wizualna, wiarygodność) — nie łącz kilku wymiarów w jedno zdanie z jedną liczbą. Nie opisuj elementu jako dobrze widocznego ani czytelnego, jeśli średnia jego wymiaru jest poniżej 3.
+- Przyczyny: opisuj objaw widoczny w dowodach (np. wartość „null kW" na karcie silnika), a NIE jego domniemaną przyczynę techniczną (baza danych, serwer, API, pamięć podręczna, skrypt) — zapis sesji jej nie pokazuje. W rekomendacji wskaż, co ma być poprawnie wyświetlone, nie który komponent zawiódł.
+- Tekst alternatywny: skalę (liczbę obrazów i stron) podawaj tylko dla obrazów treści; nie pisz, że problem „występuje na X z X stron", gdy dotyczy ikon i elementów poza treścią.
+- Droga uczestników: gdy wniosek lub rekomendacja dotyczy miejsca, do którego zadanie kazało dojść konkretną drogą (np. przyciskiem z podsumowania konfiguratora), sprawdź w DROGACH UCZESTNIKÓW, którą drogą weszli tam poszczególni uczestnicy. Jeśli weszli inną (np. z menu po nieudanym kliknięciu przycisku docelowego), nie twierdź, że strona zawodzi na drodze z zadania — napisz, której drogi dotyczy obserwacja, a rekomendację sformułuj ostrożnie („do sprawdzenia na ścieżce z podsumowania").
 - executive_summary: 3–5 sentences covering the overall picture.
 - executive_summary i pozostałe teksty o ukończeniu zadania: liczby i słowa muszą
   zgadzać się z TASK COMPLETION powyżej. „Częściowo" to nie „nie udało się", a

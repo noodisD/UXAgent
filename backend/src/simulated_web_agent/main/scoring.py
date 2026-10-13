@@ -151,7 +151,12 @@ def _issue_lines(stats: dict, participants: int) -> list[dict]:
         affected = int(r.get("personas_affected") or 0)
         reported = int(r.get("personas_reported") or affected)
         n = int(r.get("participant_count") or participants or 0)
-        share, reach = _reach(affected, n)
+        # Reach is counted among the participants who met the problem at its worst
+        # severity. (Charging the rest of the group at a lower severity could never
+        # win: the lightest serious charge, 0.5 x 0.5, exceeds the heaviest minor.)
+        at_worst = int(r.get("personas_at_worst_severity") or affected)
+        at_worst = min(at_worst, affected) if affected else at_worst
+        share, reach = _reach(at_worst, n)
         conf = str(r.get("confidence") or "high")
         cf = RULES["confidence"].get(conf, 1.0)
         amount = round(base * reach * cf, 2)
@@ -165,7 +170,9 @@ def _issue_lines(stats: dict, participants: int) -> list[dict]:
             # reviewer as an arithmetic error, because the 0.5 floor that turns
             # a third into two thirds was nowhere on the page.
             "basis": (f"problem {_SEVERITY_PL.get(sev, sev)} ({_g(base)}) × zasięg "
-                      f"{affected}/{n}"
+                      f"{at_worst}/{n}"
+                      + (f" — wśród zgłoszeń o tej wadze; łącznie problem w tej heurystyce "
+                         f"zgłosiło {affected}" if at_worst < affected else "")
                       + (f" — zgłosił {reported}, na stronie widoczne u {affected}"
                          if reported < affected else "")
                       + f" (0,5 + 0,5 × {decimal_text(share, 2)} = {decimal_text(reach, 2)}) × "
@@ -336,12 +343,19 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
                       "sesji lub inna domena — nie są dowodem o stronie",
         })
     if held:
+        why = {w for r in (stats.get("objective_reflections") or [])
+               if isinstance(r, dict) and r.get("persona_dir") in held
+               for w in (r.get("self_reported_why") or [])}
+        grounds = []
+        if "restates_held" in why or not why:
+            grounds.append("powtarza wniosek wstrzymany do weryfikacji")
+        if why & {"harness_words", "tool_trouble"}:
+            grounds.append("opisuje usterkę narzędzia, a nie serwisu")
         not_counted.append({
             "label": (f"Wynik zadania {len(held)} "
                       f"{pl_plural(len(held), 'uczestnika', 'uczestników', 'uczestników')}"),
-            "reason": "werdykt opiera się na wniosku wstrzymanym do weryfikacji — "
-                      "liczenie go obciążyłoby ocenę tym samym niepotwierdzonym "
-                      "twierdzeniem drugi raz",
+            "reason": f"werdykt opiera się na relacji, która {' lub '.join(grounds)} — "
+                      "liczenie go obciążyłoby ocenę niepotwierdzonym twierdzeniem",
         })
     if abandoned:
         not_counted.append({

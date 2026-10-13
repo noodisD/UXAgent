@@ -94,7 +94,7 @@ def test_a_verdict_resting_on_a_held_claim_is_not_scored():
                            outcome_sources={x: "declared" for x in outcomes})
     task = [d for d in res["deductions"] if d["kind"] == "task"][0]
     assert task["amount"] == round(0.75 * 0.5 / 3, 2), "only Magdalena's partial counts"
-    assert any("wstrzymanym" in n["reason"] for n in res["not_counted"])
+    assert any("wstrzymany" in n["reason"] for n in res["not_counted"])
 
 
 def test_the_report_lists_what_was_held_back():

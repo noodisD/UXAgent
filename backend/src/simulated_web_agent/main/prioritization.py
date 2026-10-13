@@ -141,6 +141,16 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
             participant_count=participant_count,
             blocked=bool(blocked_personas),
         )
+        # Who met the group's WORST version of the problem. The row's severity is
+        # the worst example's, but its reach is everyone's: the 2026-10-13 H2 group
+        # held a serious defect (two participants) and a minor remark (a third), and
+        # was charged "serious" at three participants' reach.
+        worst_rank = severity_rank(worst)
+        at_worst = {f.get("_persona_dir") for f in group
+                    if f.get("_persona_dir") and severity_rank(f) == worst_rank}
+        for f in group:
+            if severity_rank(f) == worst_rank:
+                at_worst.update(f.get("_encountered_by") or ())
         row = {
             # Kept as an int for frontend/back-compat even for a cluster row —
             # the lowest heuristic_id it was filed under; heuristics_involved
@@ -157,6 +167,7 @@ def prioritize(findings: list, outcomes: dict[str, str]) -> list[dict]:
             "personas_affected": len(personas),
             # How many of those wrote it down, when fewer than saw it.
             "personas_reported": len(reported),
+            "personas_at_worst_severity": len(at_worst),
             "participant_count": participant_count,
             "blocked": bool(blocked_personas),
             "blocked_personas": blocked_personas,

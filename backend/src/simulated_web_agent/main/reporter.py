@@ -31,7 +31,7 @@ from .severity import (
 from .a11y_checks import a11y_topic, measure_names, merge_pages
 from .evidence import page_quote, pages_contain, rendering_artifact
 from .obstacles import repeated_obstacles
-from .recurring import group_recurring_reports
+from .recurring import annotate_routes, failed_click_names, group_recurring_reports, route_summary
 from .textutil import clip_words, decimal_text, pl_plural, view_key
 from .scoring import (
     RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
@@ -440,6 +440,15 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
 MIN_VALID_SESSION_STEPS = 5
 
 
+def _routes_text(reflections: list) -> str:
+    """Each participant's last steps, for the aggregate prompt (recurring.route_summary)."""
+    lines = []
+    for r in reflections or []:
+        if isinstance(r, dict) and r.get("route"):
+            lines.append(f"{r.get('persona')}: " + " | ".join(str(s) for s in r["route"]))
+    return chr(10).join(lines) or "(brak danych)"
+
+
 def _is_truncated_session(report: dict) -> bool:
     """True when the session ended after too few steps to trust its survey."""
     sr = report.get("session_result") or {}
@@ -767,15 +776,24 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                                    for code, _ in harness_suspect_causes(store).values())
             except Exception:
                 tool_trouble = False
-        entry["self_reported_only"] = (
-            any(mentions_harness_fault(t) for t in refl_texts)
-            or restates_a_gated_finding(refl_texts, own_findings)
-            or (tool_trouble and any(describes_interaction_trouble(t) for t in refl_texts))
-        )
+        # Why, because the score page tells the reader what was set aside and
+        # "rests on a held finding" is false for an account that merely describes
+        # the tool failing.
+        why = []
+        if any(mentions_harness_fault(t) for t in refl_texts):
+            why.append("harness_words")
+        if restates_a_gated_finding(refl_texts, own_findings):
+            why.append("restates_held")
+        if tool_trouble and any(describes_interaction_trouble(t) for t in refl_texts):
+            why.append("tool_trouble")
+        entry["self_reported_only"] = bool(why)
+        entry["self_reported_why"] = why
         # What the score counts for this participant, and from where — so the
         # objectives section shows the same outcome (iso_metrics.effective_outcome).
         if store is not None:
             entry["effective_outcome"], entry["outcome_source"] = effective_outcome(store)
+            entry["route"] = route_summary(store)
+            entry["failed_clicks"] = failed_click_names(store)
             _session = store.read_session_result() or {}
             if _session.get("ended_reason") == "error":
                 # The tool crashed this session. The participant's account of why
@@ -1731,6 +1749,7 @@ async def generate_aggregated_report(
         task_description=task_description,
         website_url=website_url,
         first_impression_stats=fi_stats,
+        participant_routes=_routes_text(stats.get("objective_reflections") or []),
         heuristic_summary=heuristic_summary,
         accessibility_summary=a11y_summary,
         viewport_summary=vp_summary,
@@ -1787,9 +1806,9 @@ async def generate_aggregated_report(
     # model proposes the groups and the code keeps only what each participant's own
     # text bears out; a failure here costs this section, never the report.
     try:
-        stats["recurring_reports"] = await group_recurring_reports(
+        stats["recurring_reports"] = annotate_routes(await group_recurring_reports(
             stats.get("objective_reflections") or [], stats.get("participant_count") or n,
-            async_chat)
+            async_chat), stats.get("objective_reflections") or [])
     except Exception as e:
         log.exception("[reporter] recurring reports failed (non-fatal): %s", e)
         stats["recurring_reports"] = []
