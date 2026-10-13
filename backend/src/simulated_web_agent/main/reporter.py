@@ -607,6 +607,23 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         for s in (stores or [])
     }
 
+    # Which device each session ran on: an accessibility instance says "mobile", and
+    # a heuristic issue says how many participants on each device met it. Read before
+    # the heuristic groups below, which need it.
+    device_by_dir: dict[str, str] = {}
+    for _s in (stores or []):
+        try:
+            _card = _s.read_persona_card() or {}
+        except Exception:
+            continue
+        _name = Path(str(getattr(_s, "trace_dir", ""))).name
+        if _name and _card.get("device"):
+            device_by_dir[_name] = str(_card["device"]).strip().lower()
+    # Sessions per device among THIS report's participants — the denominators.
+    _participant_dirs = {str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1]
+                         for r in reports}
+    sessions_by_device = Counter(device_by_dir[d] for d in _participant_dirs if d in device_by_dir)
+
     fi_dimension_scores: dict[str, list[float]] = defaultdict(list)
     # Why each dimension scored what it did. first_impression.txt asks for a
     # per-dimension rationale ("the biggest barrier for this person, and why
@@ -853,6 +870,8 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "page_quote": quote_from_page or "",
             "evidence": f.get("evidence", ""),
             "verified": bool(f.get("verified")),
+            # The device of the participant who met it ("" when not recorded).
+            "device": device_by_dir.get(str(f.get("_persona_dir", "")), ""),
             # This example's own severity. A heuristic's group reports the worst
             # of its findings and everyone who filed any of them, so two
             # unrelated defects under one Nielsen number lent each other their
@@ -913,6 +932,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             "heuristic_name": HEURISTIC_NAMES.get(h_id, ""),
             "frequency": freq,
             "personas_affected": personas_affected,
+            "devices": device_split(affected_dirs, device_by_dir, sessions_by_device),
             "sessions_affected": f"{min(personas_affected, n)} z {n} uczestników",
             "worst_severity": worst_severity,
             "top_evidence": group[0].get("evidence", ""),
@@ -936,16 +956,6 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # Deduplicated by category: the same barrier on five pages is one problem to
     # fix, and listing it five times buries everything else.
     a11y_by_category: dict[str, dict] = {}
-    # Which device each session ran on, so an instance can say "mobile".
-    device_by_dir: dict[str, str] = {}
-    for _s in (stores or []):
-        try:
-            _card = _s.read_persona_card() or {}
-        except Exception:
-            continue
-        _name = Path(str(getattr(_s, "trace_dir", ""))).name
-        if _name and _card.get("device"):
-            device_by_dir[_name] = str(_card["device"]).strip().lower()
     for r in reports:
         acc = r.get("accessibility") or {}
         if not isinstance(acc, dict):
@@ -1843,6 +1853,26 @@ async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
     return {qid: str(summaries.get(qid, "")) for qid in order}
 
 
+def device_split(affected_dirs, device_by_dir: dict, sessions_by_device) -> dict:
+    """{device: {"affected": k, "of": m}} — how many participants on each device met
+    a problem, out of how many were on it.
+
+    Only when the run really used more than one device: a single-device run, or one
+    recorded before the device was stored, has nothing to split and gets {}.
+    Each participant used ONE device, so "0 of 3 on desktop" says only that those
+    three did not meet it, never that the page is fine on desktop.
+    """
+    if len([d for d, k in sessions_by_device.items() if k]) < 2:
+        return {}
+    return {device: {"affected": sum(1 for d in affected_dirs if device_by_dir.get(d) == device),
+                     "of": total}
+            for device, total in sorted(sessions_by_device.items(), key=lambda kv: _DEVICE_ORDER.get(kv[0], 9))
+            if total}
+
+
+_DEVICE_ORDER = {"desktop": 0, "mobile": 1, "tablet": 2}
+
+
 def _examples_for_issue(issue: dict, examples: list) -> tuple[list, list]:
     """(examples to show as this issue's proof, examples of the same heuristic left out).
 
@@ -1902,6 +1932,7 @@ def _attach_issue_evidence(narrative: dict, stats: dict, measurements: dict | No
             if group:
                 shown, others = _examples_for_issue(issue, group.get("examples", []))
                 issue["examples"] = shown
+                issue["devices"] = group.get("devices") or {}
                 # What the group holds that the issue's own text does not describe:
                 # listed as such, never shown as proof of the wrong claim.
                 issue["other_observations"] = [

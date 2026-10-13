@@ -90,6 +90,22 @@ def pct_text(value) -> str:
     return f"{value:.1f}".replace(".", ",")
 
 
+def devices_text(devices) -> str:
+    """"desktop 2 z 3 · mobile 0 z 3" — how many participants on each device met a
+    problem; "" unless the run used at least two devices (nothing to compare)."""
+    if not isinstance(devices, dict):
+        return ""
+    parts = [f"{name} {v.get('affected', 0)} z {v.get('of', 0)}"
+             for name, v in devices.items() if isinstance(v, dict) and v.get("of")]
+    return " · ".join(parts) if len(parts) >= 2 else ""
+
+
+DEVICES_NOTE = (
+    "Podział na urządzenia pokazuje, ilu uczestników na danym urządzeniu napotkało problem. "
+    "Każdy uczestnik używał jednego urządzenia, więc „0 z 3” znaczy tylko, że tych trzech osób "
+    "problem nie dotyczył — nie dowodzi, że na tym urządzeniu go nie ma.")
+
+
 def evidence_quote(ex: dict, limit: int = 300) -> tuple[str, str]:
     """(label, text) for the quote under an evidence screenshot — one rule for
     every format.
@@ -663,6 +679,8 @@ def _render_issues_group(title: str, issues: list) -> str:
         h_id = issue.get("heuristic_id", "?")
         h_name = _esc(issue.get("heuristic_name", ""))
         freq = _esc(issue.get("frequency", ""))
+        dev = devices_text(issue.get("devices"))
+        devices_html = f'<div class="freq">Na urządzeniach: {_esc(dev)}</div>' if dev else ""
         impact = _esc(issue.get("impact", ""))
         rec = _esc(issue.get("recommendation", ""))
         unverified_badge = (
@@ -737,6 +755,7 @@ def _render_issues_group(title: str, issues: list) -> str:
             {unverified_badge}
           </div>
           <div class="freq">Częstotliwość: {freq}</div>
+          {devices_html}
           <div class="impact">{impact}</div>
           {measured_html}
           {demotion_html}
@@ -762,6 +781,10 @@ def _render_all_issues(narr: dict) -> str:
             else:
                 issue.setdefault("severity", "drobny")
         out += _render_issues_group(title, issues)
+    if out and any(devices_text(i.get("devices")) for k in
+                   ("critical_issues", "serious_issues", "minor_issues")
+                   for i in (narr.get(k) or []) if isinstance(i, dict)):
+        out = _section("Problemy a urządzenia", f'<p class="sb-rules">{_esc(DEVICES_NOTE)}</p>') + out
     return out
 
 
@@ -1591,6 +1614,11 @@ def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
     return _section("Do weryfikacji przez człowieka", f'{intro_html}{note_html}{cards}{extra}')
 
 
+def _legend_devices(hit: dict) -> str:
+    dev = devices_text(hit.get("devices"))
+    return f'<span style="color:#6c757d"> · {_esc(dev)}</span>' if dev else ""
+
+
 def _render_heuristic_legend(stats: dict) -> str:
     """All ten heuristics with their verdict, plus what the method is.
 
@@ -1623,7 +1651,7 @@ def _render_heuristic_legend(stats: dict) -> str:
             _bg, fg, _bd = SEVERITY_COLORS.get(sev, ("#f8f9fa", "#212529", "#dee2e6"))
             verdict = (f'<span style="color:{fg};font-weight:700">{_esc(sev)}</span> '
                        f'<span style="color:#6c757d">· {_esc(hit.get("sessions_affected", ""))}</span>'
-                       f'{pending_note}')
+                       f'{_legend_devices(hit)}{pending_note}')
         elif pending:
             # Not "no violation": something was raised here and set aside. The
             # list below says what, and what would settle it.

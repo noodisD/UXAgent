@@ -320,7 +320,10 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
         cells[0].text = f"H{h_id}"
         cells[1].text = HEURISTIC_NAMES[h_id]
         if hit:
-            cells[2].text = f"{hit.get('worst_severity', '')} · {hit.get('sessions_affected', '')}{note}"
+            from .reporter_html import devices_text
+            dev = devices_text(hit.get("devices"))
+            cells[2].text = (f"{hit.get('worst_severity', '')} · {hit.get('sessions_affected', '')}"
+                             f"{' · ' + dev if dev else ''}{note}")
         elif pending:
             cells[2].text = f"brak potwierdzonych naruszeń{note}"
         elif not observed:
@@ -410,6 +413,11 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             doc.add_paragraph(str(s), style="List Bullet")
 
     # ── Issues, with their evidence ──────────────────────────────────────
+    from .reporter_html import DEVICES_NOTE, devices_text as _devices_text
+    if any(_devices_text(i.get("devices")) for _h, _l in _issues(narr)
+           for i in _l if isinstance(i, dict)):
+        doc.add_heading("Problemy a urządzenia", level=1)
+        doc.add_paragraph(DEVICES_NOTE)
     for heading, issues in _issues(narr):
         if not issues:
             continue
@@ -425,6 +433,10 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 meta.append(_SEVERITY_LABEL[sev])
             if issue.get("frequency"):
                 meta.append(str(issue["frequency"]))
+            from .reporter_html import devices_text
+            dev = devices_text(issue.get("devices"))
+            if dev:
+                meta.append(f"na urządzeniach: {dev}")
             if issue.get("verified") is False:
                 meta.append("NIEZWERYFIKOWANE")
             if meta:

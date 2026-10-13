@@ -51,6 +51,13 @@ Nie wpisuj przykładu opisującego INNĄ wadę: raport pokazuje zrzut ekranu pod
 dowód, więc zrzut innej wady byłby fałszywym dowodem. Dla problemów dostępności (WCAG),
 wydajności i innych bez przykładów w `heuristic_summary` zostaw pole puste.
 
+WAŻNE (urządzenia): `devices` przy heurystyce mówi, ilu uczestników na każdym urządzeniu
+(desktop, mobile) napotkało problem, z ilu było na tym urządzeniu: {{"desktop": {{"affected": 2,
+"of": 3}}, "mobile": {{"affected": 0, "of": 3}}}}. Jeśli problem wystąpił tylko na jednym urządzeniu,
+napisz to wprost — ale NIE twierdź, że na drugim go nie ma: każdy uczestnik używał jednego
+urządzenia, więc „0 z 3" znaczy tylko, że tych trzech osób nie dotyczył. Gdy `devices` jest puste,
+nie pisz nic o urządzeniach.
+
 CROSS-HEURISTIC DEDUPLIKACJA (root_cause.py — deterministyczna, nie Twoja ocena):
 {root_cause_summary}
 critical_count/serious_count/minor_count poniżej JUŻ uwzględniają tę deduplikację —
