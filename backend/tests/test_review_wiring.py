@@ -132,6 +132,6 @@ def test_the_word_file_embeds_the_held_items_screenshot_and_formats_the_first_im
                    {"persona": "Kacper", "score": 3.0, "screenshot": "p1/screenshot/landing.png"}]}}}
     doc = Document(build_docx(agg, tmp_path, tmp_path / "r.docx"))
     text = " | ".join(p.text for p in doc.paragraphs)
-    assert len(doc.inline_shapes) == 2, "one picture for the held item, one for the first impression"
+    assert len(doc.inline_shapes) == 3, "the logo, one picture for the held item, one for the first impression"
     assert "krok 16" in text, "the held item's caption"
     assert "Kacper · 3,00/5" in text and "3.0/5" not in text

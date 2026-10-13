@@ -231,13 +231,24 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     """Write the aggregated report to `out_path` as .docx and return the path."""
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Cm, Pt, RGBColor
 
     from .reporter import HEURISTIC_NAMES, resolve_narrative
 
     stats = agg.get("statistics") or {}
     narr = resolve_narrative(agg)
     doc = Document()
+
+    # ── Logo ─────────────────────────────────────────────────────────────
+    # Red on the white page, matching the site name's accent below it.
+    from .branding import logo_path
+    logo = logo_path("red")
+    if logo is not None:
+        try:
+            doc.add_picture(str(logo), width=Cm(3.6))
+            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.LEFT
+        except Exception as e:  # a bad image must not cost the report
+            log.warning("[docx] could not add the logo: %s", e)
 
     # ── Title ────────────────────────────────────────────────────────────
     title = doc.add_heading("Raport UX", level=0)

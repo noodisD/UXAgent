@@ -71,6 +71,7 @@ def avg_text(value) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
+from .branding import logo_data_uri  # noqa: E402
 from .obstacles import OBSTACLES_INTRO, obstacle_text  # noqa: E402,F401
 from .recurring import INTRO as RECURRING_INTRO, theme_text  # noqa: E402,F401
 from .textutil import (  # noqa: E402,F401  (shared with the Word renderer)
@@ -186,6 +187,8 @@ body {
   width: 240px; height: 30px; background: var(--havas-red);
   transform: rotate(-25deg);
 }
+.report-header .brand-logo { display: block; height: 22px; width: auto; margin-bottom: 30px;
+  position: relative; z-index: 1; }
 .report-header h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em;
   text-transform: uppercase; margin-bottom: 8px; position: relative; z-index: 1; }
 .report-header .subtitle { font-size: 13.5px; color: rgba(255,255,255,.72);
@@ -500,9 +503,13 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
     score_color = _score_color(overall)
     website = _esc(agg.get("website", ""))
     task = _esc(agg.get("task", ""))
+    # White on the black band. Absent logo: no <img>, never a broken-image icon.
+    logo_uri = logo_data_uri("white")
+    logo = f'<img class="brand-logo" src="{logo_uri}" alt="HAVAS">' if logo_uri else ""
 
     return f"""
 <div class="report-header">
+  {logo}
   <h1>Raport UX — {website}</h1>
   <div class="subtitle">{task}</div>
   <div class="header-meta">

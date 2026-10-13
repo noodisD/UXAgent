@@ -144,7 +144,8 @@ def test_evidence_screenshots_are_embedded(tmp_path):
         "persona_name": "Marta", "step": 3, "url": "https://x.pl/koszyk",
         "screenshot": "p1/screenshot/screenshot_3.png", "verified": True,
     }]
-    assert len(_doc(tmp_path, agg).inline_shapes) == 1
+    # the evidence screenshot, plus the Havas logo that opens every Word report
+    assert len(_doc(tmp_path, agg).inline_shapes) == 2
 
 
 def test_a_missing_screenshot_does_not_break_the_build(tmp_path):
@@ -153,7 +154,7 @@ def test_a_missing_screenshot_does_not_break_the_build(tmp_path):
     agg["statistics"]["heuristic"]["by_heuristic"][0]["examples"] = [
         {"persona_name": "X", "step": 1, "screenshot": "nope/missing.png"}
     ]
-    assert len(_doc(tmp_path, agg).inline_shapes) == 0
+    assert len(_doc(tmp_path, agg).inline_shapes) == 1, "only the logo: the missing screenshot adds none"
 
 
 def test_an_unverified_issue_says_so(tmp_path):
