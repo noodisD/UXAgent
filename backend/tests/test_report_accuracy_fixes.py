@@ -143,3 +143,25 @@ def test_the_routes_reach_the_prompt_text():
     text = _routes_text([{"persona": "Ala", "route": ["1: a", "2: b (nieudane)"]}, {"persona": "Bo"}])
     assert text == "Ala: 1: a | 2: b (nieudane)"
     assert _routes_text([]) == "(brak danych)"
+
+
+@pytest.mark.parametrize("text, is_action", [
+    ("Po kliknięciu przycisk wraca do poprzedniego kroku.", True),
+    ("Strona wraca do kroku wyboru wnętrza.", True),
+    # "zwracać błąd" is a page error, not a control that goes back
+    ("Ścieżki do grafik zwracają błąd; wizualizacje powinny się ładować zamiast zwracać błąd.", False),
+])
+def test_zwracac_is_not_a_control_going_back(text, is_action):
+    from simulated_web_agent.main.attribution import _ACTION_CLAIM
+    assert bool(_ACTION_CLAIM.search(text)) is is_action
+
+
+def test_a_short_quoted_word_is_found_as_a_word_not_inside_another():
+    """A finding about an 'info' button was "proved" by the legal footer's
+    "charakter informacyjny"."""
+    from simulated_web_agent.main.evidence import _window
+    text = "Wskazane ceny mają jedynie charakter informacyjny. Karta pakietu: nazwa, cena, info."
+    assert "informacyjny" not in _window(text, "info", 60) and "info" in _window(text, "info", 60)
+    assert _window("Tylko informacyjny tekst.", "info", 60) == ""
+    # longer fragments keep matching inside a longer text, as before
+    assert _window("Dopłata za lakier perłowy", "lakier perł", 40) != ""

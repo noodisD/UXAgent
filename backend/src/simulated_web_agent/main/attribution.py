@@ -326,7 +326,7 @@ def _step_text(store: TraceStore, step: int) -> str | None:
 # SHOWS ("the engine card reads 'null kW (null KM)'") does not.
 _ACTION_CLAIM = re.compile(
     r"klikn|naciśn|wciśn|po\s+(?:wybraniu|zmianie|przej\w+|powrocie|wyborze)|zaktualizowa|"
-    r"zmieni(?:ł|ła|ło|ły|ć)\b|przeni(?:ós|es)|cofa|resetu|wraca|nieaktywn|zablokowa|"
+    r"zmieni(?:ł|ła|ło|ły|ć)\b|przeni(?:ós|es)|cofa|resetu|(?<![a-ząćęłńóśźż])wraca|nieaktywn|zablokowa|"
     r"nie\s+(?:reaguj|działa|zmieni|aktualizu)",
     re.I)
 

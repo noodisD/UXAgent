@@ -29,8 +29,21 @@ def _visible_text(markup: str) -> str:
     return re.sub(r"\s+", " ", _html.unescape(re.sub(r"<[^>]+>", " ", markup))).strip()
 
 
+def _find(text: str, needle: str) -> int:
+    """Index of `needle` in `text`, case-insensitive; -1 when absent.
+
+    A short single word ('info', 'OK') matches only as a whole word. As a substring
+    it found "informacyjny" in a page's legal footer, and the report showed the
+    footer as the proof for a finding about an 'info' button."""
+    needle = needle.strip()
+    if len(needle) <= 6 and " " not in needle:
+        m = re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", text, re.IGNORECASE)
+        return m.start() if m else -1
+    return text.lower().find(needle.lower())
+
+
 def _window(text: str, needle: str, width: int) -> str:
-    i = text.lower().find(needle.lower())
+    i = _find(text, needle)
     if i < 0:
         return ""
     start = max(0, i - (width - len(needle)) // 2)
@@ -60,10 +73,9 @@ def pages_contain(store: TraceStore, fragment: str) -> bool:
     """Did any page this session recorded show `fragment`?"""
     if not fragment or store is None:
         return False
-    needle = fragment.lower()
     for path in sorted((store.trace_dir / "simp_html").glob("simp_html_*.html")):
         try:
-            if needle in _visible_text(path.read_text(encoding="utf-8", errors="replace")).lower():
+            if _find(_visible_text(path.read_text(encoding="utf-8", errors="replace")), fragment) >= 0:
                 return True
         except OSError:
             continue
