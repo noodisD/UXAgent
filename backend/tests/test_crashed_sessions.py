@@ -171,3 +171,11 @@ def test_a_claim_about_what_a_click_did_is_still_checked_by_clicking():
     held = {"repeated_with_progress": "Następny krok", "requires_human_check": True,
             "evidence": "Po kliknięciu przycisk nie zmienia ceny.", "recommendation": "Naprawić."}
     assert "Kliknij „Następny krok”" in _human_check(held)
+
+
+def test_the_aggregate_prompt_forbids_generalising_when_participants_disagree():
+    from pathlib import Path as P
+    prompt = (P(__file__).resolve().parents[1] / "src" / "simulated_web_agent" / "audit_prompts"
+              / "aggregate_synthesize.txt").read_text(encoding="utf-8")
+    assert "sprzeczne obserwacje" in prompt and "nie uogólniaj wady" in prompt
+    assert "proś o wdrożenie czegoś, co w innej ścieżce już działa" in prompt

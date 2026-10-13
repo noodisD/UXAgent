@@ -58,6 +58,15 @@ napisz to wprost — ale NIE twierdź, że na drugim go nie ma: każdy uczestnik
 urządzenia, więc „0 z 3" znaczy tylko, że tych trzech osób nie dotyczył. Gdy `devices` jest puste,
 nie pisz nic o urządzeniach.
 
+WAŻNE (sprzeczne obserwacje): jeśli jeden uczestnik napisał, że dana funkcja zadziałała
+(np. w `wins` jego refleksji: „wybrany model został przeniesiony do formularza”), a inny, że
+nie — nie uogólniaj wady na całą stronę („niezależnie od tego, co przeglądano wcześniej”,
+„formularz nigdy nie…”). Porównaj adresy i kroki ich przykładów i napisz, w jakich warunkach
+funkcja zadziałała, a w jakich zawiodła (np. po wejściu z podsumowania konfiguratora vs z menu
+lub wyszukiwarki dealerów). Rekomendację dopasuj do przypadku, w którym zawiodła — nie
+proś o wdrożenie czegoś, co w innej ścieżce już działa. Jeśli nie da się ustalić warunków,
+napisz wprost, że wyniki uczestników się różnią.
+
 CROSS-HEURISTIC DEDUPLIKACJA (root_cause.py — deterministyczna, nie Twoja ocena):
 {root_cause_summary}
 critical_count/serious_count/minor_count poniżej JUŻ uwzględniają tę deduplikację —
