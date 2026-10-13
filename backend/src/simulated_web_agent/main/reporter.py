@@ -31,6 +31,7 @@ from .severity import (
 from .a11y_checks import a11y_topic, measure_names, merge_pages
 from .evidence import page_quote, pages_contain, rendering_artifact
 from .obstacles import repeated_obstacles
+from .conflicts import annotate_recommendations, clicked_names, find_conflicts, prompt_text as _conflicts_text
 from .recurring import annotate_routes, failed_click_names, group_recurring_reports, route_summary
 from .textutil import clip_words, decimal_text, pl_plural, view_key
 from .scoring import (
@@ -794,6 +795,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             entry["effective_outcome"], entry["outcome_source"] = effective_outcome(store)
             entry["route"] = route_summary(store)
             entry["failed_clicks"] = failed_click_names(store)
+            entry["clicks"] = clicked_names(store)
             _session = store.read_session_result() or {}
             if _session.get("ended_reason") == "error":
                 # The tool crashed this session. The participant's account of why
@@ -1740,6 +1742,12 @@ async def generate_aggregated_report(
                                     pagespeed=pagespeed_data)
     stats["score_breakdown"] = score_result
 
+    try:
+        route_conflicts = await find_conflicts(stats.get("objective_reflections") or [], async_chat)
+    except Exception as e:
+        log.exception("[reporter] contradicting accounts failed (non-fatal): %s", e)
+        route_conflicts = []
+
     prompt = prompt_template.format(
         outcome_distribution=outcome_distribution,
         root_cause_summary=root_cause_summary,
@@ -1750,6 +1758,7 @@ async def generate_aggregated_report(
         website_url=website_url,
         first_impression_stats=fi_stats,
         participant_routes=_routes_text(stats.get("objective_reflections") or []),
+        route_conflicts=_conflicts_text(route_conflicts),
         heuristic_summary=heuristic_summary,
         accessibility_summary=a11y_summary,
         viewport_summary=vp_summary,
@@ -1795,6 +1804,10 @@ async def generate_aggregated_report(
 
     _attach_issue_evidence(narrative, stats, measurements={
         "links": link_data, "pagespeed": pagespeed_data})
+    # Where participants contradict each other, say so beside any recommendation about
+    # it — whatever the model wrote (conflicts.py).
+    stats["route_conflicts"] = route_conflicts
+    annotate_recommendations(narrative, route_conflicts)
 
     try:
         survey_summaries = await _summarize_survey(reports)

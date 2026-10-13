@@ -355,6 +355,7 @@ body {
 .obj-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .obj-who { font-weight: 700; font-size: 15px; }
 .obj-outcome { font-size: 11.5px; font-weight: 700; border-radius: 20px; padding: 3px 11px; }
+.route-caveat { margin-top: 6px; padding: 6px 10px; font-size: 12.5px; color: #8c5a12; background: #fbf2e3; border-radius: 6px; }
 .obj-task { font-size: 12.5px; color: var(--muted); margin-bottom: 9px; font-style: italic; }
 .obj-summary { font-size: 13.5px; line-height: 1.55; margin: 0 0 12px; }
 .obj-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
@@ -683,6 +684,8 @@ def _render_issues_group(title: str, issues: list) -> str:
         devices_html = f'<div class="freq">Na urządzeniach: {_esc(dev)}</div>' if dev else ""
         impact = _esc(issue.get("impact", ""))
         rec = _esc(issue.get("recommendation", ""))
+        if issue.get("route_caveat"):
+            rec += f'<div class="route-caveat">{_esc(issue["route_caveat"])}</div>'
         unverified_badge = (
             '<span class="unverified-badge">⚠ NIEZWERYFIKOWANE</span>'
             if issue.get("verified") is False
@@ -1030,6 +1033,7 @@ def _render_recommendations(narr: dict) -> str:
             <div class="area">{area}</div>
             <div class="action">{action}</div>
             {"" if not impact else f'<div class="impact">Oczekiwany efekt: {impact}</div>'}
+            {f'<div class="route-caveat">{_esc(rec["route_caveat"])}</div>' if rec.get("route_caveat") else ""}
           </div>
         </div>"""
     return _section("Priorytetowe rekomendacje", f'<div class="rec-list">{items}</div>')
@@ -1591,7 +1595,8 @@ def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
     note = _unconfirmed_note(narr)
     obstacles = [o for o in (stats.get("repeated_obstacles") or []) if isinstance(o, dict)]
     recurring = [t for t in (stats.get("recurring_reports") or []) if isinstance(t, dict)]
-    if not items and not note and not obstacles and not recurring:
+    conflicts = [c for c in (stats.get("route_conflicts") or []) if isinstance(c, dict)]
+    if not items and not note and not obstacles and not recurring and not conflicts:
         return ""
     cards = ""
     for it in items:
@@ -1625,6 +1630,11 @@ def _render_verification_list(stats: dict, narr: dict | None = None) -> str:
         rows = "".join(f"<li>{_esc(theme_text(t))}</li>" for t in recurring)
         extra += ('<div class="nv-sub" style="font-weight:700;margin-top:16px;">Opisywane przez wielu '
                   f'uczestników</div><p class="sb-rules">{_esc(RECURRING_INTRO)}</p><ul>{rows}</ul>')
+    if conflicts:
+        from .conflicts import INTRO as CONFLICTS_INTRO, conflict_text
+        rows = "".join(f"<li>{_esc(conflict_text(c))}</li>" for c in conflicts)
+        extra += ('<div class="nv-sub" style="font-weight:700;margin-top:16px;">Rozbieżne relacje '
+                  f'uczestników</div><p class="sb-rules">{_esc(CONFLICTS_INTRO)}</p><ul>{rows}</ul>')
     if obstacles:
         rows = "".join(f"<li>{_esc(obstacle_text(o))}</li>" for o in obstacles)
         extra += ('<div class="nv-sub" style="font-weight:700;margin-top:16px;">Powtarzające się '

@@ -152,6 +152,10 @@ MOST FREQUENT ISSUES (appearing in ≥50% of sessions):
 DROGI UCZESTNIKÓW (ostatnie kroki każdego; „(nieudane)" oznacza kliknięcie, które się nie powiodło):
 {participant_routes}
 
+ROZBIEŻNE RELACJE (to samo u jednych uczestników zadziałało, u innych nie; w nawiasie kontrolka,
+przez którą weszli):
+{route_conflicts}
+
 SURVEY QUESTIONNAIRE RESULTS (each scale question has its own range, given in the legend below;
 open questions carry verbatim answers):
 {survey_summary}
@@ -201,6 +205,9 @@ Rules:
 - first_impression_assessment (rzetelność liczb): każdą średnią przypisz dokładnie do wymiaru, którego dotyczy (jasność celu, widoczność nawigacji, wezwanie do działania, hierarchia wizualna, wiarygodność) — nie łącz kilku wymiarów w jedno zdanie z jedną liczbą. Nie opisuj elementu jako dobrze widocznego ani czytelnego, jeśli średnia jego wymiaru jest poniżej 3.
 - Przyczyny: opisuj objaw widoczny w dowodach (np. wartość „null kW" na karcie silnika), a NIE jego domniemaną przyczynę techniczną (baza danych, serwer, API, pamięć podręczna, skrypt) — zapis sesji jej nie pokazuje. W rekomendacji wskaż, co ma być poprawnie wyświetlone, nie który komponent zawiódł.
 - Tekst alternatywny: skalę (liczbę obrazów i stron) podawaj tylko dla obrazów treści; nie pisz, że problem „występuje na X z X stron", gdy dotyczy ikon i elementów poza treścią.
+- Rozbieżne relacje: jeśli temat rekomendacji jest na liście ROZBIEŻNYCH RELACJI, NIE pisz, że
+  funkcja zawodzi „na stronie" ani nie proś o wdrożenie czegoś, co u części uczestników zadziałało.
+  Napisz, na której drodze zawiodła (kto i przez którą kontrolkę), a rekomendację ogranicz do niej.
 - Droga uczestników: gdy wniosek lub rekomendacja dotyczy miejsca, do którego zadanie kazało dojść konkretną drogą (np. przyciskiem z podsumowania konfiguratora), sprawdź w DROGACH UCZESTNIKÓW, którą drogą weszli tam poszczególni uczestnicy. Jeśli weszli inną (np. z menu po nieudanym kliknięciu przycisku docelowego), nie twierdź, że strona zawodzi na drodze z zadania — napisz, której drogi dotyczy obserwacja, a rekomendację sformułuj ostrożnie („do sprawdzenia na ścieżce z podsumowania").
 - executive_summary: 3–5 sentences covering the overall picture.
 - executive_summary i pozostałe teksty o ukończeniu zadania: liczby i słowa muszą

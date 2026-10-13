@@ -468,6 +468,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 p = doc.add_paragraph()
                 p.add_run("Rekomendacja: ").bold = True
                 p.add_run(str(issue["recommendation"]))
+            if issue.get("route_caveat"):
+                _add_caption(doc, str(issue["route_caveat"]))
             for ex in (issue.get("examples") or [])[:2]:
                 caption = " · ".join(x for x in [
                     ex.get("persona_name"),
@@ -494,7 +496,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
     unconfirmed = _unconfirmed_note(narr)
     obstacles = [o for o in (stats.get("repeated_obstacles") or []) if isinstance(o, dict)]
     recurring = [t for t in (stats.get("recurring_reports") or []) if isinstance(t, dict)]
-    if held_items or unconfirmed or obstacles or recurring:
+    conflicts = [c for c in (stats.get("route_conflicts") or []) if isinstance(c, dict)]
+    if held_items or unconfirmed or obstacles or recurring or conflicts:
         doc.add_heading("Do weryfikacji przez człowieka", level=1)
         if held_items:
             from .reporter_html import held_intro_text
@@ -527,6 +530,12 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             doc.add_paragraph(RECURRING_INTRO)
             for t in recurring:
                 doc.add_paragraph(theme_text(t), style="List Bullet")
+        if conflicts:
+            from .conflicts import INTRO as CONFLICTS_INTRO, conflict_text
+            doc.add_heading("Rozbieżne relacje uczestników", level=2)
+            doc.add_paragraph(CONFLICTS_INTRO)
+            for c in conflicts:
+                doc.add_paragraph(conflict_text(c), style="List Bullet")
         if obstacles:
             from .reporter_html import OBSTACLES_INTRO, obstacle_text
             doc.add_heading("Powtarzające się przeszkody w klikaniu", level=2)
@@ -549,6 +558,8 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
             action = str(r.get("action", ""))
             if r.get("expected_impact"):
                 action += f"\nOczekiwany efekt: {r['expected_impact']}"
+            if r.get("route_caveat"):
+                action += chr(10) + str(r["route_caveat"])
             cells[2].text = action
 
     _add_measurement_sections(doc, agg)
