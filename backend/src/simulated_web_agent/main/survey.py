@@ -27,6 +27,9 @@ _POST_TASK_QUESTIONS = [
     },
 ]
 
+# Question keys read by the scoring (sus.py), never by the persona.
+_SCORING_MARKERS = ("sus_item", "reverse")
+
 
 async def run_survey(
     store: TraceStore,
@@ -42,9 +45,14 @@ async def run_survey(
     """
     survey_prompt = _prompts.get("survey")
 
-    # Append the fixed synthetic post-task questions (SEQ + confidence).
+    # Append the fixed synthetic post-task questions (SEQ + confidence). The
+    # scoring markers stay in the stored questionnaire but not in what the
+    # persona reads: "this is SUS item 4, reverse-scored" would prime its answer.
     questionnaire = dict(questionnaire or {})
-    questionnaire["questions"] = list(questionnaire.get("questions", [])) + _POST_TASK_QUESTIONS
+    questionnaire["questions"] = [
+        {k: v for k, v in q.items() if k not in _SCORING_MARKERS} if isinstance(q, dict) else q
+        for q in questionnaire.get("questions", [])
+    ] + _POST_TASK_QUESTIONS
 
     # Prepend site_context so the persona answers calibrated to the site's purpose
     site_context = store.read_basic_info().get("site_context", "") or ""

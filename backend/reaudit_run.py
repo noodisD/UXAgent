@@ -33,6 +33,7 @@ from simulated_web_agent.main.reporter import (
     generate_per_agent_report,
 )
 from simulated_web_agent.main.run import read_manifest
+from simulated_web_agent.main.sus import questions_from_manifest
 from simulated_web_agent.main.trace_store import TraceStore
 
 logging.basicConfig(level=logging.INFO)
@@ -76,7 +77,7 @@ async def main() -> None:
         await _stage("per-agent report", generate_per_agent_report(s))
         await _stage("objective reflection", generate_objective_reflection(s))
         try:
-            run_iso_metrics(s)
+            run_iso_metrics(s, questions_from_manifest(manifest) or None)
         except Exception:
             log.exception("   iso metrics failed")
         await _stage("bias audit", run_bias_audit(s))

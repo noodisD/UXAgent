@@ -196,11 +196,16 @@ def _add_measurement_sections(doc, agg: dict) -> None:
 
 def _add_survey_section(doc, stats: dict, summaries: dict) -> None:
     """The survey, question by question, as the HTML shows it."""
+    from .reporter_html import REVERSED_TAG, survey_notes
+
     questions = [q for q in ((stats.get("survey") or {}).get("questions") or [])
                  if isinstance(q, dict)]
-    if not questions:
+    notes = survey_notes(stats)
+    if not questions and not notes:
         return
     doc.add_heading("Wyniki ankiety", level=1)
+    for note in notes:
+        doc.add_paragraph(note)
     for q in questions:
         p = doc.add_paragraph()
         p.add_run(str(q.get("prompt") or q.get("id") or "")).bold = True
@@ -221,6 +226,8 @@ def _add_survey_section(doc, stats: dict, summaries: dict) -> None:
                 line += f" · rozkład {dist}"
             if na:
                 line += f" · {na} bez oceny (pytanie nie dotyczyło przebiegu sesji)"
+            if q.get("reverse"):
+                line += f" · {REVERSED_TAG}"
             doc.add_paragraph(line)
         why = summaries.get(q.get("id"))
         if why:

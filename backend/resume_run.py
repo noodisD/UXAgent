@@ -39,6 +39,7 @@ from simulated_web_agent.main.reporter import (
     generate_objective_reflection,
     generate_per_agent_report,
 )
+from simulated_web_agent.main.sus import questions_from_manifest
 from simulated_web_agent.main.trace_store import TraceStore
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -50,7 +51,7 @@ def _persona_dirs(run_dir: Path) -> list[Path]:
     return sorted(p for p in run_dir.iterdir() if p.is_dir() and (p / "basic_info.json").exists())
 
 
-async def _complete_persona(store: TraceStore) -> None:
+async def _complete_persona(store: TraceStore, q_meta: list | None = None) -> None:
     """Run only the per-agent passes whose artifacts are missing.
 
     Mirrors the tail of analysis_runner.run_all_analyses, and is isolated the
@@ -60,7 +61,7 @@ async def _complete_persona(store: TraceStore) -> None:
     steps = [
         ("ux_report.json", "per-agent report", lambda: generate_per_agent_report(store)),
         ("objective_reflection.json", "objective reflection", lambda: generate_objective_reflection(store)),
-        ("iso_metrics.json", "ISO metrics", lambda: run_iso_metrics(store)),
+        ("iso_metrics.json", "ISO metrics", lambda: run_iso_metrics(store, q_meta)),
         ("bias_audit.json", "bias audit", lambda: run_bias_audit(store)),
     ]
     for artifact, label, call in steps:
@@ -92,7 +93,7 @@ async def resume(run_dir: Path) -> None:
     stores = [TraceStore(p) for p in persona_dirs]
     for store in stores:
         log.info("Persona %s", store.trace_dir.name)
-        await _complete_persona(store)
+        await _complete_persona(store, questions_from_manifest(manifest) or None)
 
     report_path = run_dir / "aggregated_report.json"
     if report_path.exists():

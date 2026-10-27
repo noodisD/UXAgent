@@ -192,9 +192,11 @@ def test_persona_satisfaction_average_excludes_placeholders(tmp_path):
     # pB: q1=5 is its only rating; iso_metrics had averaged 5, 3, 3 → 3.67
     sat_b = personas["pB"]["iso"]["satisfaction"]
     assert sat_b["synthetic_score_1_5"] == 5.0 and sat_b["not_assessable"] == 2
-    # pA answered everything: its stored figures are passed through as they are
+    # pA answered everything, so nothing is taken out and the SEQ passes through. The
+    # score is recomputed whether or not a placeholder was dropped: the stored 3.0 is
+    # the fixture's own, and the ratings 4, 4, 3 average 3.67.
     assert personas["pA"]["iso"]["satisfaction"] == {
-        "synthetic_score_1_5": 3.0, "synthetic_seq_1_7": 5.0, "frustration_signals": 0}
+        "synthetic_score_1_5": 3.67, "synthetic_seq_1_7": 5.0, "frustration_signals": 0}
 
 
 def test_placeholder_seq_is_not_a_seq():
@@ -336,3 +338,52 @@ def test_comparison_uses_the_same_score(tmp_path):
     cmp = results_api.build_run(now_dir.name, tmp_path)["comparison"]
     metric = next(m for m in cmp["metrics"] if m["label"] == "Overall score")
     assert (metric["now"], metric["prev"]) == (2.0, b["score"])
+
+
+# --- 3. surveys the tool failed to produce --------------------------------------
+
+def _failed_survey_persona(run_dir, name):
+    """A persona whose survey call was rate-limited: run_survey stored {"error": ...}."""
+    store = _persona(run_dir, name, ANSWERS["pA"])
+    store.write_survey_result({"error": "429 RESOURCE_EXHAUSTED: quota exceeded"})
+    store.write_ux_report(_build_per_agent_json(store))
+    return store
+
+
+def test_the_dashboard_lists_a_failed_survey_and_does_not_count_it(tmp_path):
+    run_dir, _ = _run(tmp_path)
+    _failed_survey_persona(run_dir, "pE")
+    survey = results_api.build_run(run_dir.name, tmp_path)["survey"]
+    assert survey["source"] == "traces"
+    assert [f["persona_dir"] for f in survey["failedSurveys"]] == ["pE"]
+    # Who and why only: the raw error text is not for the client surface.
+    assert "error" not in survey["failedSurveys"][0]
+    assert "429" not in str(survey["failedSurveys"])
+    assert survey["surveysIncluded"] == 3  # pA, pB, pC; pE's survey holds no answer
+    assert survey["excludedSurveys"] == []
+
+
+def test_a_report_stored_before_the_key_existed_has_no_failed_surveys(tmp_path):
+    report = {"narrative": {}, "statistics": {"survey": {
+        "questions": [], "not_assessable": {}, "surveys_included": 3, "excluded_surveys": []}}}
+    run_dir, _ = _run(tmp_path, report=report)
+    survey = results_api.build_run(run_dir.name, tmp_path)["survey"]
+    assert survey["source"] == "report"
+    assert survey["failedSurveys"] == []
+
+
+def test_a_stored_report_passes_its_failed_surveys_through(tmp_path):
+    failed = {"persona_dir": "pE", "persona": "Ewa", "reason": "ankieta nie powiodła się",
+              "error": "429"}
+    report = {"narrative": {}, "statistics": {"survey": {
+        "questions": [], "not_assessable": {}, "surveys_included": 2, "excluded_surveys": [],
+        "failed_surveys": [failed, "junk"]}}}
+    run_dir, _ = _run(tmp_path, report=report)
+    # Who and why only: the stored error text stays in the report, not the payload.
+    assert results_api.build_run(run_dir.name, tmp_path)["survey"]["failedSurveys"] == [
+        {"persona_dir": "pE", "persona": "Ewa", "reason": "ankieta nie powiodła się"}]
+
+
+def test_a_run_without_failures_has_an_empty_list(tmp_path):
+    run_dir, _ = _run(tmp_path)
+    assert results_api.build_run(run_dir.name, tmp_path)["survey"]["failedSurveys"] == []

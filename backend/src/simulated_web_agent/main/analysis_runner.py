@@ -112,7 +112,8 @@ async def run_all_analyses(
     # Post-reflection passes: ISO metrics (sync, reads reflection) and the
     # bias audit (LLM, reads findings + reflection rationale).
     try:
-        run_iso_metrics(store)
+        questions = questionnaire.get("questions") if isinstance(questionnaire, dict) else None
+        run_iso_metrics(store, questions if isinstance(questions, list) else None)
     except Exception:
         log.exception("[analysis_runner] iso metrics failed for %s", store.trace_dir)
     try:

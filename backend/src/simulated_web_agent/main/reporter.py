@@ -44,6 +44,7 @@ from .redaction import (
     clean as _redact, clean_narrative, describes_interaction_trouble, describes_session_crash,
     mentions_harness_fault,
 )
+from .sus import polarity, questions_from_manifest, sus_items, summarize_sus
 from .trace_store import TraceStore
 
 log = logging.getLogger(__name__)
@@ -459,6 +460,36 @@ def _is_truncated_session(report: dict) -> bool:
     return isinstance(steps, int) and steps < MIN_VALID_SESSION_STEPS
 
 
+def _survey_failure(survey) -> str | None:
+    """Why a survey produced no usable answer, or None when it did or never ran.
+
+    run_survey stores {"error": ...} when the model call raised and {"raw": ...}
+    when the reply was not JSON. An answers value that holds no answer is the
+    same failure in a different shape. {} or a missing survey_result is an older
+    run (or a fixture) with no survey, which is not a failure.
+    """
+    if not isinstance(survey, dict) or not survey:
+        return None
+    answers = survey.get("answers")
+    if isinstance(answers, list) and any(_has_answer(a) for a in answers):
+        return None
+    if "error" in survey:
+        return str(survey["error"]).strip() or "nieznany błąd"
+    if "raw" in survey:
+        return "odpowiedź modelu nie była poprawnym JSON-em"
+    # A non-empty result with no usable answer (answers missing, empty, valueless,
+    # or under an unexpected key) is the same failure in another shape.
+    return "ankieta nie zawiera żadnej odpowiedzi"
+
+
+def _has_answer(a) -> bool:
+    """An answer entry that names its question and carries a value."""
+    if not isinstance(a, dict) or a.get("question_id") in (None, ""):
+        return False
+    value = a.get("value", a.get("answer"))
+    return value is not None and str(value).strip() != ""
+
+
 # Post-task metrics appended by the survey pass (not in the questionnaire); they
 # ride a 1-7 scale, not the 1-5 Likert, and each carries its own anchors + label.
 _SYNTHETIC_SCALES = {
@@ -529,14 +560,62 @@ def _not_assessable(value, reason) -> bool:
     return any(m in r for m in _NOT_ASSESSABLE_MARKERS)
 
 
+def _open_question(meta: dict | None) -> bool:
+    """A free-text question: a number typed into it is an answer, not a rating."""
+    return str((meta or {}).get("type") or "").strip().lower() == "short_text"
+
+
+def _number(val) -> float | None:
+    """The value as a float, or None when it is not numeric. 'nan' and 'inf'
+    parse; _rating is what refuses them."""
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _numeric_options(meta: dict | None) -> set[float]:
+    options = (meta or {}).get("options")
+    found = set()
+    for o in options if isinstance(options, (list, tuple)) else ():
+        try:
+            f = float(str(o).strip())
+        except ValueError:
+            continue
+        if math.isfinite(f):
+            found.add(f)
+    return found
+
+
+def _rating(val, meta: dict | None, qid: str) -> float | None:
+    """The answer as a rating, or None when it is not a valid one for this question.
+
+    A 9 on a 1-5 item used to enter the average and n while the distribution
+    dropped it, so the three disagreed. Valid means: a finite number; within the
+    scale for the synthetic SEQ / confidence items; one of the options when the
+    question lists numeric options. A question with no metadata, or with label
+    options ("Tak", "Nie"), keeps accepting any finite number.
+    """
+    num = _number(val)
+    if _open_question(meta) or num is None or not math.isfinite(num):
+        return None
+    if qid in _SYNTHETIC_SCALES:
+        lo, hi, _, _ = _survey_scale(qid, meta)
+        return num if lo <= num <= hi else None
+    options = _numeric_options(meta)
+    return num if not options or num in options else None
+
+
 def _build_survey_questions(survey_scores: dict, survey_open: dict,
-                            q_meta: list | None, avg, survey_na: dict | None = None) -> list[dict]:
+                            q_meta: list | None, avg, survey_na: dict | None = None,
+                            survey_invalid: dict | None = None) -> list[dict]:
     """One entry per question in questionnaire order (synthetic metrics last):
     rated -> value distribution + average + anchored scale; open -> the answers.
     This is what lets the report show the real prompt, the response spread (vital
     at n=5), and the correct scale instead of a bare '/5' bar on an id."""
     q_list = [q for q in (q_meta or []) if isinstance(q, dict)]
     q_map = {q.get("id"): q for q in q_list}
+    reverse = polarity(q_list)
     order = [q.get("id") for q in q_list]
     for qid in list(survey_scores) + list(survey_open) + list(survey_na or {}):
         if qid not in order:
@@ -553,16 +632,24 @@ def _build_survey_questions(survey_scores: dict, survey_open: dict,
                 iv = int(round(v))
                 if iv in counts:
                     counts[iv] += 1
-            out.append({
+            entry = {
                 "id": qid, "prompt": _survey_prompt(qid, meta), "kind": "scale",
                 "min": lo, "max": hi, "low_label": low_l, "high_label": high_l,
                 "avg": avg(vals), "n": len(vals),
                 # Participants who said they could not answer — shown beside n
                 # so the reader knows how thin the average is.
                 "not_assessable": int((survey_na or {}).get(qid, 0)),
+                # Numeric answers outside the question's options, kept out of
+                # n, the average and the distribution alike.
+                "invalid_answers": int((survey_invalid or {}).get(qid, 0)),
                 "distribution": [{"value": v, "count": counts[v]}
                                  for v in range(lo, hi + 1)],
-            })
+            }
+            # A negatively worded item: a high average is the bad outcome, and
+            # every renderer and narrator must read it that way round.
+            if reverse.get(qid):
+                entry["reverse"] = True
+            out.append(entry)
         elif survey_open.get(qid):
             answers = [str(a).strip() for a in survey_open[qid] if str(a).strip()]
             if answers:
@@ -1184,35 +1271,97 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # Answers the participant said it could not give. Kept out of the
     # averages and counted instead — see _not_assessable.
     survey_na: dict[str, int] = defaultdict(int)
+    # Numbers the question's own options rule out (see _rating).
+    survey_invalid: dict[str, int] = defaultdict(int)
+    # Truncated or crashed session: no survey signal. Failed survey: the tool,
+    # not the participant, produced no answers. Each participant lands in one.
     excluded_surveys: list[dict] = []
+    failed_surveys: list[dict] = []
+    surveys_included = 0
+    q_by_id = {q.get("id"): q for q in (q_meta or []) if isinstance(q, dict)}
+    # One row per report, in order, for SUS scoring: a participant is not
+    # identified by persona_dir alone (reports without a trace_dir share "").
+    sus_rows: list[dict] = []
     for r in reports:
+        p_dir = str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1]
+        row = {"persona_dir": p_dir, "persona": _persona_label(r), "answers": {}, "why_not": None}
+        sus_rows.append(row)
         if _is_truncated_session(r):
             sr = r.get("session_result") or {}
             excluded_surveys.append({
-                "persona_dir": str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1],
+                "persona_dir": p_dir,
                 "steps_taken": sr.get("steps_taken"),
                 "reason": (f"sesja przerwana awarią narzędzia po {sr.get('steps_taken')} krokach — ankieta wykluczona ze średnich"
                            if sr.get("ended_reason") == "error" else
                            f"sesja przerwana po {sr.get('steps_taken')} krokach — ankieta wykluczona ze średnich"),
             })
+            row["why_not"] = excluded_surveys[-1]["reason"]
             continue
-        survey = r.get("survey_result") or {}
+        survey = r.get("survey_result")
+        survey = survey if isinstance(survey, dict) else {}
+        failure = _survey_failure(survey)
+        if failure:
+            reason = "ankieta nie powiodła się (usterka narzędzia) — nie wliczona do średnich"
+            failed_surveys.append({
+                "persona_dir": p_dir, "persona": row["persona"], "reason": reason,
+                "error": clip_words(_redact(failure), 160),
+            })
+            row["why_not"] = reason
+            continue
+        if not survey:
+            row["why_not"] = "brak ankiety"
+        answered = False
+        seen_qids: set = set()
         for a in survey.get("answers") or []:
-            qid = a.get("question_id", "")
+            if not isinstance(a, dict) or a.get("question_id") in (None, ""):
+                continue
+            qid = a["question_id"]
+            if qid in seen_qids:
+                continue  # a participant answers a question once: n and avg count it once
+            seen_qids.add(qid)
             val = a.get("value", "")
+            meta = q_by_id.get(qid)
+            rating = _rating(val, meta, qid)
             if _not_assessable(val, a.get("reason") or a.get("reasoning")):
                 survey_na[qid] += 1
-                continue
-            try:
-                survey_scores[qid].append(float(val))
-            except (ValueError, TypeError):
+            elif rating is not None:
+                survey_scores[qid].append(rating)
+                row["answers"][str(qid)] = rating
+            elif _open_question(meta) or _number(val) is None:
                 # Same reasoning as the reflections above: free text straight
                 # from the persona, never gated, and read by the aggregate pass.
                 survey_open[qid].append(_redact(str(val)))
+            else:
+                survey_invalid[qid] += 1
+                continue
+            answered = True
+        if answered:
+            surveys_included += 1
 
     def _avg(lst: list) -> float | None:
         clean = [x for x in lst if x is not None]
         return round(statistics.mean(clean), 2) if clean else None
+
+    survey_stats = {
+        "avg_scores": {k: _avg(v) for k, v in survey_scores.items()},
+        "open_answers": {k: v for k, v in survey_open.items()},
+        # Enriched, questionnaire-ordered view: real prompts, per-value
+        # distribution, correct scale + anchors. reporter_html renders this.
+        "questions": _build_survey_questions(survey_scores, survey_open, q_meta, _avg,
+                                             survey_na, survey_invalid),
+        "not_assessable": dict(survey_na),
+        "invalid_answers": dict(survey_invalid),
+        # Participants who contributed at least one answer. A truncated session
+        # and a failed survey are not among them; each is listed apart below.
+        "surveys_included": surveys_included,
+        "excluded_surveys": excluded_surveys,
+        "failed_surveys": failed_surveys,
+    }
+    # SUS is scored per participant, never as an average across its items: the
+    # ten items run in both directions, so avg_scores above is not a SUS figure.
+    sus_map = sus_items(q_meta)
+    if sus_map is not None:
+        survey_stats["sus"] = summarize_sus(sus_map, sus_rows)
 
     return {
         "participant_count": n,
@@ -1285,17 +1434,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # What the walkthrough itself ran on, as {device: session count}.
             "session_devices": session_devices,
         },
-        "survey": {
-            "avg_scores": {k: _avg(v) for k, v in survey_scores.items()},
-            "open_answers": {k: v for k, v in survey_open.items()},
-            # Enriched, questionnaire-ordered view: real prompts, per-value
-            # distribution, correct scale + anchors. reporter_html renders this.
-            "questions": _build_survey_questions(survey_scores, survey_open, q_meta, _avg,
-                                                 survey_na),
-            "not_assessable": dict(survey_na),
-            "surveys_included": n - len(excluded_surveys),
-            "excluded_surveys": excluded_surveys,
-        },
+        "survey": survey_stats,
     }
 
 
@@ -1555,8 +1694,24 @@ def _survey_legend(survey_stats: dict | None) -> str:
             continue
         scale = (f"skala {q.get('min', 1)}–{q.get('max', 5)}" if q.get("kind") == "scale"
                  else "pytanie otwarte" if q.get("kind") == "open" else "")
+        if scale and q.get("reverse"):
+            scale += "; odwrócone: wyższa średnia = gorzej"
         lines.append(f"- {q['id']} = {q.get('prompt') or ''}" + (f" ({scale})" if scale else ""))
     return "\n".join(lines) or "(brak pytań ankiety)"
+
+
+def _survey_for_prompt(survey_stats: dict | None) -> dict:
+    """statistics.survey as the aggregate narrator reads it.
+
+    A failed survey keeps who and why but not the tool's own error text: that
+    is a log line about the tool, and the narrator has turned such lines into
+    findings about the site.
+    """
+    out = dict(survey_stats or {})
+    if "failed_surveys" in out:
+        out["failed_surveys"] = [{k: v for k, v in f.items() if k != "error"}
+                                 for f in out["failed_surveys"] or [] if isinstance(f, dict)]
+    return out
 
 
 def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
@@ -1682,13 +1837,8 @@ async def generate_aggregated_report(
     q_meta = None
     try:
         if stores:
-            _mani = json.loads(
-                (stores[0].trace_dir.parent / "run_manifest.json").read_text(encoding="utf-8"))
-            _qn = _mani.get("questionnaire")
-            if isinstance(_qn, str):
-                _qn = json.loads(_qn)
-            if isinstance(_qn, dict):
-                q_meta = _qn.get("questions")
+            q_meta = questions_from_manifest(json.loads(
+                (stores[0].trace_dir.parent / "run_manifest.json").read_text(encoding="utf-8")))
     except Exception:
         q_meta = None
 
@@ -1718,7 +1868,7 @@ async def generate_aggregated_report(
     vp_summary = json.dumps(stats["viewport"], ensure_ascii=False, indent=2)
     sc = stats["heuristic"]["severity_counts"]
     top_issues = _top_issues_text(stats)
-    survey_summary = json.dumps(stats.get("survey", {}), ensure_ascii=False, indent=2)
+    survey_summary = json.dumps(_survey_for_prompt(stats.get("survey")), ensure_ascii=False, indent=2)
 
     # Measured task-completion — anchors the score to observed reality (§4.2),
     # not only synthetic self-report. Also recorded in stats for the payload.
@@ -1810,7 +1960,7 @@ async def generate_aggregated_report(
     annotate_recommendations(narrative, route_conflicts)
 
     try:
-        survey_summaries = await _summarize_survey(reports)
+        survey_summaries = await _summarize_survey(reports, q_meta)
     except Exception as e:
         log.exception("[reporter] survey summaries failed (non-fatal): %s", e)
         survey_summaries = {}
@@ -1850,7 +2000,10 @@ async def generate_aggregated_report(
     return aggregated
 
 
-async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
+_REVERSED_NOTE = "pytanie negatywne — niska średnia oznacza ocenę dobrą"
+
+
+async def _summarize_survey(reports: list[dict], q_meta: list | None = None) -> dict[str, str]:
     """One Polish 'why agents answered this way' summary per survey question.
 
     Keyed by question id. It used to return a positional list ordered by
@@ -1858,45 +2011,71 @@ async def _summarize_survey(reports: list[dict]) -> dict[str, str]:
     list by array index — but that list is questionnaire-ordered and omits
     questions nobody answered, so any gap shifted every later summary onto the
     wrong question. The LLM already replies keyed by id; keep it that way.
+
+    Answers are sorted as aggregate_statistics sorts them, so the mean given to
+    the model is the average and n the report prints: a placeholder ("cannot
+    assess") is not an answer, and neither is a number the question's own
+    options rule out. `q_meta` supplies those options and which questions are
+    worded negatively.
     """
+    q_by_id = {q.get("id"): q for q in (q_meta or []) if isinstance(q, dict)}
+    reversed_ids = {qid for qid, rev in polarity(q_meta).items() if rev}
     per_question: dict[str, list[str]] = {}
     numbers: dict[str, list[float]] = {}
     order: list[str] = []
     for r in reports:
         if _is_truncated_session(r):
             continue
-        survey = r.get("survey_result") or {}
+        survey = r.get("survey_result")
+        survey = survey if isinstance(survey, dict) else {}
         for a in survey.get("answers") or []:
-            qid = a.get("question_id")
+            qid = a.get("question_id") if isinstance(a, dict) else None
             if not qid:
+                continue
+            value, reason = a.get("value", ""), a.get("reason") or a.get("reasoning") or ""
+            if _not_assessable(value, reason):
+                continue
+            meta = q_by_id.get(qid)
+            rating = _rating(value, meta, qid)
+            if rating is None and not _open_question(meta) and _number(value) is not None:
                 continue
             if qid not in per_question:
                 per_question[qid] = []
                 order.append(qid)
             per_question[qid].append(
-                f"odpowiedź: {a.get('value', '')} | uzasadnienie: {str(a.get('reason', ''))[:400]}"
+                f"odpowiedź: {value} | uzasadnienie: {str(reason)[:400]}"
             )
-            try:
-                numbers.setdefault(qid, []).append(float(a.get("value")))
-            except (TypeError, ValueError):
-                pass
+            if rating is not None:
+                numbers.setdefault(qid, []).append(rating)
 
     if not order:
         return []
 
     # The mean goes with the answers: "ocenili pozytywnie" was written under a
     # question whose answers averaged 3,17 of 5 — the model read the reasons, not
-    # the numbers beside them.
-    payload = {qid: ({"średnia": round(sum(numbers[qid]) / len(numbers[qid]), 2),
-                      "odpowiedzi": per_question[qid]} if numbers.get(qid) else per_question[qid])
-               for qid in order}
+    # the numbers beside them. A negatively worded question carries a note,
+    # because the same mean means the opposite there.
+    payload = {}
+    for qid in order:
+        entry: dict | list = per_question[qid]
+        if numbers.get(qid):
+            entry = {"średnia": round(statistics.mean(numbers[qid]), 2), "odpowiedzi": entry}
+        if qid in reversed_ids:
+            entry = {**(entry if isinstance(entry, dict) else {"odpowiedzi": entry}),
+                     "uwaga": _REVERSED_NOTE}
+        payload[qid] = entry
     system = (
         "You are a UX researcher. For EACH survey question (keyed by question id), "
         "synthesise WHY the agents answered the way they did, based on their stated "
         "reasoning. 2-4 sentences per question, in Polish. "
-        "Where a mean is given (\"średnia\"), the tone must agree with it: do not call "
+        "Where a mean is given (\"średnia\") on an ordinary question (one without an "
+        "\"uwaga\" note), the tone must agree with it: do not call "
         "answers positive or high when the mean is in the lower half of the scale or near "
         "its middle (about 3 of 5, about 4 of 7) — say the opinions were mixed. "
+        "A question with an \"uwaga\" note is worded negatively (agreeing means a worse "
+        "opinion of the site), so its scale reads the other way round: a LOW mean is a good "
+        "assessment and a HIGH mean a bad one. Never call a high mean on such a question "
+        "positive: a mean near the middle means mixed opinions, a high one negative opinions. "
         "Describe only why they answered as they did. Do NOT state as fact that buttons, "
         "links or pages malfunctioned (did not respond, looped, blocked clicks, script "
         "errors): participants sometimes describe the automation failing, so report such "

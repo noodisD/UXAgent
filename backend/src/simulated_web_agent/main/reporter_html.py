@@ -77,6 +77,7 @@ from .recurring import INTRO as RECURRING_INTRO, theme_text  # noqa: E402,F401
 from .textutil import (  # noqa: E402,F401  (shared with the Word renderer)
     clip_words, decimal_text, display_url, pl_plural, sessions_in,
 )
+from .sus import BENCHMARK_HUMAN, BENCHMARK_NOTE  # noqa: E402
 
 
 def pct_text(value) -> str:
@@ -448,9 +449,15 @@ body {
 .sv-anchors { display: flex; justify-content: space-between; font-size: 11px;
   color: #8b929c; margin-top: 7px; }
 .sv-n { font: 11px ui-monospace, monospace; color: #b7bcc4; margin-top: 8px; }
-.sv-open .sv-q-tag { font: 600 10px ui-monospace, monospace; text-transform: uppercase;
+.sv-open .sv-q-tag, .sv-rev .sv-q-tag { font: 600 10px ui-monospace, monospace; text-transform: uppercase;
   letter-spacing: .04em; color: #8b929c; border: 1px solid #e2e5ea; border-radius: 4px;
   padding: 3px 7px; white-space: nowrap; }
+.sv-rev .sv-q-tag { display: inline-block; margin: -6px 0 12px; }
+.sv-rev .sv-track { background: linear-gradient(90deg, #a9dcc0, #f5e6a8 50%, #f0b6b6); }
+.sv-notes { font-size: 13px; color: #3a3f47; line-height: 1.55; margin: 0 0 20px;
+  padding: 12px 14px; background: #f6f7f9; border-radius: 8px; }
+.sv-notes p { margin: 0 0 6px; }
+.sv-notes p:last-child { margin-bottom: 0; }
 .sv-answers { list-style: none; margin: 4px 0 0; padding: 0; display: flex;
   flex-direction: column; gap: 7px; }
 .sv-answers li { font-size: 13px; color: #40454c; background: #f6f7f9;
@@ -848,12 +855,16 @@ def _render_first_impression(stats: dict, narr: dict) -> str:
     return _section("Pierwsze wrażenie (test 5 sekund)", shots + body)
 
 
-def _scale_color(avg: float | None, lo: int, hi: int) -> str:
+def _scale_color(avg: float | None, lo: int, hi: int, reverse: bool = False) -> str:
     """Colour a rated answer by where the average sits in its OWN range, so a
-    1-7 SEQ is not judged against 1-5 thresholds."""
+    1-7 SEQ is not judged against 1-5 thresholds. A reversed question (worded
+    negatively) is judged from the other end: 4,0 of 5 on "unnecessarily
+    complex" is a bad result, not a good one."""
     if avg is None or hi <= lo:
         return "#6c757d"
     frac = (avg - lo) / (hi - lo)
+    if reverse:
+        frac = 1 - frac
     if frac >= 0.7:
         return "#008573"
     if frac >= 0.45:
@@ -864,7 +875,8 @@ def _scale_color(avg: float | None, lo: int, hi: int) -> str:
 def _render_scale_question(q: dict) -> str:
     lo, hi = q["min"], q["max"]
     avg = q.get("avg")
-    color = _scale_color(avg, lo, hi)
+    reverse = bool(q.get("reverse"))
+    color = _scale_color(avg, lo, hi, reverse)
     dist = q.get("distribution") or []
     peak = max((d["count"] for d in dist), default=0) or 1
     cols = ""
@@ -877,18 +889,23 @@ def _render_scale_question(q: dict) -> str:
                  f'<div class="sv-tick">{d["value"]}</div></div>')
     pct = round((avg - lo) / (hi - lo) * 100) if (avg is not None and hi > lo) else 0
     avgtxt = avg_text(avg)
+    rev_tag = f'<span class="sv-q-tag">{REVERSED_TAG}</span>' if reverse else ""
     return f"""
-    <div class="sv-q">
+    <div class="sv-q{' sv-rev' if reverse else ''}">
       <div class="sv-q-head">
         <span class="sv-q-text">{_esc(q['prompt'])}</span>
         <span class="sv-q-avg" style="color:{color};">śr. {avgtxt} / {hi}</span>
       </div>
+      {rev_tag}
       <div class="sv-hist">{cols}</div>
       <div class="sv-track"><span class="sv-marker" style="left:{pct}%;"></span></div>
       <div class="sv-anchors"><span>{lo} · {_esc(q['low_label'])}</span>
         <span>{_esc(q['high_label'])} · {hi}</span></div>
       <div class="sv-n">n = {q.get('n', 0)}{_na_note(q)}</div>
     </div>"""
+
+
+REVERSED_TAG = "pytanie odwrócone: niżej = lepiej"
 
 
 def _na_note(q: dict) -> str:
@@ -923,26 +940,84 @@ def _render_open_question(q: dict) -> str:
     </div>"""
 
 
+def _sus_line(sus: dict) -> str:
+    """The run's SUS result in one sentence (statistics.survey.sus).
+
+    The mean is printed only when the block carries one; below two scored
+    participants it says how many were scored instead. Always labelled as the
+    personas' own synthetic rating, with the human benchmark as context.
+    """
+    scored, total = sus.get("n_scored") or 0, sus.get("n_participants") or 0
+    context = (f"Syntetyczna samoocena person; benchmark {sus.get('benchmark_human', BENCHMARK_HUMAN)} "
+               f"{sus.get('benchmark_note') or BENCHMARK_NOTE}.")
+    mean, lo, hi = sus.get("mean"), sus.get("min"), sus.get("max")
+    if isinstance(mean, (int, float)) and not isinstance(mean, bool):
+        spread = (f"; zakres {decimal_text(lo)}–{decimal_text(hi)}"
+                  if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) else "")
+        return f"SUS: {decimal_text(mean)}/100 (n={scored} z {total}{spread}). {context}"
+    if not scored:
+        return f"SUS: nie policzono wyniku dla żadnego z {total} uczestników."
+    only = f" ({decimal_text(lo)}/100)" if scored == 1 and isinstance(lo, (int, float)) else ""
+    return (f"SUS: bez średniej — wynik policzono dla {scored} z {total} uczestników{only}. "
+            f"{context}")
+
+
+def survey_notes(stats: dict) -> list[str]:
+    """What qualifies the survey's numbers, one sentence each: the SUS result,
+    who has none and why, and whose survey the tool failed to produce. Shared
+    by the HTML and Word renderers, printed above the questions.
+    """
+    survey = stats.get("survey") or {}
+    failed = [f for f in survey.get("failed_surveys") or [] if isinstance(f, dict)]
+    notes: list[str] = []
+    sus = survey.get("sus")
+    if isinstance(sus, dict):
+        notes.append(_sus_line(sus))
+        # A failed survey is named below; listing it here too would say it twice.
+        failed_ids = {(f.get("persona_dir"), f.get("persona")) for f in failed}
+        unscored = [
+            f"{p.get('persona') or p.get('persona_dir') or '—'} ({p['why_not']})"
+            for p in sus.get("per_participant") or []
+            if isinstance(p, dict) and p.get("score") is None and p.get("why_not")
+            and (p.get("persona_dir"), p.get("persona")) not in failed_ids]
+        if unscored:
+            notes.append("Bez wyniku SUS: " + "; ".join(unscored) + ".")
+    if failed:
+        names = ", ".join(str(f.get("persona") or f.get("persona_dir") or "—") for f in failed)
+        included, total = survey.get("surveys_included"), stats.get("participant_count")
+        counted = (f" (n={included} z {total})"
+                   if isinstance(included, int) and isinstance(total, int) else "")
+        notes.append(
+            (f"Ankieta nie powiodła się dla: {names} — jej odpowiedzi nie wchodzą do średnich{counted}."
+             if len(failed) == 1 else
+             f"Ankiety nie powiodły się dla: {names} — ich odpowiedzi nie wchodzą do średnich{counted}."))
+    return notes
+
+
 def _render_survey(stats: dict, summaries: dict | None = None) -> str:
     survey = stats.get("survey") or {}
     questions = survey.get("questions") or []
+    notes = survey_notes(stats)
+    notes_html = (f'<div class="sv-notes">{"".join(f"<p>{_esc(n)}</p>" for n in notes)}</div>'
+                  if notes else "")
 
     if not questions:
         # Legacy runs (no enriched questions): fall back to the old id + bar.
         avg_scores = survey.get("avg_scores") or {}
-        if not avg_scores:
+        if not avg_scores and not notes:
             return ""
         rows = "".join(
             f'<div class="score-row"><div class="dim-label">'
             f'{_esc(qid)}</div>{_score_bar(avg_scores[qid])}</div>'
             for qid in sorted(avg_scores))
-        return _section("Wyniki ankiety", f'<div class="survey-grid">{rows}</div>')
+        return _section("Wyniki ankiety",
+                        notes_html + (f'<div class="survey-grid">{rows}</div>' if rows else ""))
 
     legend = ('<p class="sv-legend">Słupki pokazują, ilu uczestników wybrało daną '
               'wartość na skali; znacznik <b>●</b> to średnia. Kotwice skali (co '
               'oznacza wartość najniższa i najwyższa) są podane pod każdym pytaniem. '
               'Pytania otwarte cytują odpowiedzi uczestników.</p>')
-    body = [legend]
+    body = [notes_html, legend]
     for q in questions:
         body.append(_render_open_question(q) if q.get("kind") == "open"
                     else _render_not_assessable_question(q) if q.get("kind") == "not_assessable"

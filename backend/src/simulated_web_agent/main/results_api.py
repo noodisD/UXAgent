@@ -22,16 +22,17 @@ from pathlib import Path
 from typing import Any
 
 from . import run_storage
-from .iso_metrics import _numeric_survey_avg, current_effectiveness, effective_outcome
+from .iso_metrics import _numeric_survey_avg, current_effectiveness, effective_outcome, reversed_ids
 from .persona_matrix import build_persona_task_matrix
 # The report's own definitions. The dashboard used to average survey answers
 # its own way, so a placeholder "3" from a persona who never reached payment
 # ("nie mogę ocenić") sat in the dashboard's averages after the report had
 # stopped counting it. Importing the predicate and the aggregation, rather than
 # copying them, is what keeps the two from drifting apart again.
-from .reporter import _gate_reason, _not_assessable, aggregate_statistics
+from .reporter import _gate_reason, _is_truncated_session, _not_assessable, aggregate_statistics
 from .run import read_manifest
 from .severity import SEVERITY_EN, excluded_from_report, severity_score
+from .sus import questions_from_manifest, sus_items, sus_score
 from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger(__name__)
@@ -131,29 +132,38 @@ def _survey_rows(survey: dict, q_prompts: dict[str, str]) -> list[dict]:
     return rows
 
 
-def _dashboard_iso(iso: Any, survey: dict) -> Any:
-    """iso_metrics with not-assessable survey answers taken out of satisfaction.
+def _dashboard_iso(iso: Any, survey: dict, q_meta: list | None = None,
+                   include_sus: bool = True) -> Any:
+    """iso_metrics as the dashboard shows it: the report's figures, not the stored ones.
 
-    iso_metrics averages every 1-5 answer into synthetic_score_1_5 and copies
+    iso_metrics averaged every 1-5 answer into synthetic_score_1_5 and copied
     the SEQ / confidence answers verbatim, placeholders included — the same "3"
     the report no longer counts. Recomputed here with iso_metrics' own average
-    over the answers the report would keep; the stored file is not rewritten.
+    over the answers the report would keep, and with the questionnaire's
+    negatively worded questions flipped (the stored file mixed the two
+    directions, and is not rewritten). When the persona answered all ten SUS
+    items, its score on the 0-100 scale is added beside it, unless the report
+    left this persona's survey out (`include_sus` False).
     """
     if not isinstance(iso, dict) or not isinstance(iso.get("satisfaction"), dict):
         return iso
     answers = [a for a in _as_list(_as_dict(survey).get("answers")) if isinstance(a, dict)]
     placeholders = [a for a in answers if _answer_not_assessable(a)]
-    if not placeholders:
-        return iso
     kept = {**_as_dict(survey), "answers": [a for a in answers if not _answer_not_assessable(a)]}
     sat = dict(iso["satisfaction"])
-    sat["synthetic_score_1_5"] = _numeric_survey_avg(kept)
-    na_ids = {a.get("question_id") for a in placeholders}
-    if "synthetic_seq" in na_ids:
-        sat["synthetic_seq_1_7"] = None
-    if "synthetic_confidence" in na_ids:
-        sat["synthetic_confidence_1_7"] = None
-    sat["not_assessable"] = len(placeholders)
+    sat["synthetic_score_1_5"] = _numeric_survey_avg(kept, reversed_ids(q_meta))
+    if placeholders:
+        na_ids = {a.get("question_id") for a in placeholders}
+        if "synthetic_seq" in na_ids:
+            sat["synthetic_seq_1_7"] = None
+        if "synthetic_confidence" in na_ids:
+            sat["synthetic_confidence_1_7"] = None
+        sat["not_assessable"] = len(placeholders)
+    items = sus_items(q_meta)
+    if include_sus and items is not None:
+        score, _why = sus_score({a.get("question_id"): a.get("value") for a in kept["answers"]}, items)
+        if score is not None:
+            sat["sus_score_0_100"] = score
     return {**iso, "satisfaction": sat}
 
 
@@ -180,7 +190,7 @@ def _effective_outcome(store) -> str:
     return "failed" if outcome == "persona_abandoned" else outcome
 
 
-def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
+def build_persona(trace_dir: Path, q_prompts: dict[str, str], q_meta: list | None = None) -> dict:
     store = TraceStore(trace_dir)
     card = _as_dict(store.read_persona_card())
     basic = _as_dict(store.read_basic_info())
@@ -292,7 +302,9 @@ def build_persona(trace_dir: Path, q_prompts: dict[str, str]) -> dict:
             for h in heuristics
         ],
         "survey": _survey_rows(survey, q_prompts),
-        "iso": _dashboard_iso(iso, survey),
+        # A session the report leaves out as truncated has no SUS in the report.
+        "iso": _dashboard_iso(iso, survey, q_meta, include_sus=not _is_truncated_session(
+            {"session_result": _as_dict(store.read_session_result())})),
         "biasAudit": store.read_bias_audit(),
         "cognitiveWalkthrough": store.read_cognitive_walkthrough(),
     }
@@ -322,18 +334,6 @@ def _first_persona_site_context(run_dir: Path) -> str:
         if isinstance(ctx, str) and ctx.strip():
             return ctx.strip()
     return ""
-
-
-def _questionnaire_questions(manifest: dict) -> list[dict]:
-    """The manifest's questionnaire questions. Read the way the reporter reads
-    them, which also accepts a questionnaire stored as a JSON string."""
-    qn = manifest.get("questionnaire")
-    if isinstance(qn, str):
-        try:
-            qn = json.loads(qn)
-        except ValueError:
-            qn = None
-    return [q for q in _as_list(_as_dict(qn).get("questions")) if isinstance(q, dict)]
 
 
 def _is_number(v) -> bool:
@@ -442,6 +442,16 @@ def _run_survey(run_dir: Path, report: dict | None, q_meta: list[dict]) -> dict 
         "surveysIncluded": survey.get("surveys_included"),
         "excludedSurveys": [e for e in _as_list(survey.get("excluded_surveys"))
                             if isinstance(e, dict)],
+        # Surveys the tool failed to produce; a stored report that predates
+        # the key has none to show.
+        # Who and why only: the raw error text can carry quota and
+        # infrastructure detail, and nothing on the dashboard shows it.
+        "failedSurveys": [{k: e.get(k) for k in ("persona_dir", "persona", "reason")}
+                          for e in _as_list(survey.get("failed_surveys"))
+                          if isinstance(e, dict)],
+        # The run's SUS result (sus.summarize_sus); None when the questionnaire
+        # is not SUS or the stored report predates it.
+        "sus": _as_dict(survey.get("sus")) or None,
     }
 
 
@@ -478,10 +488,10 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
     if manifest is None:
         return None
 
-    q_meta = _questionnaire_questions(manifest)
+    q_meta = questions_from_manifest(manifest)
     q_prompts = {q.get("id"): q.get("prompt", "") for q in q_meta if q.get("id")}
 
-    personas = [build_persona(d, q_prompts) for d in _persona_dirs(run_dir)]
+    personas = [build_persona(d, q_prompts, q_meta) for d in _persona_dirs(run_dir)]
 
     ps_score, ps_device = _pagespeed_perf(run_dir)
     meta = {

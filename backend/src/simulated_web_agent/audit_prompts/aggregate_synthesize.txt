@@ -162,6 +162,25 @@ open questions carry verbatim answers):
 Question legend for THIS study (id = wording, scale):
 {survey_legend}
 
+WAŻNE (ankieta, pytania odwrócone i SUS): niektóre pytania są sformułowane negatywnie (np. „Strona
+była niepotrzebnie skomplikowana”). Takie pytanie ma w `survey_summary` pole `reverse: true`, a w
+legendzie dopisek „odwrócone”. Dla niego WYŻSZA średnia oznacza GORSZĄ ocenę, a niższa lepszą —
+czytaj je odwrotnie niż pozostałe i nigdy nie nazywaj jego wysokiej średniej pozytywną.
+Nie uśredniaj surowych odpowiedzi z RÓŻNYCH pytań w jedną „średnią ankiety” ani „ogólną ocenę
+ankiety”: pytania mają przeciwne kierunki, więc taka liczba nic nie znaczy. Każdą średnią podawaj
+przy jej własnym pytaniu.
+Wynik SUS (skala 0–100) bierz WYŁĄCZNIE z `survey_summary.sus` (`mean`, `n_scored`,
+`n_participants`, `min`, `max`) — sam go nie obliczaj ani nie wyprowadzaj ze średnich pytań. Jeśli
+`mean` jest puste (SUS policzono dla mniej niż dwóch uczestników), nie podawaj średniej SUS: napisz
+tylko, dla ilu z ilu uczestników go policzono. SUS to syntetyczna samoocena person, a
+`benchmark_human` dotyczy ludzi — możesz go wspomnieć jako kontekst, ale nie porównuj z nim wyniku
+person ani nie pisz, że strona jest powyżej lub poniżej rynkowej średniej. Jeśli w
+`survey_summary` nie ma pola `sus`, nie pisz o wyniku SUS w ogóle. Uczestnicy z `why_not` nie mają
+wyniku SUS — nie zgaduj go.
+Pole `failed_surveys` wymienia uczestników, których ankiet narzędzie nie zdołało zebrać: to usterka
+POMIARU, a nie wada strony ani odpowiedź uczestnika. Ich odpowiedzi nie wchodzą do średnich, a
+`surveys_included` ich nie obejmuje. Nie opisuj tego jako problemu strony.
+
 ## Output format
 
 Produce exactly this JSON structure (no markdown fences in the final block). ALL text values must be in Polish.

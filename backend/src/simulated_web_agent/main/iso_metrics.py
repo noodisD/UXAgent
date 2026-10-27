@@ -30,6 +30,7 @@ from .attribution import _FALLBACK_MARKERS, harness_suspect_steps
 from .trace_store import parse_action as _parse_action
 from .session_goal_state import observed_outcome
 from .site_scope import target_url_for
+from .sus import polarity
 from .trace_store import TraceStore
 
 # Declared outcomes the LLM may emit — used only to detect observed/declared
@@ -51,7 +52,14 @@ _OUTCOME_MAP = {
 _POST_TASK_IDS = {"synthetic_seq", "synthetic_confidence"}
 
 
-def _numeric_survey_avg(survey: dict) -> float | None:
+def _numeric_survey_avg(survey: dict, reverse: frozenset | set = frozenset()) -> float | None:
+    """The persona's mean 1-5 answer, negatively worded questions flipped (6 - v).
+
+    Without the flip the mean mixes two directions: Julia's SUS answers average
+    2,2 raw and 4,2 flipped, and the raw figure was narrated as "very low" for
+    a participant whose SUS is 80. For a complete SUS the flipped mean is
+    SUS / 25 + 1. `reverse` is the set of reversed question ids (sus.polarity).
+    """
     vals: list[float] = []
     for a in (survey or {}).get("answers", []) or []:
         if a.get("question_id") in _POST_TASK_IDS:
@@ -62,8 +70,13 @@ def _numeric_survey_avg(survey: dict) -> float | None:
         except (TypeError, ValueError):
             continue
         if 1 <= f <= 5:  # SUS/Likert scale answers only
-            vals.append(f)
+            vals.append(6 - f if a.get("question_id") in reverse else f)
     return round(sum(vals) / len(vals), 2) if vals else None
+
+
+def reversed_ids(q_meta) -> frozenset:
+    """The ids of the questionnaire's negatively worded questions."""
+    return frozenset(qid for qid, rev in polarity(q_meta).items() if rev)
 
 
 _INJECTED_BACK_MARKERS = _FALLBACK_MARKERS + ("zamknięta regułami badania",)
@@ -93,8 +106,12 @@ def _has_stuck_run(actions: list, length: int = 3) -> bool:
     return False
 
 
-def compute_iso_metrics(store: TraceStore) -> dict:
-    """Return effectiveness / efficiency / satisfaction signals for one run."""
+def compute_iso_metrics(store: TraceStore, q_meta: list | None = None) -> dict:
+    """Return effectiveness / efficiency / satisfaction signals for one run.
+
+    `q_meta` is the questionnaire's `questions`; it says which survey answers
+    read the other way round. None (the default) averages every answer as given.
+    """
     session = store.read_session_result() or {}
     reflection = store.read_objective_reflection() or {}
     survey = store.read_survey_result() or {}
@@ -138,7 +155,7 @@ def compute_iso_metrics(store: TraceStore) -> dict:
     reached_step_limit = ended_reason == "max_steps"
 
     # --- satisfaction (SYNTHETIC self-report — never a real-user metric) ---
-    synth_score = _numeric_survey_avg(survey)
+    synth_score = _numeric_survey_avg(survey, reversed_ids(q_meta))
     frustration_signals = backtracks + len(suspect)
 
     def _answer(qid: str) -> float | None:
@@ -188,9 +205,9 @@ def compute_iso_metrics(store: TraceStore) -> dict:
     }
 
 
-def run_iso_metrics(store: TraceStore) -> dict:
+def run_iso_metrics(store: TraceStore, q_meta: list | None = None) -> dict:
     """Compute and persist ISO 9241-11 metrics for a run (cheap sync pass)."""
-    metrics = compute_iso_metrics(store)
+    metrics = compute_iso_metrics(store, q_meta)
     store.write_iso_metrics(metrics)
     return metrics
 
