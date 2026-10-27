@@ -12,6 +12,7 @@
 import inspect
 
 from simulated_web_agent.main import attribution, experiment
+from simulated_web_agent.main.loop_guards import REFUSED_DESCRIPTION, REFUSED_THOUGHT
 
 
 def test_the_same_url_with_new_content_is_a_change():
@@ -33,11 +34,18 @@ def test_the_repeat_guard_compares_the_page_too():
 
 
 def test_a_refused_path_is_not_called_broken_or_a_harness_failure():
+    assert "not a problem with the site" in REFUSED_THOUGHT
+    assert "broken" not in REFUSED_THOUGHT and "UX finding" not in REFUSED_THOUGHT
+    assert not any(m in REFUSED_DESCRIPTION for m in attribution._FALLBACK_MARKERS)
+
+
+def test_experiment_uses_the_refused_and_failed_wording_it_is_tested_for():
+    """Drift guard: the loop must say what the tests above read, not a copy."""
     src = inspect.getsource(experiment)
-    block = src[src.index("intended_key in refused_keys"):src.index("elif fail_counts[intended_key] >= 2:")]
-    thought = block[block.index("Thought("):block.index("policy.agent.memory,")]
-    assert "not a problem with the site" in thought
-    assert "broken" not in thought and "UX finding" not in thought
-    desc = "Ta ścieżka jest zamknięta regułami badania — wracam i kontynuuję zadanie."
-    assert desc in block
-    assert not any(m in desc for m in attribution._FALLBACK_MARKERS)
+    # Used by the loop, not merely imported: the import line alone would satisfy
+    # a bare "in src" check.
+    assert "Thought(REFUSED_THOUGHT" in src
+    assert '"description": REFUSED_DESCRIPTION' in src
+    assert "FAILED_THOUGHT.format(" in src
+    assert "not a problem with the site" not in src
+    assert "kept failing" not in src

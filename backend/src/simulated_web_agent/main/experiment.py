@@ -16,9 +16,20 @@ from omegaconf import DictConfig
 from ..agent import context, gpt
 from ..agent.memory import Thought
 from . import cancellation
-from ..executor.env import INPUT_REFUSAL_PREFIX, SCOPE_REFUSAL_PREFIX, WebAgentEnv
+from ..executor.env import WebAgentEnv
 from ..config import load_cfg
 from .abort import abandon_threshold
+from .loop_guards import (
+    FAILED_THOUGHT,
+    REFUSED_DESCRIPTION,
+    REFUSED_THOUGHT,
+    VERDICT_FAILED,
+    VERDICT_REFUSED,
+    FailureBreaker,
+    action_key as _action_key,
+    current_url as _current_url,
+    visit_over,
+)
 from .loop_phrases import FORCED_BACK_ELEMENT, FORCED_BACK_METHOD
 from .model import AgentPolicy  # noqa
 from .trace_store import TraceStore, parse_action as _parse_action
@@ -734,29 +745,11 @@ async def _run_for_persona_and_intent(
 
         log.info("Initial observation ready")
 
-        def _action_key(action_json: str) -> str:
-            """Action identity ignoring the freeform description."""
-            try:
-                a = json.loads(action_json)
-                a = a[0] if isinstance(a, list) and a else a
-                a.pop("description", None)
-                return json.dumps(a, sort_keys=True)
-            except Exception:
-                return action_json
-
-        def _current_url(o: dict) -> str:
-            tabs = o.get("tabs") or []
-            return tabs[0].get("url", "") if tabs else ""
-
         action_trace = []
         prev_action_key = None
         repeat_count = 0
         click_counts: Counter = Counter()
-        fail_counts: Counter = Counter()
-        # Action keys the audit's own rules refused (no personal data, stay
-        # on the site). Blocked like any repeated failure, but not described
-        # to the persona as the site's fault.
-        refused_keys: set = set()
+        breaker = FailureBreaker()
         abandon_at = abandon_threshold(store.read_persona_card())
         abandoned = False
         deadline = time.monotonic() + persona_budget_seconds()
@@ -838,44 +831,34 @@ async def _run_for_persona_and_intent(
 
             # Failed-action circuit breaker: the consecutive-repeat guard is
             # defeated when the model alternates (click X fails → scroll →
-            # click X fails → goto → click X ...). Once the SAME action has
-            # already failed twice at execution (element unclickable, invalid
-            # URL), retrying is hopeless — block it and force a new route.
+            # click X fails → goto → click X ...). Once the SAME attempt has
+            # already failed twice on this visit to the page (element
+            # unclickable, invalid URL), retrying is hopeless — block it and
+            # force a new route. See loop_guards.FailureBreaker.
             intended_key = _action_key(action)
-            if fail_counts[intended_key] >= 2 and intended_key in refused_keys:
+            verdict = breaker.verdict(action, url_before)
+            if verdict == VERDICT_REFUSED:
                 # Refused by the audit's rules, not failed by the site. It used
                 # to get the "that element is broken — a UX finding worth
-                # noting" thought below, and a back whose wording attribution
+                # noting" thought, and a back whose wording attribution
                 # reads as a harness failure, so a policy working as designed
                 # became a site defect and gated the step's own findings.
                 log.warning("Blocking an action the audit refused %d times: %s",
-                            fail_counts[intended_key], intended_key)
+                            breaker.refusals[intended_key], intended_key)
                 await policy.agent.memory.add_memory_piece(
-                    Thought(
-                        "This path is closed by the rules of this study (no personal "
-                        "data, stay on the site under test), not by the site — it is "
-                        "not a problem with the site. I will not try it again and will "
-                        "continue the task another way.",
-                        policy.agent.memory,
-                    )
+                    Thought(REFUSED_THOUGHT, policy.agent.memory)
                 )
                 action = json.dumps({
                     "action": "back",
-                    "description": "Ta ścieżka jest zamknięta regułami badania — wracam i kontynuuję zadanie.",
+                    "description": REFUSED_DESCRIPTION,
                 })
-            elif fail_counts[intended_key] >= 2:
-                log.warning(
-                    "Blocking action that failed %d times: %s",
-                    fail_counts[intended_key], intended_key,
-                )
+            elif verdict == VERDICT_FAILED:
+                tries = breaker.attempts(action, url_before)
+                log.warning("Blocking action that failed %d times: %s", tries, intended_key)
                 blocked_desc = _parse_action(action).get("description", "")
                 await policy.agent.memory.add_memory_piece(
                     Thought(
-                        "I already tried this several times and it kept failing: "
-                        f"{blocked_desc or intended_key}. That element or route is "
-                        "broken — a UX finding worth noting. I must NOT try it "
-                        "again; I'll go back and take a completely different path "
-                        "toward my goal.",
+                        FAILED_THOUGHT.format(tries=tries, what=blocked_desc or intended_key),
                         policy.agent.memory,
                     )
                 )
@@ -910,13 +893,15 @@ async def _run_for_persona_and_intent(
             obs = await env.step(action)
             steps_taken += 1
 
-            # Count execution failures per action identity (feeds the
-            # circuit breaker). Read before the guards below inject their
-            # own advisory messages into obs["error"].
-            if obs.get("error"):
-                fail_counts[_action_key(action)] += 1
-                if str(obs["error"]).startswith((INPUT_REFUSAL_PREFIX, SCOPE_REFUSAL_PREFIX)):
-                    refused_keys.add(_action_key(action))
+            # Feed the circuit breaker how the action ended. Read before the
+            # guards below inject their own advisory messages into
+            # obs["error"]. The visit is cleared only after the failure is
+            # recorded, so a failing action that itself changed the page does
+            # not carry its count onto the next one.
+            breaker.record(action, obs.get("error"), url_before)
+            if visit_over(url_before, _current_url(obs), html_before,
+                          _page_signature(obs), obs.get("error")):
+                breaker.page_changed()
 
             # Repeat-action guard: same action + page unchanged = the agent is
             # looping. Warn it via memory; escalate via the error channel it
