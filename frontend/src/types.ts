@@ -115,6 +115,9 @@ export type IsoMetrics = {
     synthetic_score_1_5: number | null
     synthetic_seq_1_7?: number | null
     synthetic_confidence_1_7?: number | null
+    /** This persona's System Usability Scale score, only when it answered all
+     *  ten SUS items (results_api._dashboard_iso). */
+    sus_score_0_100?: number
     /** How many of this persona's answers were placeholders ("nie dotyczy"). */
     not_assessable?: number
     frustration_signals: number
@@ -321,9 +324,39 @@ export type SurveyQuestionStat = {
   n?: number
   /** Participants who could not answer — kept out of avg and distribution. */
   not_assessable?: number
+  /** A negatively worded item (even SUS items): a high average is the bad end. */
+  reverse?: boolean
   distribution?: { value: number; count: number }[]
   answers?: string[]
 }
+
+/** One participant of survey.sus (sus.summarize_sus). `score` is null when
+ *  `why_not` says why there is none. */
+export type SusParticipant = {
+  persona_dir?: string | null
+  persona?: string | null
+  score: number | null
+  why_not?: string | null
+}
+
+/** The run's SUS result, statistics.survey.sus. The mean needs two scored
+ *  participants, so it is null below that. Absent unless the questionnaire is
+ *  SUS, and for reports stored before scoring existed. */
+export type SusSummary = {
+  scale: string
+  per_participant: SusParticipant[]
+  n_scored: number
+  n_participants: number
+  mean: number | null
+  min: number | null
+  max: number | null
+  straightlined?: (string | null)[]
+  benchmark_human?: number
+}
+
+/** A survey the tool failed to produce (reporter._survey_failure) — a
+ *  measurement fault, kept out of every average. */
+export type FailedSurvey = { persona_dir?: string; persona?: string; reason?: string }
 
 /** Run-level survey figures with the not-assessable answers counted apart
  *  (results_api._run_survey). `source`: "report" = the stored report's own
@@ -336,6 +369,10 @@ export type RunSurvey = {
   notAssessableTotal: number
   surveysIncluded?: number | null
   excludedSurveys: { persona_dir?: string; steps_taken?: number | null; reason?: string }[]
+  /** Absent for a backend that predates the failed-survey count. */
+  failedSurveys?: FailedSurvey[]
+  /** null/absent: not a SUS questionnaire, or a report that predates scoring. */
+  sus?: SusSummary | null
 }
 
 export type RunDetail = {

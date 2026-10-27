@@ -507,7 +507,9 @@ function addChoice(d: any) { d.choices.push({ name: 'New option', weight: 1 }) }
 function removeChoice(d: any, j: number) { if (d.choices.length > 1) d.choices.splice(j, 1) }
 
 // Questions live in the survey questionnaire JSON string; mirror to a working array.
-type Q = { id: string; type: 'short_text' | 'multiple_choice'; prompt: string; options?: string[] }
+// `sus_item` (1-10) marks a System Usability Scale item, so the backend still
+// scores it as SUS when the wording is edited or translated.
+type Q = { id: string; type: 'short_text' | 'multiple_choice'; prompt: string; options?: string[]; sus_item?: number }
 
 const questions = computed<Q[]>({
   get() {
@@ -621,8 +623,14 @@ function insertSUS() {
     revealAddedFrom(present)
     return
   }
+  // Add only the items that are missing: with one deleted, re-adding all ten would
+  // leave a duplicated wording, and the backend then does not score SUS at all.
+  const have = new Set(base.map(q => q.prompt))
   const taken = takenIds()
-  sus.forEach(p => base.push({ id: freshId('sus', taken), type: 'multiple_choice', prompt: p, options: ['1', '2', '3', '4', '5'] }))
+  sus.forEach((p, i) => {
+    if (have.has(p)) return
+    base.push({ id: freshId('sus', taken), type: 'multiple_choice', prompt: p, options: ['1', '2', '3', '4', '5'], sus_item: i + 1 })
+  })
   writeQuestions(base)
   revealAddedFrom(at)
 }

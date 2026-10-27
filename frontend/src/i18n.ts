@@ -307,6 +307,18 @@ const messages: Record<Locale, Record<string, string>> = {
     'survey.naHint': 'Uczestnik zaznaczył, że nie może ocenić tego pytania (np. nie dotarł do tego etapu). Taka odpowiedź nie wchodzi do średnich ani rozkładów.',
     'survey.naRaw': 'Wpisana wartość: {v}.',
     'survey.excluded': 'Ankiety wykluczone ze średnich, bo sesja zakończyła się po zbyt małej liczbie kroków: {n}.',
+    // A survey the tool could not collect: a measurement fault, not an answer
+    // and not a finding about the site (reporter._survey_failure).
+    'survey.failed': 'Ankiety, których nie udało się zebrać z powodu usterki narzędzia: {n} ({names}). Nie wchodzą do średnich ani rozkładów.',
+    // SUS (sus.summarize_sus). The score is the personas' own synthetic rating.
+    'survey.sus.mean': 'SUS: {mean}/100 (n={n} z {total}; zakres {min}–{max})',
+    'survey.sus.noMean': 'SUS: bez średniej — wynik policzono dla {n} z {total} uczestników{only}.',
+    'survey.sus.none': 'SUS: nie policzono wyniku dla żadnego z {total} uczestników.',
+    'survey.sus.context': 'Syntetyczna samoocena person, nie wynik badania z ludźmi. Benchmark {bm} dotyczy ludzi — to kontekst, nie porównanie.',
+    'survey.sus.unscored': 'Bez wyniku SUS: {list}.',
+    'survey.reverse': 'odwrócone: niżej = lepiej',
+    'survey.reverseHint': 'Pytanie sformułowane negatywnie (np. „zbyt skomplikowany”): niska średnia oznacza dobrą ocenę, wysoka — złą.',
+    'pd.iso.sus': 'SUS: {x}/100',
     // report view
     'rep.empty': 'Dla tej analizy nie wygenerowano zbiorczego raportu.',
     // score breakdown — the report's "Jak obliczono ocenę" (reporter_html)
@@ -693,6 +705,15 @@ const messages: Record<Locale, Record<string, string>> = {
     'survey.naHint': 'The participant said it could not assess this question (e.g. it never reached that step). Such an answer is left out of averages and distributions.',
     'survey.naRaw': 'Value entered: {v}.',
     'survey.excluded': 'Surveys left out of the averages because the session ended after too few steps: {n}.',
+    'survey.failed': 'Surveys the tool failed to collect: {n} ({names}). They are left out of every average and distribution.',
+    'survey.sus.mean': 'SUS: {mean}/100 (n={n} of {total}; range {min}–{max})',
+    'survey.sus.noMean': 'SUS: no average — a score was computed for {n} of {total} participants{only}.',
+    'survey.sus.none': 'SUS: no score could be computed for any of the {total} participants.',
+    'survey.sus.context': 'The personas’ own synthetic self-assessment, not a result from human participants. The benchmark of {bm} is for people — context, not a comparison.',
+    'survey.sus.unscored': 'No SUS score: {list}.',
+    'survey.reverse': 'reversed: lower = better',
+    'survey.reverseHint': 'A negatively worded question (e.g. “unnecessarily complex”): a low average is a good result, a high one a bad result.',
+    'pd.iso.sus': 'SUS: {x}/100',
     'rep.empty': 'No aggregated report was generated for this run.',
     'rep.toc.score': 'How the score was computed',
     'rep.sb.title': 'How the score was computed',

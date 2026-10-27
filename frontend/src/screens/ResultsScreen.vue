@@ -211,6 +211,9 @@
                     <span class="iso-unit">{{ detail.iso.satisfaction.synthetic_seq_1_7 ? 'SEQ /7' : '/5' }}</span>
                   </div>
                   <div class="iso-sub">{{ t('pd.iso.frustration') }}: {{ detail.iso.satisfaction.frustration_signals }}</div>
+                  <div v-if="typeof detail.iso.satisfaction.sus_score_0_100 === 'number'" class="iso-sub">
+                    {{ t('pd.iso.sus', { x: dec1(detail.iso.satisfaction.sus_score_0_100) }) }}
+                  </div>
                   <div v-if="detail.iso.satisfaction.not_assessable" class="iso-sub" :title="t('survey.naHint')">
                     {{ t('survey.naCount', { n: detail.iso.satisfaction.not_assessable }) }}
                   </div>
@@ -354,10 +357,19 @@
                here, and in no average or distribution below. -->
           <div v-if="surveyNaTotal > 0" class="survey-note" :title="t('survey.naHint')">{{ t('survey.naTotal', { n: surveyNaTotal }) }}</div>
           <div v-if="surveyExcluded > 0" class="survey-note">{{ t('survey.excluded', { n: surveyExcluded }) }}</div>
+          <!-- A survey the tool failed to collect is not "too few steps": own note. -->
+          <div v-if="surveyFailed.length > 0" class="survey-note">{{ t('survey.failed', { n: surveyFailed.length, names: surveyFailedNames }) }}</div>
+          <!-- The personas' own SUS rating, per participant — never a cross-item average. -->
+          <div v-if="runSus" class="survey-note">
+            <div class="sus-line mono">{{ susLine }}</div>
+            <div class="sus-ctx">{{ t('survey.sus.context', { bm: runSus.benchmark_human ?? 68 }) }}</div>
+            <div v-if="susUnscored" class="sus-ctx">{{ t('survey.sus.unscored', { list: susUnscored }) }}</div>
+          </div>
           <div v-for="(q, qi) in surveyRows" :key="qi" class="ux-card">
             <div class="survey-q">
               <span class="q-num mono">{{ String(qi + 1).padStart(2, '0') }}</span>
               <span class="survey-prompt">{{ q.prompt }}</span>
+              <span v-if="q.reverse" class="survey-tag mono" :title="t('survey.reverseHint')">{{ t('survey.reverse') }}</span>
               <span v-if="q.kind === 'scale'" class="survey-avg mono">{{ t('survey.avgN', { x: q.avg, m: q.max }) }}</span>
               <span v-else-if="q.kind === 'na'" class="survey-tag mono">{{ t('survey.naKind') }}</span>
               <span v-else class="survey-tag mono">{{ t('survey.open') }}</span>
@@ -371,7 +383,7 @@
                   <span class="dist-v mono">{{ d.v }}</span>
                 </div>
               </div>
-              <div class="scale-track"><span class="scale-marker" :style="{ left: q.markerPct + '%' }"></span></div>
+              <div class="scale-track" :class="{ rev: q.reverse }"><span class="scale-marker" :style="{ left: q.markerPct + '%' }"></span></div>
               <div class="scale-anchors">
                 <span>{{ q.min }} · {{ q.lowLabel }}</span>
                 <span>{{ q.highLabel }} · {{ q.max }}</span>
@@ -391,7 +403,7 @@
               </div>
             </div>
           </div>
-          <div v-if="surveyRows.length === 0 && surveyExcluded === 0" class="muted">{{ t('survey.empty') }}</div>
+          <div v-if="surveyRows.length === 0 && surveyExcluded === 0 && surveyFailed.length === 0 && !runSus" class="muted">{{ t('survey.empty') }}</div>
         </div>
       </div>
     </template>
@@ -643,6 +655,8 @@ type SurveyRow = {
   // Answers to this question that were placeholders ("nie dotyczy",
   // "nie mogę ocenić"). Already outside n, avg and dist — shown beside them.
   na: number
+  // Negatively worded: a high average is the bad end (the colour track flips).
+  reverse: boolean
   lowLabel: string; highLabel: string; avg: string; markerPct: number
   dist: { v: number; count: number; height: number }[]; answers: string[]
 }
@@ -656,7 +670,7 @@ function surveyRowFrom(q: SurveyQuestionStat, naById: Record<string, number>): S
   const id = String(q.id ?? '')
   // Scale questions carry their own count; open ones only appear in the map.
   const na = typeof q.not_assessable === 'number' ? q.not_assessable : (naById[id] ?? 0)
-  const base = { id, prompt: q.prompt, na, min: 1, max: 5, n: 0, lowLabel: '', highLabel: '',
+  const base = { id, prompt: q.prompt, na, reverse: q.reverse === true, min: 1, max: 5, n: 0, lowLabel: '', highLabel: '',
                  avg: '—', markerPct: 0, dist: [] as SurveyRow['dist'], answers: [] as string[] }
   if (q.kind === 'scale') {
     const cs = (q.distribution || []).map(d => ({ v: d.value, count: d.count }))
@@ -711,7 +725,7 @@ const surveyRows = computed<SurveyRow[]>(() => {
     const kind: SurveyRow['kind'] = numeric ? 'scale' : (answers.length === 0 && na > 0 ? 'na' : 'open')
     // Legacy rows have no id from the backend, so fall back to the positional
     // qN convention these runs used; summaries for them are dropped anyway.
-    return { id: `q${qi + 1}`, kind, prompt, min: 1, max: 5, n: numeric ? answers.length : 0, na,
+    return { id: `q${qi + 1}`, kind, prompt, min: 1, max: 5, n: numeric ? answers.length : 0, na, reverse: false,
              lowLabel: t('survey.anchorLow'), highLabel: t('survey.anchorHigh'),
              avg, markerPct, dist, answers: kind === 'open' ? answers : [] }
   })
@@ -723,6 +737,32 @@ const surveyNaTotal = computed(() => runSurvey.value
   ? runSurvey.value.notAssessableTotal
   : surveyRows.value.reduce((s, q) => s + q.na, 0))
 const surveyExcluded = computed(() => runSurvey.value?.excludedSurveys?.length ?? 0)
+
+// Surveys the tool failed to produce (a stored report from before the count has none).
+const surveyFailed = computed(() => runSurvey.value?.failedSurveys ?? [])
+const surveyFailedNames = computed(() => surveyFailed.value.map(f => f.persona || f.persona_dir || '—').join(', '))
+
+const dec1 = (v: number | null | undefined) => typeof v === 'number' ? v.toFixed(1).replace('.', ',') : '—'
+
+const runSus = computed(() => runSurvey.value?.sus ?? null)
+// The mean needs two scored participants (sus.summarize_sus); below that the line says how many were scored.
+const susLine = computed(() => {
+  const s = runSus.value
+  if (!s) return ''
+  const n = s.n_scored ?? 0, total = s.n_participants ?? 0
+  if (typeof s.mean === 'number') return t('survey.sus.mean', { mean: dec1(s.mean), n, total, min: dec1(s.min), max: dec1(s.max) })
+  if (!n) return t('survey.sus.none', { total })
+  return t('survey.sus.noMean', { n, total, only: n === 1 ? ` (${dec1(s.min)}/100)` : '' })
+})
+// Participants with no score and why. A failed survey is already named in its own note.
+const susUnscored = computed(() => {
+  const who = (dir?: string | null, name?: string | null) => JSON.stringify([dir ?? null, name ?? null])
+  const failed = new Set(surveyFailed.value.map(f => who(f.persona_dir, f.persona)))
+  return (runSus.value?.per_participant ?? [])
+    .filter(p => p.score == null && p.why_not && !failed.has(who(p.persona_dir, p.persona)))
+    .map(p => `${p.persona || p.persona_dir || '—'} (${p.why_not})`)
+    .join('; ')
+})
 
 const tabs = computed((): { key: TabKey; label: string; count: number | null }[] => [
   { key: 'overview', label: t('tab.overview'), count: null as number | null },
@@ -892,6 +932,8 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 /* a placeholder answer ("nie dotyczy") — neutral, never styled as a rating */
 .psurvey-answer.na { color: var(--muted-2); background: var(--surface-3); font-weight: 600; cursor: help; }
 .survey-note { font-size: 12.5px; color: var(--muted); background: var(--surface-2, #f7f8fa); border: 1px solid var(--border-2, #eef0f3); border-radius: 8px; padding: 10px 13px; }
+.sus-line { font-weight: 600; color: var(--text); }
+.sus-ctx { margin-top: 4px; color: var(--muted-2); }
 
 .sev-chips { display: flex; gap: 8px; margin-bottom: 18px; }
 .chip { display: inline-flex; align-items: center; gap: 8px; padding: 9px 15px; border-radius: 8px; font: 600 13px var(--sans); cursor: pointer; background: #fff; color: var(--muted); border: 1px solid #e0e3e9; }
@@ -910,6 +952,7 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .dist-v { font: 600 12px var(--mono); color: #9aa0a8; }
 .survey-tag { font: 600 10px var(--mono); text-transform: uppercase; letter-spacing: .04em; color: var(--muted-2); border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; flex: none; }
 .scale-track { position: relative; height: 5px; border-radius: 3px; margin-top: 14px; background: linear-gradient(90deg, #f0b6b6, #f5e6a8 50%, #a9dcc0); }
+.scale-track.rev { background: linear-gradient(90deg, #a9dcc0, #f5e6a8 50%, #f0b6b6); }
 .scale-marker { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; background: var(--text); border: 2px solid var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.3); transform: translate(-50%, -50%); }
 .scale-anchors { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted-2); margin-top: 8px; }
 .scale-n { font: 11px var(--mono); color: var(--faint); margin-top: 8px; }
