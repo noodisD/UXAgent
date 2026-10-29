@@ -427,6 +427,20 @@ class Agent:
 
         return chosen
 
+    def replace_last_action(self, action: dict) -> None:
+        """Rewrite the newest Action piece to what actually ran.
+
+        When the harness runs something else in place of the chosen action, the
+        piece still described the chosen one: feedback() read it as the step just
+        taken and narrated an attempt that never happened. Rewritten in place,
+        never removed or inserted: Memory.update() pairs embeddings with pieces by
+        index."""
+        for m in reversed(self.memory.memories):
+            if isinstance(m, Action):
+                m.content = action["description"]
+                m.raw_action = json.dumps(action, ensure_ascii=False)
+                return
+
     # Plan steps that legitimately end the session must say so explicitly
     # (the planning prompt's termination policy phrases them with these words).
     _EXPLICIT_STOP = re.compile(

@@ -14,7 +14,16 @@ import pytest
 
 from simulated_web_agent.main import iso_metrics
 from simulated_web_agent.main.attribution import harness_suspect_steps
-from simulated_web_agent.main.loop_phrases import FORCED_BACK_ELEMENT, FORCED_BACK_METHOD
+from simulated_web_agent.main.loop_phrases import (
+    FORCED_BACK_ELEMENT,
+    FORCED_BACK_METHOD,
+    KIND_FAILED_BREAKER,
+    KIND_LOOP_BREAKER,
+    KIND_REFUSED,
+    REFUSED_DESCRIPTION,
+    injected_action,
+    injected_kind,
+)
 from simulated_web_agent.main.trace_store import TraceStore
 
 EXPERIMENT = (Path(__file__).resolve().parents[1] / "src" / "simulated_web_agent"
@@ -58,8 +67,31 @@ def test_a_persona_using_the_same_words_is_not_a_tool_failure(tmp_path, text):
 
 
 def test_experiment_writes_the_sentences_the_markers_read():
-    """Drift guard: experiment.py must take the sentences from loop_phrases, not
-    carry a copy that a later edit changes on one side only."""
+    """Drift guard: experiment.py must take the sentences from loop_phrases (the
+    kind picks the sentence, in injected_action), not carry a copy that a later
+    edit changes on one side only."""
     src = EXPERIMENT.read_text(encoding="utf-8")
-    assert "FORCED_BACK_METHOD" in src and "FORCED_BACK_ELEMENT" in src
+    assert "_inject_back(policy.agent, KIND_LOOP_BREAKER, action)" in src
+    assert "_inject_back(policy.agent, KIND_FAILED_BREAKER, action)" in src
     assert "mimo kilku prób" not in src
+
+
+@pytest.mark.parametrize("kind, sentence", [(KIND_LOOP_BREAKER, FORCED_BACK_METHOD),
+                                            (KIND_FAILED_BREAKER, FORCED_BACK_ELEMENT)])
+def test_a_marked_injection_is_still_read_as_the_harness_by_what_read_the_sentence(
+        tmp_path, kind, sentence):
+    """The sentence stays the description, so attribution and the metrics read a
+    trace with the marker exactly as they read one without it."""
+    actions = [{"action": "click", "target": "a", "description": "otwieram"},
+               {"action": "scroll", "target": None, "description": "przewijam"},
+               injected_action(kind, {"action": "type", "target": "a", "text": "x"})]
+    suspect = harness_suspect_steps(_store(tmp_path, actions))
+    assert {1, 2} <= suspect and 0 not in suspect
+    assert iso_metrics._injected_back(actions[2])
+
+
+@pytest.mark.parametrize("sentence, kind", [(FORCED_BACK_METHOD, KIND_LOOP_BREAKER),
+                                            (FORCED_BACK_ELEMENT, KIND_FAILED_BREAKER),
+                                            (REFUSED_DESCRIPTION, KIND_REFUSED)])
+def test_a_trace_without_the_marker_is_told_apart_by_its_sentence(sentence, kind):
+    assert injected_kind({"action": "back", "description": sentence}) == kind

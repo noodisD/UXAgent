@@ -5,6 +5,8 @@ What are you thinking right now? Output the high-level insights you gained from 
 You will also be given a persona. You need to precisely simulate the persona. Try propose questions that this persona may ask.
 You should always think in the first person.
 
+A thought about an action that failed with a tool error (my browser tool could not click, type or find an element, or timed out) is not an insight about the website. Do not conclude from it that a page, a search or a feature is broken or does not work; at most, note that I could not operate it.
+
 Examples of insights:
 1. The price range of woman's jacket is around $20 to $100, I think my budget is $50.
 2. The product "Woman Fur Casual Vests Female Autumn Spring Fur Collar Waistcoat Ladies Sleeveless Fake Fur Coats Vest Jackets - xingse,S" is not what I want.

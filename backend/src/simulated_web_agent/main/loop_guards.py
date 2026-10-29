@@ -22,12 +22,14 @@ from collections import Counter
 from typing import Optional
 
 from ..executor.env import INPUT_REFUSAL_PREFIX, SCOPE_REFUSAL_PREFIX
+from .loop_phrases import REFUSED_DESCRIPTION  # noqa: F401 - written by loop_phrases.injected_action
 from .textutil import view_key
 from .trace_store import parse_action
 
 # What a retry cannot change: the persona's own wording of the step, and whether
-# it pressed Enter after typing.
-_VOLATILE_KEYS = frozenset({"description", "enter"})
+# it pressed Enter after typing. A harness back also carries what it replaced
+# (loop_phrases.injected_action); that is a record, not part of the action.
+_VOLATILE_KEYS = frozenset({"description", "enter", "harness", "intended"})
 
 # Actions aimed at one control. The same control is the same attempt whatever was
 # typed or chosen: three different strings into a field that will not take input
@@ -61,15 +63,15 @@ FAILED_THOUGHT = (
 
 # A path the audit's own rules closed (no personal data, stay on the site) is a
 # policy working, not a failure, so neither sentence may blame the site; and the
-# description must stay clear of the markers attribution reads as a harness
-# failure, or the step's own findings would be discarded.
+# description (loop_phrases.REFUSED_DESCRIPTION) must stay clear of the markers
+# attribution reads as a harness failure, or the step's own findings would be
+# discarded.
 REFUSED_THOUGHT = (
     "This path is closed by the rules of this study (no personal "
     "data, stay on the site under test), not by the site — it is "
     "not a problem with the site. I will not try it again and will "
     "continue the task another way."
 )
-REFUSED_DESCRIPTION = "Ta ścieżka jest zamknięta regułami badania — wracam i kontynuuję zadanie."
 
 
 def action_key(action_json: str) -> str:

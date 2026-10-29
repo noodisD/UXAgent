@@ -21,7 +21,6 @@ from ..config import load_cfg
 from .abort import abandon_threshold
 from .loop_guards import (
     FAILED_THOUGHT,
-    REFUSED_DESCRIPTION,
     REFUSED_THOUGHT,
     VERDICT_FAILED,
     VERDICT_REFUSED,
@@ -30,7 +29,12 @@ from .loop_guards import (
     current_url as _current_url,
     visit_over,
 )
-from .loop_phrases import FORCED_BACK_ELEMENT, FORCED_BACK_METHOD
+from .loop_phrases import (
+    KIND_FAILED_BREAKER,
+    KIND_LOOP_BREAKER,
+    KIND_REFUSED,
+    injected_action,
+)
 from .model import AgentPolicy  # noqa
 from .trace_store import TraceStore, parse_action as _parse_action
 
@@ -101,6 +105,17 @@ def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Opt
             "Do not open it again — choose a product or link you have not visited yet."
         )
     return thought, None
+
+
+def _inject_back(agent, kind: str, chosen: str) -> str:
+    """The harness back to run in place of the persona's `chosen` action.
+
+    The persona's memory is rewritten to the back too: its Action piece still
+    described the step that never ran, and feedback() narrated that as an
+    attempt. What it chose stays in the trace, under "intended"."""
+    injected = injected_action(kind, chosen)
+    agent.replace_last_action({k: v for k, v in injected.items() if k != "intended"})
+    return json.dumps(injected)
 
 
 # Demographic keys that carry where the persona lives. Without one, a task like
@@ -809,10 +824,7 @@ async def _run_for_persona_and_intent(
             forced_escape = False
             if repeat_count >= 2 and _action_key(action) == prev_action_key:
                 log.warning("Forcing escape from action loop: %s", prev_action_key)
-                action = json.dumps({
-                    "action": "back",
-                    "description": FORCED_BACK_METHOD,
-                })
+                action = _inject_back(policy.agent, KIND_LOOP_BREAKER, action)
                 await policy.agent.memory.add_memory_piece(
                     Thought(
                         "I tried the same action several times and it did not work. "
@@ -848,10 +860,8 @@ async def _run_for_persona_and_intent(
                 await policy.agent.memory.add_memory_piece(
                     Thought(REFUSED_THOUGHT, policy.agent.memory)
                 )
-                action = json.dumps({
-                    "action": "back",
-                    "description": REFUSED_DESCRIPTION,
-                })
+                action = _inject_back(policy.agent, KIND_REFUSED, action)
+                forced_escape = True
             elif verdict == VERDICT_FAILED:
                 tries = breaker.attempts(action, url_before)
                 log.warning("Blocking action that failed %d times: %s", tries, intended_key)
@@ -862,10 +872,8 @@ async def _run_for_persona_and_intent(
                         policy.agent.memory,
                     )
                 )
-                action = json.dumps({
-                    "action": "back",
-                    "description": FORCED_BACK_ELEMENT,
-                })
+                action = _inject_back(policy.agent, KIND_FAILED_BREAKER, action)
+                forced_escape = True
 
             # Revisit guard: catches A-B-A-B product loops the consecutive
             # repeat guard can't see. Advisory thought on the 2nd click of a

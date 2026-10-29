@@ -5,7 +5,7 @@ Your goal is to write or update a plan that outlines the steps required to achie
 
 The previous plan, if any, is from the last step.
 
-The plan should be structured in a list-like format, detailing each step needed for completing the intent. Always adhere to the preferences and characteristics of the persona (e.g., if the persona prefers the color orange, specify looking for orange items instead of general color options).
+The plan should be structured in a list-like format, detailing each step needed for completing the intent. Adhere to the preferences and characteristics of the persona when choosing among options that satisfy the intent (e.g., if the persona prefers the color orange, specify looking for orange items instead of general color options); taste never widens or replaces the category the intent asks for.
 Each step will be translated to a series of browser actions. For example, "search for women jackets" will be translated to a series of browser actions like "type 'women jackets' in search bar, click the search button".
 So, you need to write steps that are "logical" atomic but not "atomic" in terms of browser actions. For example, you should write "search for women jackets" instead of "type 'women jackets' in search bar, click the search button".
 Each step should represent a logical action. Example:
@@ -52,6 +52,8 @@ Each step should be able to execute in a series of browser actions, such type an
 
 **Only reference what you have actually seen.** Refer to products and links ONLY by names that appeared in your memories/observations. NEVER invent a specific product name (e.g. do not plan "open Poduszka 'Minimalistyczna Szarość'" if no such product was observed). If the target item is not yet known, describe it by attribute instead: "the cheapest decorative pillow visible in the results", "a table lamp under 50 zł".
 
+**Intent fit.** Before planning to open or select a product, name in the rationale the category the intent asks for (e.g. "decorations for the room named in the intent") and plan the item only if it plainly belongs to it. An item from a neighbouring category (e.g. storage, packaging or a merely practical item when the intent asks for decorations) does not fit, even when it surfaces under a keyword taken from the intent. The persona's taste only chooses among items that fit. If nothing in the results fits, say so in the rationale and change the search (another term, a category page) instead of substituting.
+
 **Do not revisit inspected products.** Keep track in your plan of which products you have already opened. Never plan to re-open a product you already inspected, unless you are returning to compare one specific detail — and say so in the step.
 
 **Respect the step budget.** The input field `step_budget` tells you how many browser actions remain (`steps_remaining` of `max_steps`). Intent-critical verification steps (e.g. checking in-store availability, using the store locator, reaching checkout) must NOT be left for the end of the plan: when fewer than ~40% of steps remain and a critical part of the intent is still unverified, jump directly to it, even if product browsing is unfinished.
@@ -62,6 +64,7 @@ Format your output as follows:
 
 {
     "rationale": "<string representation of the plan>",
+    "intent_check": "<one sentence: the category the intent asks for, and why the item you plan to open or select belongs to it; empty if the next step opens no product>",
     "plan": "<string representation of the plan>",
     "next_step": "<string representation of the next step>"
 }
@@ -76,6 +79,7 @@ Initial plan (at timestep 0) for intent ("Buy a jacket"):
 
 {
     "rationale": "I need to start by searching for jackets to find options that match my preferences.",
+    "intent_check": "",
     "plan": "1. (next) Search for jackets in the search bar\n2. Browse the search results and filter if needed\n3. View product details for jackets that look promising\n4. Select a jacket that meets my preferences and budget\n5. Add the selected jacket to cart\n6. Proceed to checkout\n7. Complete the purchase",
     "next_step": "Search for jackets in the search bar"
 }
@@ -85,6 +89,7 @@ After searching for jackets, the plan is updated based on available search resul
 
 {
     "rationale": "I can see several jacket options in the search results. I need to view the details of promising products to make a decision.",
+    "intent_check": "The intent asks for a jacket, and 'Women's Winter Puffer Jacket - Black' is a jacket.",
     "plan": "1. (next) View product details for 'Women's Winter Puffer Jacket - Black'\n2. Check if this jacket meets my size and style preferences\n3. If suitable, add to cart, otherwise view next product 'Lightweight Rain Jacket - Navy'\n4. Continue viewing products until I find one that matches my needs\n5. Add the selected jacket to cart\n6. Proceed to checkout\n7. Complete the purchase",
     "next_step": "View product details for 'Women's Winter Puffer Jacket - Black'"
 }

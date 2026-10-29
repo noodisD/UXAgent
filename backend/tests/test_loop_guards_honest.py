@@ -45,7 +45,7 @@ def test_experiment_uses_the_refused_and_failed_wording_it_is_tested_for():
     # Used by the loop, not merely imported: the import line alone would satisfy
     # a bare "in src" check.
     assert "Thought(REFUSED_THOUGHT" in src
-    assert '"description": REFUSED_DESCRIPTION' in src
+    assert "_inject_back(policy.agent, KIND_REFUSED, action)" in src
     assert "FAILED_THOUGHT.format(" in src
     assert "not a problem with the site" not in src
     assert "kept failing" not in src
