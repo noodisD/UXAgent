@@ -36,6 +36,8 @@ against.
 Fail-toward-declared: when the target is undecidable (non-shopping / oblique
 intent) or the trace has no on-site evidence, `observed_outcome` returns
 `unknown` and the caller (iso_metrics) keeps the declared outcome, labelled.
+The same when the site has no shop: an inferred target is only measured if some
+session of the run reached a product, cart or checkout page (`ladder_applies`).
 """
 from __future__ import annotations
 
@@ -63,8 +65,14 @@ _RUNG_INDEX = {name: i for i, name in enumerate(RUNGS)}
 _PARTIAL_FLOOR = "cart_has_items"
 
 # --- URL markers (primary evidence; substring match on the lowered URL) -----
-_PRODUCT_URL_MARKERS = ("/p/", "/produkt", "/product/")
+#
+# "/products/" is the Shopify-style product page (pepco.pl: /products/poduszka-324777).
+# The trailing slash keeps a bare /products listing from counting as a product.
+_PRODUCT_URL_MARKERS = ("/p/", "/produkt", "/product/", "/products/")
 _CART_URL_MARKERS = ("koszyk", "/cart", "checkout", "/kasa")
+# What shows that the site has the shop the ladder measures: a product, cart or
+# checkout page. Search and listing markers are left out — a bank has a search box.
+_SHOP_URL_MARKERS = _PRODUCT_URL_MARKERS + _CART_URL_MARKERS
 _SEARCH_URL_MARKERS = ("?query", "&query", "/search", "/szukaj", "szukaj=", "q=")
 _CHECKOUT_URL_MARKERS = ("checkout", "/kasa")
 # The checkout ceiling is login-gated: on dm, clicking "Do kasy" leads to
@@ -319,14 +327,65 @@ def resolve_target_rung(store: TraceStore) -> tuple[str | None, str]:
     return None, "abstain"
 
 
+# --- does the ladder apply to this site? ------------------------------------
+
+def _shop_url_seen(store: TraceStore, target_url: str) -> bool:
+    """Did this session reach a same-site product, cart or checkout URL? Decided
+    the way compute_goal_state decides the product and cart rungs."""
+    for entry in store.read_observations():
+        url = _active_url(entry)
+        if url and same_site(url, target_url) and _url_has(url.lower(), _SHOP_URL_MARKERS):
+            return True
+    return False
+
+
+def ladder_applies(store: TraceStore, target_url: str, own_shop_seen: bool) -> bool:
+    """Can the shopping ladder tell failure from absence on this site?
+
+    The ladder measures a shop. The target is inferred from generic verbs
+    ("znajdź", "sprawdź"), so a goal at a bank infers "product_viewed" — and a bank
+    has no product URLs, so every persona scored `failed`, whatever the persona
+    achieved (bnpparibas.pl: 6 of 6, over a goal each of them judged achieved).
+
+    It applies when any session of the run reached a product, cart or checkout
+    page: then a persona that never got there really did fail. When none did, the
+    site has nothing for the ladder to measure and the caller keeps the declared
+    outcome. A run whose siblings cannot be read (a fixture, a run from before
+    run_manifest.json) is judged as it always was: the ladder applies.
+    """
+    if own_shop_seen:
+        return True
+    run_dir = store.trace_dir.parent
+    if not (run_dir / "run_manifest.json").is_file():
+        return True
+    try:
+        for sibling in sorted(run_dir.iterdir()):
+            if sibling.name == store.trace_dir.name or not (sibling / "basic_info.json").is_file():
+                continue
+            if _shop_url_seen(TraceStore(sibling), target_url):
+                return True
+    except Exception:
+        return True
+    return False
+
+
 # --- the fusion: verdict of #2 against #1 ----------------------------------
 
 def observed_outcome(store: TraceStore, target_url: str) -> dict:
     """Evidence-grounded outcome. `unknown` (→ caller falls back to declared)
-    when the target is undecidable or there is no on-site evidence."""
+    when the target is undecidable, there is no on-site evidence, or the site has
+    no shop for an inferred target to be measured on (`ladder_applies`)."""
     gs = compute_goal_state(store, target_url)
     target, source = resolve_target_rung(store)
-    decidable = target is not None and gs["same_site_steps"] > 0
+    # Only an inferred target is checked: an explicit success_condition is the
+    # author saying the site has what it names. None = not evaluated.
+    applies = None
+    if source == "inferred" and gs["same_site_steps"] > 0:
+        ladder = gs["ladder"]
+        applies = ladder_applies(
+            store, target_url,
+            ladder["product_viewed"]["reached"] or ladder["cart_reached"]["reached"])
+    decidable = target is not None and gs["same_site_steps"] > 0 and applies is not False
 
     if not decidable:
         outcome = "unknown"
@@ -346,6 +405,7 @@ def observed_outcome(store: TraceStore, target_url: str) -> dict:
     return {
         "outcome": outcome,
         "decidable": decidable,
+        "ladder_applies": applies,
         "reached_rung": gs["reached_rung"],
         "reached_index": gs["reached_index"],
         "target_rung": target,

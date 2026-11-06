@@ -198,3 +198,13 @@ def test_session_capabilities_excludes_off_site_urls(tmp_path):
     caps = session_capabilities(store)
     assert caps["product_pages_opened"] == 1
     assert caps["reached_cart"] is True
+
+
+def test_a_shopify_style_product_page_is_a_product_page(tmp_path):
+    # pepco.pl: /products/<handle>?Colour=..&Size=.. — neither /product/ nor /produkt.
+    pepco = "https://www.pepco.pl"
+    store = _store(tmp_path, [
+        (f"{pepco}/products/poduszka-324777?Colour=Cream&Size=ONE", "x"),
+    ], intent="Znajdź poduszkę i sprawdź jej cenę.")
+    assert observed_outcome(store, pepco)["outcome"] == "success"
+    assert session_capabilities(store)["product_pages_opened"] == 1

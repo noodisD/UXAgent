@@ -14,8 +14,9 @@ Where each signal actually comes from — read this before trusting one:
                  machine-decidable: session_goal_state climbs a same-site goal
                  ladder and compares the highest rung reached against the target
                  the intent asks for. `outcome_source: "observed"` marks these.
-                 When the target is undecidable (non-shopping / oblique intent)
-                 or there is no on-site evidence, it falls back to the LLM's
+                 When the target is undecidable (non-shopping / oblique intent),
+                 there is no on-site evidence, or no session of the run reached
+                 a product or cart page, it falls back to the LLM's
                  `objective_reflection.outcome` (`outcome_source: "declared"`),
                  and any observed/declared conflict is flagged (`disagreement`).
                  `ended_reason`/`critical_error` come from the harness.
@@ -181,6 +182,8 @@ def compute_iso_metrics(store: TraceStore, q_meta: list | None = None) -> dict:
             "outcome_source": outcome_source,
             "declared_outcome": declared or None,
             "observed_outcome": observed["outcome"],
+            # None = not checked, False = the site has no shop pages in any session
+            "ladder_applies": observed["ladder_applies"],
             "target_rung": observed["target_rung"],
             "target_source": observed["target_source"],
             "reached_rung": observed["reached_rung"],
