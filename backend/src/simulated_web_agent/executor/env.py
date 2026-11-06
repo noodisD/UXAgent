@@ -73,13 +73,35 @@ _PERSONAL_AUTOCOMPLETE = frozenset({
     "new-password", "one-time-code", "cc-name", "cc-number", "cc-csc", "cc-exp",
     "cc-exp-month", "cc-exp-year", "bday",
 })
+# "mobile" alone is the mobile layout as often as a phone: bnpparibas.pl's site
+# search is `id=query_mobile`. It counts only beside a phone/number word.
 _PERSONAL_NAME_RE = re.compile(
     r"(first.?name|last.?name|full.?name|surname|imi[eę]\b|nazwisk|e-?mail|"
-    r"phone|telefon|\btel\b|mobile|kom[oó]rk|pesel|\bnip\b|password|has[lł]o|"
-    r"sms|verification.?code|kod.?weryfik|card.?number|numer.?karty|cvv|cvc)",
+    r"phone|telefon|\btel\b|mobile[\s._-]*(?:phone|number|tel|no(?![a-z])|nr(?![a-z]))|"
+    r"(?<![a-z])(?:number|numer|no|nr)[\s._-]*mobile|kom[oó]rk|pesel|\bnip\b|password|"
+    r"has[lł]o|sms|verification.?code|kod.?weryfik|card.?number|numer.?karty|"
+    r"cvv|cvc)",
     re.IGNORECASE,
 )
 _EMAIL_RE = re.compile(r"[^\s@]+@[^\s@]+\.[a-z]{2,}", re.IGNORECASE)
+
+# A search box asks for a query, not for who the visitor is, and its identifiers
+# are free to mention anything (`query_mobile`, "Wpisz czego szukasz..."), so the
+# wording check skips it. What is typed into it is still checked as text.
+_SEARCH_WORDS = ("query", "search", "szukaj", "wyszuk")
+
+
+def _is_search_box(attrs: dict) -> bool:
+    if str(attrs.get("type") or "").lower() == "search":
+        return True
+    if str(attrs.get("role") or "").lower() == "search":
+        return True
+    for key in ("name", "id", "class"):
+        value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(attrs.get(key) or ""))
+        for token in re.split(r"[^a-z0-9]+", value.lower()):
+            if token == "q" or token.startswith(_SEARCH_WORDS):
+                return True
+    return False
 
 
 def personal_field_reason(attrs: dict) -> str | None:
@@ -91,6 +113,8 @@ def personal_field_reason(attrs: dict) -> str | None:
     hit = next((a for a in auto if a in _PERSONAL_AUTOCOMPLETE), None)
     if hit:
         return f"autocomplete={hit}"
+    if _is_search_box(attrs):
+        return None
     for key in ("name", "id", "placeholder", "aria_label", "label"):
         value = str(attrs.get(key) or "")
         if _PERSONAL_NAME_RE.search(value):
@@ -1126,6 +1150,7 @@ class WebAgentEnv:
                     type: el.getAttribute('type'),
                     autocomplete: el.getAttribute('autocomplete'),
                     name: el.getAttribute('name'), id: el.id,
+                    role: el.getAttribute('role'), class: el.getAttribute('class'),
                     placeholder: el.getAttribute('placeholder'),
                     aria_label: el.getAttribute('aria-label'),
                     label: (el.labels && el.labels[0]) ? el.labels[0].innerText : ''
