@@ -5,6 +5,7 @@ import inspect
 import logging
 import re
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable, ClassVar, Optional
@@ -147,24 +148,111 @@ def input_refusal_message(reason: str) -> str:
     )
 
 
-async def select_places_suggestion(page, timeout: int = 2500) -> bool:
-    """Select the first Google Places Autocomplete suggestion, if the dropdown
-    is visible. Returns True if a suggestion was selected.
+# Street-type and country words that every address carries, so sharing one says
+# nothing about whether a suggestion is the place that was typed.
+_PLACE_FILLER = frozenset({
+    "ul", "ulica", "al", "aleja", "pl", "plac", "os", "osiedle", "polska", "poland",
+})
+
+
+def _place_tokens(text: str) -> list[str]:
+    """Lowercase words and numbers of an address, without diacritics ("ł" does
+    not decompose, so it is mapped by hand)."""
+    folded = unicodedata.normalize("NFKD", str(text or "").casefold().replace("ł", "l"))
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    return re.findall(r"[^\W\d_]+|\d+", folded)
+
+
+def choose_places_suggestion(typed: str, suggestions: list[str]) -> int | None:
+    """Index of the suggestion that is the place `typed` names, else None.
+
+    A suggestion counts only if it shares a whole word with what was typed
+    (any word of it, when the text has no letters at all except a postcode):
+    "Kraków" is not in "Krakowskie Przedmieście", and picking that by position
+    is how a search for Kraków ended in Warsaw. Letters weigh more than digits;
+    among equals the shorter suggestion, then the earlier one, wins.
+    """
+    if not suggestions:
+        return None
+    wanted = [t for t in _place_tokens(typed) if t not in _PLACE_FILLER]
+    if not wanted:
+        return 0  # nothing to compare against: the first is as good as any
+    words = {t for t in wanted if t.isalpha()}
+    best: tuple | None = None
+    for index, suggestion in enumerate(suggestions):
+        have = set(_place_tokens(suggestion))
+        letters = len(words & have)
+        digits = len({t for t in wanted if t.isdigit()} & have)
+        if not (letters if words else digits):
+            continue
+        key = (3 * letters + digits, -len(have - set(wanted)), -index)
+        if best is None or key > best[0]:
+            best = (key, index)
+    return best[1] if best else None
+
+
+def places_advisory(typed: str, suggestions: list[str], limit: int = 5) -> str:
+    """What the persona and the trace are told when no suggestion was the place
+    typed. It states what was offered and what was chosen; it does not say who
+    is at fault, because from here nobody can tell a site that never offers the
+    place from a query worded in a way it does not know."""
+    shown = " | ".join(s[:70] for s in suggestions[:limit])
+    if len(suggestions) > limit:
+        shown += f" | (+{len(suggestions) - limit} more)"
+    return (
+        f"none of the place suggestions the site offered for '{typed}' contained that "
+        f"place. Offered: {shown}. The first one was chosen, as a visitor would, so "
+        "the results that follow may be for a different place than the one you typed. "
+        "Check which place the results are for; a shorter entry (just the city) may "
+        "get better suggestions."
+    )
+
+
+async def select_places_suggestion(
+    page,
+    typed: str = "",
+    timeout: int = 2500,
+    advise: Callable[[str], None] | None = None,
+    settle: float = 1.0,
+) -> bool:
+    """Select the Google Places Autocomplete suggestion that is the place
+    `typed`, if the dropdown is visible. Returns True if a suggestion was selected.
 
     Google Places (inputs with class "pac-target-input") only updates the
     map/results after a suggestion is *chosen* — this fires the place_changed
     event. Typing the query text alone, even with Enter, does nothing (observed
     on pepco.pl's store locator: the store list stayed unfiltered no matter how
-    many times "Warszawa" was typed). Selecting the first suggestion via
+    many times "Warszawa" was typed). Choosing a suggestion via
     ArrowDown+Enter triggers the filter.
+
+    It used to be the first suggestion always. On bnpparibas.pl's branch finder
+    "30-052 Kraków" is offered only streets named after Kraków in Warsaw, and the
+    first of them sent the search to Warsaw. When no suggestion is the place
+    typed the first is still chosen (what a visitor would do) and `advise` is
+    told what was offered. The list is re-read for up to `settle` seconds first:
+    the dropdown may still hold the answer to a shorter prefix.
     """
+    items = page.locator(".pac-container .pac-item:visible")
     try:
-        await page.locator(".pac-container .pac-item").first.wait_for(
-            state="visible", timeout=timeout
-        )
+        await items.first.wait_for(state="visible", timeout=timeout)
     except Exception:
         return False
-    await page.keyboard.press("ArrowDown")
+    deadline = time.monotonic() + settle
+    while True:
+        try:
+            shown = [" ".join(t.split()) for t in await items.all_inner_texts()]
+        except Exception:
+            shown = []
+        pick = choose_places_suggestion(typed, shown)
+        if pick is not None or not shown or time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(0.25)
+    if pick is None:
+        pick = 0
+        if shown and advise:
+            advise(places_advisory(typed, shown))
+    for _ in range(pick + 1):
+        await page.keyboard.press("ArrowDown")
     await page.keyboard.press("Enter")
     return True
 
@@ -1304,6 +1392,7 @@ class WebAgentEnv:
         import json
 
         self._hook_ran = False
+        self._advisory = None
         self._guard_new_tabs()
         try:
             action_data = json.loads(action)
@@ -1420,6 +1509,10 @@ class WebAgentEnv:
             # Return the next observation after executing the action
             observation = await self.observation()
             observation["error"] = scope_error
+            # Not "error": the action worked, so the failure counters must not
+            # see it. The browser loop turns it into an advisory afterwards.
+            if self._advisory:
+                observation["advisory"] = self._advisory
             return observation
 
         except json.JSONDecodeError as e:
@@ -1440,6 +1533,10 @@ class WebAgentEnv:
             observation = await self.observation()
             observation["error"] = f"Error executing action: {e}"
             return observation
+
+    def _advise(self, message: str) -> None:
+        """A hint about the action just taken, for the persona and the trace."""
+        self._advisory = message
 
     async def _ensure_step_evidence(self) -> None:
         """Record this step's evidence if no action got as far as the hook.
@@ -1618,16 +1715,19 @@ class WebAgentEnv:
             # Google Places Autocomplete (class "pac-target-input"): the map/list
             # only updates once a *suggestion* is chosen, which fires the
             # place_changed event. Typing the text — even with Enter — does
-            # nothing on its own. For such inputs, select the first suggestion.
-            # This is the store-locator "search does nothing" fix. Gated on the
-            # Places class so normal inputs don't pay the dropdown-wait latency.
+            # nothing on its own. For such inputs, select the suggestion that is
+            # the place typed. This is the store-locator "search does nothing"
+            # fix. Gated on the Places class so normal inputs don't pay the
+            # dropdown-wait latency.
             try:
                 is_places = await element.evaluate(
                     "el => el.classList.contains('pac-target-input')"
                 )
             except Exception:
                 is_places = False
-            if is_places and await select_places_suggestion(self.page):
+            if is_places and await select_places_suggestion(
+                self.page, text, advise=self._advise
+            ):
                 await asyncio.sleep(0.8)  # let place_changed re-render results
                 self.logger.info(
                     f"Selected Google Places suggestion for '{text}' ({semantic_id})"

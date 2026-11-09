@@ -107,6 +107,15 @@ def _revisit_warning(prior_clicks: int, target: str) -> tuple[Optional[str], Opt
     return thought, None
 
 
+def _executor_advisory(obs: dict) -> Optional[str]:
+    """The executor's hint about the action it just ran, worded for the error
+    channel. The executor leaves it beside "error", not in it: the action worked,
+    so the failure breaker must have counted it as worked. Taken off the
+    observation so the trace does not keep it twice."""
+    advisory = obs.pop("advisory", None)
+    return f"{ADVISORY_PREFIX} {advisory}" if advisory else None
+
+
 def _inject_back(agent, kind: str, chosen: str) -> str:
     """The harness back to run in place of the persona's `chosen` action.
 
@@ -956,8 +965,9 @@ async def _run_for_persona_and_intent(
             if not forced_escape:
                 prev_action_key = action_key
 
-            if revisit_error and not obs.get("error"):
-                obs["error"] = revisit_error
+            executor_advisory = _executor_advisory(obs)
+            if (executor_advisory or revisit_error) and not obs.get("error"):
+                obs["error"] = executor_advisory or revisit_error
 
             if obs.get("terminated"):
                 break
