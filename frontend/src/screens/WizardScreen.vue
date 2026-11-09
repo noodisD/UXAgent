@@ -59,6 +59,14 @@
             <option value="">{{ t('w2.preset.choose') }}</option>
             <option v-for="k in presetKeys" :key="k" :value="k">{{ t('w2.preset.' + k) }}</option>
           </select>
+          <textarea class="ux-input mt10" rows="3" v-model="form.experiment.siteContext"
+            :placeholder="t('w1.siteContext.ph')"></textarea>
+          <div class="device-note">{{ t('w1.siteContext.hint') }}</div>
+          <div v-if="pendingPreset" class="preset-confirm mt10">
+            <span>{{ t('w2.preset.replace', { name: t('w2.preset.' + pendingPreset) }) }}</span>
+            <button class="btn small" @click="replaceWithPreset">{{ t('w2.preset.replaceYes') }}</button>
+            <button class="btn small" @click="keepQuestions">{{ t('w2.preset.replaceNo') }}</button>
+          </div>
         </div>
         <div class="grid-url mt16">
           <div>
@@ -204,6 +212,25 @@
           </select>
           <span class="preset-hint">{{ t('w2.preset.hint') }}</span>
         </div>
+        <div v-if="pendingPreset" class="preset-confirm">
+          <span>{{ t('w2.preset.replace', { name: t('w2.preset.' + pendingPreset) }) }}</span>
+          <button class="btn small" @click="replaceWithPreset">{{ t('w2.preset.replaceYes') }}</button>
+          <button class="btn small" @click="keepQuestions">{{ t('w2.preset.replaceNo') }}</button>
+        </div>
+
+        <!-- a whole questionnaire pasted as JSON; replaces the list below -->
+        <div class="import-box">
+          <button class="link-btn" @click="importOpen = !importOpen">
+            {{ importOpen ? '▾' : '▸' }} {{ t('w2.import.toggle') }}
+          </button>
+          <template v-if="importOpen">
+            <div class="import-hint">{{ t('w2.import.hint') }}</div>
+            <textarea class="ux-input mono ta-mono" rows="9" v-model="importText"
+              :placeholder="t('w2.import.ph')" @input="importIssue = null"></textarea>
+            <div v-if="importIssue" class="gen-err">{{ t(importIssue.key, importIssue.params) }}</div>
+            <button class="btn small sus mt10" @click="importQuestionnaire">{{ t('w2.import.load') }}</button>
+          </template>
+        </div>
 
         <div v-if="questions.length === 0" class="empty">{{ t('w2.empty') }}</div>
 
@@ -317,7 +344,8 @@ import { useRun } from '../composables/useRun'
 import { resetWizardForm } from '../composables/useForm'
 import { useI18n } from '../i18n'
 import { PRESET_KEYS, PRESET_SITE_CONTEXT, presetQuestions, type PresetKey } from '../surveyPresets'
-import { nextTick, ref } from 'vue'
+import { parseQuestionnaireJson, type QuestionnaireIssue, type QuestionnaireQuestion } from '../questionnaireImport'
+import { nextTick, reactive, ref, watch } from 'vue'
 
 const form = inject<WizardForm>(FORM_KEY)!
 const { state: app, nextStep, prevStep, goStep, goScreen } = useApp()
@@ -387,10 +415,9 @@ async function fillSettings() {
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
     if (data.general_intent) form.persona.generalIntent = data.general_intent
-    // NOT data.site_context: siteContext is now driven by the category select
-    // (presetKey), which must always hold one of the known preset texts or empty —
-    // writing an arbitrary AI sentence here would desync the dropdown from the
-    // text silently applied underneath it.
+    // NOT data.site_context: the description tells every judging pass what the
+    // site is and is not, so it is the user's to set (typed or from a preset) —
+    // an AI sentence written here would silently replace what they typed.
     if (data.num_subjects) form.persona.numSubjects = Math.min(MAX_PERSONAS, Math.max(MIN_PERSONAS, Number(data.num_subjects)))
     if (data.max_steps) form.experiment.maxSteps = data.max_steps
     if (Array.isArray(data.demographics) && data.demographics.length) {
@@ -509,26 +536,34 @@ function removeChoice(d: any, j: number) { if (d.choices.length > 1) d.choices.s
 // Questions live in the survey questionnaire JSON string; mirror to a working array.
 // `sus_item` (1-10) marks a System Usability Scale item, so the backend still
 // scores it as SUS when the wording is edited or translated.
-type Q = { id: string; type: 'short_text' | 'multiple_choice'; prompt: string; options?: string[]; sus_item?: number }
+type Q = QuestionnaireQuestion
 
-const questions = computed<Q[]>({
-  get() {
-    try {
-      const obj = JSON.parse(form.survey.questionnaire || '{}')
-      return Array.isArray(obj.questions) ? obj.questions : []
-    } catch { return [] }
-  },
-  set(list) {
-    let obj: any = {}
-    try { obj = JSON.parse(form.survey.questionnaire || '{}') } catch { obj = {} }
-    obj.questionnaire_id = obj.questionnaire_id || 'survey_v1'
-    obj.title = obj.title || 'Post-session survey'
-    obj.questions = list
-    form.survey.questionnaire = JSON.stringify(obj, null, 2)
-  },
+function parseQuestions(src: string): Q[] {
+  try {
+    const obj = JSON.parse(src || '{}')
+    return Array.isArray(obj.questions) ? obj.questions : []
+  } catch { return [] }
+}
+
+// Reactive, and written back below: the cards edit these objects in place
+// (v-model on the prompt and on each option, push/splice on the options). A
+// plain parse result is not tracked, so those edits neither re-rendered nor
+// reached form.survey — a prompt typed over a preset's was sent unchanged.
+const questions = computed<Q[]>(() => reactive(parseQuestions(form.survey.questionnaire)))
+watch(() => JSON.stringify(questions.value), (json) => {
+  if (json !== JSON.stringify(parseQuestions(form.survey.questionnaire))) writeQuestions(questions.value)
 })
 
-function writeQuestions(list: Q[]) { questions.value = list }
+// `meta` is only given by a pasted questionnaire; otherwise the id and title
+// already in the form (or the defaults) stay.
+function writeQuestions(list: Q[], meta: { questionnaire_id?: string; title?: string } = {}) {
+  let obj: any = {}
+  try { obj = JSON.parse(form.survey.questionnaire || '{}') } catch { obj = {} }
+  obj.questionnaire_id = meta.questionnaire_id || obj.questionnaire_id || 'survey_v1'
+  obj.title = meta.title || obj.title || 'Post-session survey'
+  obj.questions = list
+  form.survey.questionnaire = JSON.stringify(obj, null, 2)
+}
 
 // Adding a question used to change nothing visible: the new card is appended
 // below the fold, the page does not move, and nothing confirms the click. The
@@ -575,31 +610,75 @@ function addMC() {
 function removeQuestion(i: number) { const l = questions.value.slice(); l.splice(i, 1); writeQuestions(l) }
 function onReset() {
   resetWizardForm(form)
-  presetKey.value = ''
+  pendingPreset.value = null
+  importOpen.value = false
+  importText.value = ''
+  importIssue.value = null
   goStep(1)
 }
 
 const presetKeys = PRESET_KEYS
 
-// One category drives both the site-description text (step 1) and the survey
-// question set (step 2) — they were always the same choice ("this is a
-// catalog site") shown twice. siteContext is a plain string, not a select
-// value, so on load we recover the dropdown's position by matching it back
-// against the known preset texts; an old free-typed description (pre-select
-// UI) simply won't match anything and the dropdown shows unselected while the
-// text itself is still sent as-is.
-const presetKey = ref<string>(
-  (Object.entries(PRESET_SITE_CONTEXT) as [PresetKey, string][])
-    .find(([, text]) => text === form.experiment.siteContext)?.[0] ?? ''
-)
+// One category fills both the site-description text (step 1) and the survey
+// question set (step 3) — they were always the same choice ("this is a
+// catalog site") shown twice. siteContext is a plain string the user can also
+// type, so the dropdown's position is recovered by matching it against the
+// known preset texts: a preset shows as selected until the text is edited, and
+// a custom description (or one saved before the select existed) shows it
+// unselected while the text itself is still sent as-is.
+const presetKey = computed<PresetKey | ''>(() => {
+  const text = String(form.experiment.siteContext ?? '').trim()
+  return (Object.entries(PRESET_SITE_CONTEXT) as [PresetKey, string][])
+    .find(([, preset]) => preset === text)?.[0] ?? ''
+})
+
+// What a preset load could destroy is work on the questions, so "edited" means
+// the list is not empty and not one of the stock sets (compared on what the
+// survey reads — id, type, prompt, options — not on the JSON text).
+const questionSig = (list: Q[]) =>
+  JSON.stringify(list.map(q => [q.id, q.type, q.prompt, q.options ?? null]))
+const stockSigs = PRESET_KEYS.map(k => questionSig(presetQuestions(k) as Q[]))
+const questionsEdited = () =>
+  questions.value.length > 0 && !stockSigs.includes(questionSig(questions.value))
+
+// A preset picked over edited questions waits here for the user's answer.
+const pendingPreset = ref<PresetKey | null>(null)
 
 function applySitePreset(key: PresetKey | '') {
-  presetKey.value = key
-  form.experiment.siteContext = key ? PRESET_SITE_CONTEXT[key] : ''
-  if (key) writeQuestions(presetQuestions(key) as Q[])
+  pendingPreset.value = null
+  if (!key) {
+    // Picking "choose…" empties a description that is just a preset's text,
+    // never one the user wrote.
+    if (presetKey.value) form.experiment.siteContext = ''
+    return
+  }
+  form.experiment.siteContext = PRESET_SITE_CONTEXT[key]
+  if (questionsEdited()) pendingPreset.value = key
+  else writeQuestions(presetQuestions(key) as Q[])
 }
 function onPresetChange(e: Event) {
   applySitePreset((e.target as HTMLSelectElement).value as PresetKey | '')
+}
+function replaceWithPreset() {
+  if (pendingPreset.value) writeQuestions(presetQuestions(pendingPreset.value) as Q[])
+  pendingPreset.value = null
+}
+function keepQuestions() { pendingPreset.value = null }
+
+const importOpen = ref(false)
+const importText = ref('')
+const importIssue = ref<QuestionnaireIssue | null>(null)
+
+function importQuestionnaire() {
+  const res = parseQuestionnaireJson(importText.value)
+  if (!res.ok) { importIssue.value = res.issue; return }
+  const { questions: list, ...meta } = res.questionnaire
+  writeQuestions(list, meta)
+  pendingPreset.value = null
+  importIssue.value = null
+  importText.value = ''
+  importOpen.value = false
+  revealAddedFrom(0)
 }
 
 function insertSUS() {
@@ -741,6 +820,11 @@ async function confirmRun() {
 .preset-select { padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; font: 500 13px var(--sans); background: #fff; color: var(--ink); cursor: pointer; min-width: 240px; }
 .preset-select:focus { outline: none; border-color: var(--ac); }
 .preset-hint { font-size: 12px; color: var(--muted-2); }
+.preset-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 14px; background: #fdf6e9; border: 1px solid #f1e2c2; border-radius: 9px; font-size: 13px; line-height: 1.45; color: #a8691a; }
+.preset-confirm span { flex: 1 1 320px; }
+.import-box { margin-bottom: 14px; }
+.import-box .link-btn { margin-top: 0; }
+.import-hint { font-size: 12.5px; color: var(--muted-2); line-height: 1.5; margin: 4px 0 8px; }
 .empty { text-align: center; padding: 38px 0; color: var(--faint); font-size: 14px; }
 .q-card { border: 1px solid var(--border-soft); border-radius: 10px; padding: 14px 16px; background: #fcfcfd; }
 .q-head { display: flex; align-items: center; gap: 11px; margin-bottom: 11px; }
