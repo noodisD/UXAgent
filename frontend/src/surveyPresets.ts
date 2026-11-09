@@ -41,6 +41,12 @@ export const PRESET_SITE_CONTEXT: Record<PresetKey, string> = {
   corporate: 'Strona firmowa / prezentacja marki; brak katalogu produktów i zakupów online.',
 }
 
+/** A description somebody wrote: not empty and not one a preset supplies. */
+export function isCustomSiteContext(text: string): boolean {
+  const own = text.trim()
+  return own !== '' && !Object.values(PRESET_SITE_CONTEXT).includes(own)
+}
+
 export const SURVEY_PRESETS: Record<PresetKey, PresetQuestion[]> = {
   ecommerce: [
     L('e1', 'Strona była łatwa w obsłudze.'),

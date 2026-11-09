@@ -63,9 +63,9 @@
             :placeholder="t('w1.siteContext.ph')"></textarea>
           <div class="device-note">{{ t('w1.siteContext.hint') }}</div>
           <div v-if="pendingPreset" class="preset-confirm mt10">
-            <span>{{ t('w2.preset.replace', { name: t('w2.preset.' + pendingPreset) }) }}</span>
-            <button class="btn small" @click="replaceWithPreset">{{ t('w2.preset.replaceYes') }}</button>
-            <button class="btn small" @click="keepQuestions">{{ t('w2.preset.replaceNo') }}</button>
+            <span>{{ t(pendingKeys.msg, { name: t('w2.preset.' + pendingPreset) }) }}</span>
+            <button class="btn small" @click="replaceWithPreset">{{ t(pendingKeys.yes) }}</button>
+            <button class="btn small" @click="keepQuestions">{{ t(pendingKeys.no) }}</button>
           </div>
         </div>
         <div class="grid-url mt16">
@@ -213,9 +213,9 @@
           <span class="preset-hint">{{ t('w2.preset.hint') }}</span>
         </div>
         <div v-if="pendingPreset" class="preset-confirm">
-          <span>{{ t('w2.preset.replace', { name: t('w2.preset.' + pendingPreset) }) }}</span>
-          <button class="btn small" @click="replaceWithPreset">{{ t('w2.preset.replaceYes') }}</button>
-          <button class="btn small" @click="keepQuestions">{{ t('w2.preset.replaceNo') }}</button>
+          <span>{{ t(pendingKeys.msg, { name: t('w2.preset.' + pendingPreset) }) }}</span>
+          <button class="btn small" @click="replaceWithPreset">{{ t(pendingKeys.yes) }}</button>
+          <button class="btn small" @click="keepQuestions">{{ t(pendingKeys.no) }}</button>
         </div>
 
         <!-- a whole questionnaire pasted as JSON; replaces the list below -->
@@ -343,7 +343,7 @@ import { useApp } from '../composables/useApp'
 import { useRun } from '../composables/useRun'
 import { resetWizardForm } from '../composables/useForm'
 import { useI18n } from '../i18n'
-import { PRESET_KEYS, PRESET_SITE_CONTEXT, presetQuestions, type PresetKey } from '../surveyPresets'
+import { PRESET_KEYS, PRESET_SITE_CONTEXT, isCustomSiteContext, presetQuestions, type PresetKey } from '../surveyPresets'
 import { parseQuestionnaireJson, type QuestionnaireIssue, type QuestionnaireQuestion } from '../questionnaireImport'
 import { nextTick, reactive, ref, watch } from 'vue'
 
@@ -555,12 +555,16 @@ watch(() => JSON.stringify(questions.value), (json) => {
 })
 
 // `meta` is only given by a pasted questionnaire; otherwise the id and title
-// already in the form (or the defaults) stay.
-function writeQuestions(list: Q[], meta: { questionnaire_id?: string; title?: string } = {}) {
+// already in the form (or the defaults) stay. A pasted questionnaire replaces the
+// old one whole (`replace`): its other keys reach the persona, so none of the old
+// questionnaire's may linger beside the new ones.
+function writeQuestions(list: Q[], meta: Record<string, unknown> = {}, replace = false) {
   let obj: any = {}
   try { obj = JSON.parse(form.survey.questionnaire || '{}') } catch { obj = {} }
-  obj.questionnaire_id = meta.questionnaire_id || obj.questionnaire_id || 'survey_v1'
-  obj.title = meta.title || obj.title || 'Post-session survey'
+  if (replace) obj = { questionnaire_id: obj.questionnaire_id, title: obj.title }
+  Object.assign(obj, meta)
+  obj.questionnaire_id = obj.questionnaire_id || 'survey_v1'
+  obj.title = obj.title || 'Post-session survey'
   obj.questions = list
   form.survey.questionnaire = JSON.stringify(obj, null, 2)
 }
@@ -610,7 +614,7 @@ function addMC() {
 function removeQuestion(i: number) { const l = questions.value.slice(); l.splice(i, 1); writeQuestions(l) }
 function onReset() {
   resetWizardForm(form)
-  pendingPreset.value = null
+  clearPending()
   importOpen.value = false
   importText.value = ''
   importIssue.value = null
@@ -641,15 +645,27 @@ const stockSigs = PRESET_KEYS.map(k => questionSig(presetQuestions(k) as Q[]))
 const questionsEdited = () =>
   questions.value.length > 0 && !stockSigs.includes(questionSig(questions.value))
 
-// A preset picked over edited questions waits here for the user's answer.
+// A preset picked over a description the user wrote, or over edited questions,
+// waits here for the user's answer. `pendingText` means the description is at
+// stake too; otherwise it was set at once and only the questions wait.
 const pendingPreset = ref<PresetKey | null>(null)
+const pendingText = ref(false)
+const clearPending = () => { pendingPreset.value = null; pendingText.value = false }
+const pendingKeys = computed(() => pendingText.value
+  ? { msg: 'w2.preset.replaceText', yes: 'w2.preset.replaceTextYes', no: 'w2.preset.replaceTextNo' }
+  : { msg: 'w2.preset.replace', yes: 'w2.preset.replaceYes', no: 'w2.preset.replaceNo' })
 
 function applySitePreset(key: PresetKey | '') {
-  pendingPreset.value = null
+  clearPending()
   if (!key) {
     // Picking "choose…" empties a description that is just a preset's text,
     // never one the user wrote.
     if (presetKey.value) form.experiment.siteContext = ''
+    return
+  }
+  if (isCustomSiteContext(String(form.experiment.siteContext ?? ''))) {
+    pendingPreset.value = key
+    pendingText.value = true
     return
   }
   form.experiment.siteContext = PRESET_SITE_CONTEXT[key]
@@ -657,13 +673,20 @@ function applySitePreset(key: PresetKey | '') {
   else writeQuestions(presetQuestions(key) as Q[])
 }
 function onPresetChange(e: Event) {
-  applySitePreset((e.target as HTMLSelectElement).value as PresetKey | '')
+  const select = e.target as HTMLSelectElement
+  applySitePreset(select.value as PresetKey | '')
+  // A preset held back for confirmation is not selected yet.
+  select.value = presetKey.value
 }
 function replaceWithPreset() {
-  if (pendingPreset.value) writeQuestions(presetQuestions(pendingPreset.value) as Q[])
-  pendingPreset.value = null
+  const key = pendingPreset.value
+  if (key) {
+    if (pendingText.value) form.experiment.siteContext = PRESET_SITE_CONTEXT[key]
+    writeQuestions(presetQuestions(key) as Q[])
+  }
+  clearPending()
 }
-function keepQuestions() { pendingPreset.value = null }
+function keepQuestions() { clearPending() }
 
 const importOpen = ref(false)
 const importText = ref('')
@@ -673,8 +696,8 @@ function importQuestionnaire() {
   const res = parseQuestionnaireJson(importText.value)
   if (!res.ok) { importIssue.value = res.issue; return }
   const { questions: list, ...meta } = res.questionnaire
-  writeQuestions(list, meta)
-  pendingPreset.value = null
+  writeQuestions(list, meta, true)
+  clearPending()
   importIssue.value = null
   importText.value = ''
   importOpen.value = false
