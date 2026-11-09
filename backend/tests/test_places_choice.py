@@ -8,6 +8,7 @@ choosing the first sent the search to Warsaw - while the report could not tell
 that the site had offered no Kraków from the tool picking a bad suggestion.
 """
 import json
+import time
 
 import pytest
 from omegaconf import OmegaConf
@@ -111,22 +112,35 @@ def test_a_long_list_is_cut_and_says_so():
 def test_the_advisory_blames_neither_the_site_nor_the_tool_and_is_no_executor_error():
     from simulated_web_agent.main.attribution import _EXECUTOR_ERROR_MARKERS
 
-    text = places_advisory("Kraków", WRONG_PLACES).lower()
-    assert not any(marker in text for marker in _EXECUTOR_ERROR_MARKERS)
-    assert "defect" not in text and "broken" not in text and "failed" not in text
+    for text in (
+        places_advisory("Kraków", WRONG_PLACES),
+        places_advisory("Nowy Sącz", ["Nowy Targ, Polska"], chosen="Nowy Targ, Polska"),
+    ):
+        text = text.lower()
+        assert not any(marker in text for marker in _EXECUTOR_ERROR_MARKERS)
+        assert "defect" not in text and "broken" not in text and "failed" not in text
+
+
+def test_a_partial_match_is_still_the_best_of_what_is_offered():
+    """The chooser answers with the closest suggestion; that it has only part of
+    the place is for select_places_suggestion to say."""
+    assert choose_places_suggestion("Nowy Sącz", ["Nowy Targ, Polska"]) == 0
+    assert choose_places_suggestion("Zielona Góra", ["Góra Kalwaria, Polska"]) == 0
 
 
 # --- the dropdown ------------------------------------------------------------
 
-def _page(items, *, replace_after_ms=None, replacement=()):
+def _page(items, *, replace_after_ms=None, replace_on_down=None, replacement=()):
     """A stand-in for the Places dropdown; as Google's, its key handling lives on
-    document. `replacement` swaps the list in later, like a late response."""
+    document, the highlighted row carries `pac-item-selected`, ArrowDown past the
+    last row leaves the list and the next one starts again, and a new list has no
+    highlight. `replacement` swaps the list in later, like a late response: after
+    a delay, or while the `replace_on_down`-th ArrowDown is handled."""
     rows = "".join(f'<div class="pac-item">{t}</div>' for t in items)
+    later = "".join(f'<div class="pac-item">{t}</div>' for t in replacement)
     swap = ""
     if replace_after_ms:
-        later = "".join(f'<div class="pac-item">{t}</div>' for t in replacement)
-        swap = (f"setTimeout(() => {{ document.querySelector('.pac-container')"
-                f".innerHTML = {json.dumps(later)}; }}, {replace_after_ms});")
+        swap = f"setTimeout(replace, {replace_after_ms});"
     return f"""<!DOCTYPE html><html><body style="margin:0">
       <input class="pac-target-input" parser-semantic-id="loc">
       <div class="pac-container" style="display:block">{rows}</div>
@@ -134,9 +148,15 @@ def _page(items, *, replace_after_ms=None, replacement=()):
         window.__selected = null; window.__downs = 0; let hi = -1;
         const items = () => Array.from(document.querySelectorAll('.pac-item'))
           .filter((el) => el.getClientRects().length);
+        const mark = () => items().forEach((el, i) => el.classList.toggle('pac-item-selected', i === hi));
+        const replace = () => {{
+          document.querySelector('.pac-container').innerHTML = {json.dumps(later)}; hi = -1;
+        }};
         document.addEventListener('keydown', (e) => {{
-          if (e.key === 'ArrowDown') {{ window.__downs++; hi = Math.min(hi + 1, items().length - 1); }}
-          else if (e.key === 'Enter' && hi >= 0) {{ window.__selected = items()[hi].innerText; }}
+          if (e.key === 'ArrowDown') {{
+            window.__downs++; hi = hi + 1 >= items().length ? -1 : hi + 1; mark();
+            if (window.__downs === {json.dumps(replace_on_down)}) replace();
+          }} else if (e.key === 'Enter' && hi >= 0) {{ window.__selected = items()[hi].innerText; }}
         }});
         {swap}
       </script></body></html>"""
@@ -203,6 +223,72 @@ async def test_a_hidden_dropdown_left_by_an_earlier_input_is_not_counted(page):
     assert await page.evaluate("window.__selected") == "Kraków, Polska"
 
 
+async def test_a_suggestion_with_only_part_of_the_place_is_chosen_but_said_so(page):
+    """Nowy Targ shares "Nowy" with Nowy Sącz and is the wrong town. It is the
+    closest on offer, so it is chosen (the first would be no better), and the
+    advisory is the only trace that the search may be for another place."""
+    await page.set_content(_page(["Nowy Targ, Polska"]))
+    told = []
+    assert await select_places_suggestion(
+        page, "Nowy Sącz", timeout=1500, advise=told.append, settle=0
+    ) is True
+    assert await page.evaluate("window.__selected") == "Nowy Targ, Polska"
+    assert len(told) == 1
+    assert "Nowy Sącz" in told[0] and "Nowy Targ, Polska" in told[0]
+    assert "only part of what you typed" in told[0]
+
+
+async def test_a_suggestion_with_the_whole_place_is_not_flagged_and_does_not_wait(page):
+    await page.set_content(_page(["Nowy Targ, Polska", "Nowy Sącz, Polska"]))
+    told = []
+    started = time.monotonic()
+    assert await select_places_suggestion(
+        page, "Nowy Sącz", timeout=1500, advise=told.append, settle=5
+    ) is True
+    assert time.monotonic() - started < 2.5
+    assert await page.evaluate("window.__selected") == "Nowy Sącz, Polska"
+    assert told == []
+
+
+async def test_a_list_that_matches_only_in_part_is_given_time_to_settle(page):
+    """The answer to "Kraków" matches "Kraków Nowa Huta" in part; the list for
+    the whole text comes a moment later."""
+    await page.set_content(_page(
+        ["Kraków, Polska"], replace_after_ms=500,
+        replacement=["Kraków, Polska", "Nowa Huta, Kraków, Polska"],
+    ))
+    told = []
+    assert await select_places_suggestion(
+        page, "Kraków Nowa Huta", timeout=1500, advise=told.append, settle=3
+    ) is True
+    assert await page.evaluate("window.__selected") == "Nowa Huta, Kraków, Polska"
+    assert told == []
+
+
+async def test_a_list_replaced_while_the_keys_are_sent_is_chosen_from_again(page):
+    """The response to the last keystroke lands between two ArrowDowns: the list
+    is new and nothing is highlighted, so the count made for the old one selects
+    the wrong row (here the second, Krakowska) unless the choice is made again."""
+    await page.set_content(_page(
+        ["Krakowska, Warszawa", "Krakowiaków, Warszawa", "Kraków, Małopolskie"],
+        replace_on_down=1,
+        replacement=["Kraków, Polska", "Krakowska, Warszawa", "Krakowiaków, Warszawa"],
+    ))
+    told = []
+    assert await select_places_suggestion(
+        page, "Kraków", timeout=1500, advise=told.append, settle=0
+    ) is True
+    assert await page.evaluate("window.__selected") == "Kraków, Polska"
+    assert told == []
+
+
+async def test_a_list_that_did_not_change_is_walked_once(page):
+    await page.set_content(_page(["Krakowska, Warszawa", "Krakowiaków, Warszawa", "Kraków, Polska"]))
+    assert await select_places_suggestion(page, "Kraków", timeout=1500, settle=0) is True
+    assert await page.evaluate("window.__downs") == 3
+    assert await page.evaluate("window.__selected") == "Kraków, Polska"
+
+
 # --- how it reaches the persona and the trace --------------------------------
 
 @pytest.fixture
@@ -228,6 +314,13 @@ async def test_the_step_carries_the_advisory_beside_a_clean_error_channel(env, p
     obs = await _type(env, "30-052 Kraków")
     assert not obs.get("error"), "the action worked: the failure counters must not see it"
     assert "30-052 Kraków" in obs["advisory"] and "Krakowiaków Warszawa" in obs["advisory"]
+
+
+async def test_the_step_carries_the_advisory_for_a_partial_match_too(env, page):
+    await page.set_content(_page(["Nowy Targ, Polska"]))
+    obs = await _type(env, "Nowy Sącz")
+    assert not obs.get("error")
+    assert "Nowy Targ, Polska" in obs["advisory"] and "only part" in obs["advisory"]
 
 
 async def test_a_step_that_chose_the_place_has_nothing_to_advise(env, page):

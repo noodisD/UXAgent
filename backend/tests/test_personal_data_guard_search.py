@@ -34,13 +34,39 @@ def test_the_search_box_that_was_refused_on_the_live_site_is_left_alone():
     {"role": "search", "id": "mobile_box"},
     {"name": "query_mobile"},
     {"id": "siteSearch", "placeholder": "Telefon lub nazwa"},
-    {"class": "header__search-input", "aria_label": "Szukaj telefonu"},
+    {"name": "site-search", "aria_label": "Szukaj telefonu"},
+    {"role": "searchbox", "id": "mobile_phone"},
     {"name": "q"},
     {"id": "wyszukiwarka-mobile"},
     {"name": "szukaj"},
+    {"type": "search", "placeholder": "Wpisz hasło"},
 ])
 def test_a_search_or_query_box_skips_the_wording_check(attrs):
     assert personal_field_reason(attrs) is None
+
+
+@pytest.mark.parametrize("attrs", [
+    {"type": "text", "name": "email", "class": "form-control search-input"},
+    {"type": "text", "name": "password", "class": "search-box"},
+    {"class": "header__search-input", "aria_label": "Szukaj telefonu"},
+    {"id": "mobile_phone", "class": "search-field"},
+])
+def test_a_search_class_alone_does_not_make_a_field_a_search_box(attrs):
+    """`form-control search-input` styles ordinary text fields too."""
+    assert personal_field_reason(attrs)
+
+
+@pytest.mark.parametrize("attrs", [
+    {"name": "q", "label": "First name"},
+    {"type": "search", "name": "login", "placeholder": "E-mail"},
+    {"role": "search", "aria_label": "Imię i nazwisko"},
+    {"name": "query", "placeholder": "Nazwisko"},
+    {"id": "siteSearch", "placeholder": "Numer karty"},
+])
+def test_a_search_box_whose_wording_asks_for_an_identity_is_still_refused(attrs):
+    """Only the identifiers are free to say anything; what a visitor reads in the
+    box is still read."""
+    assert personal_field_reason(attrs)
 
 
 @pytest.mark.parametrize("attrs", [
@@ -71,6 +97,7 @@ def test_mobile_alone_is_a_layout_word_not_a_phone(attrs):
     {"autocomplete": "tel", "type": "search"},
     {"name": "firstName"},
     {"name": "pesel"},
+    {"placeholder": "Hasło"},
 ])
 def test_phone_and_other_personal_fields_are_still_refused(attrs):
     assert personal_field_reason(attrs)

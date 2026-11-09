@@ -74,30 +74,37 @@ _PERSONAL_AUTOCOMPLETE = frozenset({
     "new-password", "one-time-code", "cc-name", "cc-number", "cc-csc", "cc-exp",
     "cc-exp-month", "cc-exp-year", "bday",
 })
+_PERSONAL_IDENTITY = (
+    r"first.?name|last.?name|full.?name|surname|imi[eę]\b|nazwisk|e-?mail|pesel|"
+    r"password|verification.?code|kod.?weryfik|card.?number|numer.?karty|cvv|cvc"
+)
 # "mobile" alone is the mobile layout as often as a phone: bnpparibas.pl's site
 # search is `id=query_mobile`. It counts only beside a phone/number word.
 _PERSONAL_NAME_RE = re.compile(
-    r"(first.?name|last.?name|full.?name|surname|imi[eę]\b|nazwisk|e-?mail|"
+    rf"({_PERSONAL_IDENTITY}|"
     r"phone|telefon|\btel\b|mobile[\s._-]*(?:phone|number|tel|no(?![a-z])|nr(?![a-z]))|"
-    r"(?<![a-z])(?:number|numer|no|nr)[\s._-]*mobile|kom[oó]rk|pesel|\bnip\b|password|"
-    r"has[lł]o|sms|verification.?code|kod.?weryfik|card.?number|numer.?karty|"
-    r"cvv|cvc)",
+    r"(?<![a-z])(?:number|numer|no|nr)[\s._-]*mobile|kom[oó]rk|\bnip\b|has[lł]o|sms)",
     re.IGNORECASE,
 )
+# What a search box's wording is still read for: the words that are never a query.
+# Not the phone words (a phone shop's search says "Szukaj telefonu"; a number is
+# caught as text) and not "hasło" ("Wpisz hasło" asks for a search term).
+_PERSONAL_IDENTITY_RE = re.compile(rf"({_PERSONAL_IDENTITY})", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"[^\s@]+@[^\s@]+\.[a-z]{2,}", re.IGNORECASE)
 
 # A search box asks for a query, not for who the visitor is, and its identifiers
-# are free to mention anything (`query_mobile`, "Wpisz czego szukasz..."), so the
-# wording check skips it. What is typed into it is still checked as text.
+# are free to mention anything (`query_mobile`), so only what a visitor reads in
+# it is checked for identity words. What is typed into it is still checked as text.
+# `class` is not read: `form-control search-input` sits on ordinary text fields.
 _SEARCH_WORDS = ("query", "search", "szukaj", "wyszuk")
 
 
 def _is_search_box(attrs: dict) -> bool:
     if str(attrs.get("type") or "").lower() == "search":
         return True
-    if str(attrs.get("role") or "").lower() == "search":
+    if str(attrs.get("role") or "").lower() in ("search", "searchbox"):
         return True
-    for key in ("name", "id", "class"):
+    for key in ("name", "id"):
         value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(attrs.get(key) or ""))
         for token in re.split(r"[^a-z0-9]+", value.lower()):
             if token == "q" or token.startswith(_SEARCH_WORDS):
@@ -115,10 +122,12 @@ def personal_field_reason(attrs: dict) -> str | None:
     if hit:
         return f"autocomplete={hit}"
     if _is_search_box(attrs):
-        return None
-    for key in ("name", "id", "placeholder", "aria_label", "label"):
+        keys, wording = ("placeholder", "aria_label", "label"), _PERSONAL_IDENTITY_RE
+    else:
+        keys, wording = ("name", "id", "placeholder", "aria_label", "label"), _PERSONAL_NAME_RE
+    for key in keys:
         value = str(attrs.get(key) or "")
-        if _PERSONAL_NAME_RE.search(value):
+        if wording.search(value):
             return f"{key}={value[:40]!r}"
     return None
 
@@ -191,21 +200,72 @@ def choose_places_suggestion(typed: str, suggestions: list[str]) -> int | None:
     return best[1] if best else None
 
 
-def places_advisory(typed: str, suggestions: list[str], limit: int = 5) -> str:
+def _covers_typed_words(typed: str, suggestion: str) -> bool:
+    """Whether `suggestion` has every word of `typed`. "Nowy Targ" has one of
+    the two words of "Nowy Sącz", and chooses a different town. Numbers are not
+    asked for: a suggestion rarely repeats a house number or a postcode."""
+    have = set(_place_tokens(suggestion))
+    return all(
+        t in have for t in _place_tokens(typed) if t.isalpha() and t not in _PLACE_FILLER
+    )
+
+
+def places_advisory(
+    typed: str, suggestions: list[str], limit: int = 5, chosen: str | None = None
+) -> str:
     """What the persona and the trace are told when no suggestion was the place
-    typed. It states what was offered and what was chosen; it does not say who
-    is at fault, because from here nobody can tell a site that never offers the
-    place from a query worded in a way it does not know."""
+    typed, or when the one chosen (`chosen`) has only part of it. It states what
+    was offered and what was chosen; it does not say who is at fault, because
+    from here nobody can tell a site that never offers the place from a query
+    worded in a way it does not know."""
     shown = " | ".join(s[:70] for s in suggestions[:limit])
     if len(suggestions) > limit:
         shown += f" | (+{len(suggestions) - limit} more)"
-    return (
-        f"none of the place suggestions the site offered for '{typed}' contained that "
-        f"place. Offered: {shown}. The first one was chosen, as a visitor would, so "
+    if chosen is None:
+        said = (
+            f"none of the place suggestions the site offered for '{typed}' contained that "
+            f"place. Offered: {shown}. The first one was chosen, as a visitor would, so "
+        )
+    else:
+        said = (
+            f"the place suggestion chosen for '{typed}' was '{chosen[:70]}', which has "
+            f"only part of what you typed. Offered: {shown}. It was the closest the "
+            "site offered, so "
+        )
+    return said + (
         "the results that follow may be for a different place than the one you typed. "
         "Check which place the results are for; a shorter entry (just the city) may "
         "get better suggestions."
     )
+
+
+async def _places_shown(items) -> list[str]:
+    try:
+        return [" ".join(t.split()) for t in await items.all_inner_texts()]
+    except Exception:
+        return []
+
+
+async def _places_highlighted(page) -> str | None:
+    """The text of the suggestion the arrow keys have highlighted, None if none
+    is (or the markup does not say)."""
+    try:
+        row = page.locator(".pac-container .pac-item-selected:visible")
+        if await row.count() == 0:
+            return None
+        return " ".join((await row.first.inner_text()).split())
+    except Exception:
+        return None
+
+
+async def _places_choice_holds(page, items, shown: list[str], row: str | None) -> bool:
+    """After the arrow keys: is `row` the highlighted suggestion? A highlight the
+    markup does not show is no evidence either way; a list that is no longer the
+    one the choice was made from is."""
+    current = await _places_highlighted(page)
+    if current is not None:
+        return current == row
+    return await _places_shown(items) == shown
 
 
 async def select_places_suggestion(
@@ -229,8 +289,10 @@ async def select_places_suggestion(
     "30-052 Kraków" is offered only streets named after Kraków in Warsaw, and the
     first of them sent the search to Warsaw. When no suggestion is the place
     typed the first is still chosen (what a visitor would do) and `advise` is
-    told what was offered. The list is re-read for up to `settle` seconds first:
-    the dropdown may still hold the answer to a shorter prefix.
+    told what was offered; so it is when the best one has only part of what was
+    typed ("Nowy Targ" for "Nowy Sącz"). The list is re-read for up to `settle`
+    seconds first, until one suggestion has all of it: the dropdown may still
+    hold the answer to a shorter prefix.
     """
     items = page.locator(".pac-container .pac-item:visible")
     try:
@@ -239,21 +301,34 @@ async def select_places_suggestion(
         return False
     deadline = time.monotonic() + settle
     while True:
-        try:
-            shown = [" ".join(t.split()) for t in await items.all_inner_texts()]
-        except Exception:
-            shown = []
+        shown = await _places_shown(items)
         pick = choose_places_suggestion(typed, shown)
-        if pick is not None or not shown or time.monotonic() >= deadline:
+        if not shown or time.monotonic() >= deadline:
+            break
+        if pick is not None and _covers_typed_words(typed, shown[pick]):
             break
         await asyncio.sleep(0.25)
-    if pick is None:
-        pick = 0
-        if shown and advise:
-            advise(places_advisory(typed, shown))
-    for _ in range(pick + 1):
+    for _ in range((pick or 0) + 1):
         await page.keyboard.press("ArrowDown")
+    row = shown[pick or 0] if shown else None
+    if not await _places_choice_holds(page, items, shown, row):
+        # The response to the last keystroke replaced the list while the keys were
+        # sent, and the highlight went with it. Choose again from what is shown
+        # now and walk to that row, wherever the highlight is (len + 1 presses
+        # are one full turn, so a row that is not there leaves it where it was).
+        shown = await _places_shown(items) or shown
+        pick = choose_places_suggestion(typed, shown)
+        row = shown[pick or 0] if shown else None
+        for _ in range(len(shown) + 1):
+            if await _places_highlighted(page) == row:
+                break
+            await page.keyboard.press("ArrowDown")
     await page.keyboard.press("Enter")
+    if shown and advise:
+        if pick is None:
+            advise(places_advisory(typed, shown))
+        elif not _covers_typed_words(typed, shown[pick]):
+            advise(places_advisory(typed, shown, chosen=shown[pick]))
     return True
 
 
