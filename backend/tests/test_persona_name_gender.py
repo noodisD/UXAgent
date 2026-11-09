@@ -2,6 +2,8 @@
 gender. One mixed pool turned a man into 'Anna' while the backstory went on
 with 'jako programista' and 'jego cel' (the report then described 'Anna' with
 masculine forms)."""
+import re
+
 from simulated_web_agent.main.persona import (
     _PL_FEMALE_NAMES,
     _PL_MALE_NAMES,
@@ -108,6 +110,31 @@ def test_replacement_does_not_take_a_name_a_later_persona_has():
     names = _names(personas)
     assert names[2] == "Piotr"
     assert names[1] in _PL_MALE_NAMES and names[1] != "Piotr"
+
+
+def test_replacement_is_not_a_name_the_backstory_already_uses():
+    """'Piotr' is the first free man's name and the commonest relative in a
+    backstory: 'Piotr mieszka z żoną Anną, brat Piotr' read as two people."""
+    personas = [
+        _p("Persona: Jan\nPłeć: mężczyzna\nx"),
+        _p("Persona: Jan\nPłeć: mężczyzna\nTło: Jan mieszka z żoną Anną, a brat Piotr "
+           "pracuje z Piotrem i Krzysztofem."),
+    ]
+    _ensure_unique_names(personas)
+    second = personas[1]["persona"]
+    new = _persona_name(second)
+    assert new in _PL_MALE_NAMES and new not in ("Piotr", "Krzysztof"), new
+    # the header and "Jan mieszka" only; no relative now shares the name
+    assert len(re.findall(rf"\b{new}", second)) == 2, second
+
+
+def test_replacement_falls_back_when_every_name_is_in_the_backstory():
+    personas = [
+        _p("Persona: Jan\nPłeć: mężczyzna\nx"),
+        _p("Persona: Jan\nPłeć: mężczyzna\nTło: " + ", ".join(_PL_MALE_NAMES)),
+    ]
+    _ensure_unique_names(personas)
+    assert _persona_name(personas[1]["persona"]) in _PL_MALE_NAMES
 
 
 def test_replacement_stays_whole_word():

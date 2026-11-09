@@ -79,7 +79,8 @@ _PERSONAL_IDENTITY = (
     r"password|verification.?code|kod.?weryfik|card.?number|numer.?karty|cvv|cvc"
 )
 # "mobile" alone is the mobile layout as often as a phone: bnpparibas.pl's site
-# search is `id=query_mobile`. It counts only beside a phone/number word.
+# search is `id=query_mobile`. It counts beside a phone/number word here, and
+# alone only as a whole label or the last word of an identifier (_bare_mobile).
 _PERSONAL_NAME_RE = re.compile(
     rf"({_PERSONAL_IDENTITY}|"
     r"phone|telefon|\btel\b|mobile[\s._-]*(?:phone|number|tel|no(?![a-z])|nr(?![a-z]))|"
@@ -92,11 +93,28 @@ _PERSONAL_NAME_RE = re.compile(
 _PERSONAL_IDENTITY_RE = re.compile(rf"({_PERSONAL_IDENTITY})", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"[^\s@]+@[^\s@]+\.[a-z]{2,}", re.IGNORECASE)
 
-# A search box asks for a query, not for who the visitor is, and its identifiers
-# are free to mention anything (`query_mobile`), so only what a visitor reads in
-# it is checked for identity words. What is typed into it is still checked as text.
-# `class` is not read: `form-control search-input` sits on ordinary text fields.
+# A search box asks for a query, not for who the visitor is, so it is checked for
+# identity words only; its identifiers are free to mention anything else
+# (`query_mobile`). One search-like name or id makes it a search box, so the other
+# one is still read for those words (`name=email id=query`). What is typed into it
+# is still checked as text. `class` is not read: `form-control search-input` sits
+# on ordinary text fields.
 _SEARCH_WORDS = ("query", "search", "szukaj", "wyszuk")
+# A lone "mobile" is the phone field of an English form ("Mobile", billing_mobile)
+# and a layout word only inside a longer name or phrase (mobile_menu, "Wersja mobile").
+_MOBILE_LABEL_RE = re.compile(r"^[^a-z]*mobile[^a-z]*$", re.IGNORECASE)
+_MOBILE_LAST_WORD_RE = re.compile(r"(?:^|[^a-z])mobile[^a-z]*$")
+
+
+def _spaced(value) -> str:
+    """camelCase split into words: userMobile -> user Mobile."""
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(value or ""))
+
+
+def _bare_mobile(key: str, value: str) -> bool:
+    if key in ("name", "id"):
+        return bool(_MOBILE_LAST_WORD_RE.search(_spaced(value).lower()))
+    return bool(_MOBILE_LABEL_RE.match(value))
 
 
 def _is_search_box(attrs: dict) -> bool:
@@ -105,8 +123,7 @@ def _is_search_box(attrs: dict) -> bool:
     if str(attrs.get("role") or "").lower() in ("search", "searchbox"):
         return True
     for key in ("name", "id"):
-        value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(attrs.get(key) or ""))
-        for token in re.split(r"[^a-z0-9]+", value.lower()):
+        for token in re.split(r"[^a-z0-9]+", _spaced(attrs.get(key)).lower()):
             if token == "q" or token.startswith(_SEARCH_WORDS):
                 return True
     return False
@@ -121,13 +138,11 @@ def personal_field_reason(attrs: dict) -> str | None:
     hit = next((a for a in auto if a in _PERSONAL_AUTOCOMPLETE), None)
     if hit:
         return f"autocomplete={hit}"
-    if _is_search_box(attrs):
-        keys, wording = ("placeholder", "aria_label", "label"), _PERSONAL_IDENTITY_RE
-    else:
-        keys, wording = ("name", "id", "placeholder", "aria_label", "label"), _PERSONAL_NAME_RE
-    for key in keys:
+    search = _is_search_box(attrs)
+    wording = _PERSONAL_IDENTITY_RE if search else _PERSONAL_NAME_RE
+    for key in ("name", "id", "placeholder", "aria_label", "label"):
         value = str(attrs.get(key) or "")
-        if wording.search(value):
+        if wording.search(value) or (not search and _bare_mobile(key, value)):
             return f"{key}={value[:40]!r}"
     return None
 
@@ -194,7 +209,7 @@ def choose_places_suggestion(typed: str, suggestions: list[str]) -> int | None:
         digits = len({t for t in wanted if t.isdigit()} & have)
         if not (letters if words else digits):
             continue
-        key = (3 * letters + digits, -len(have - set(wanted)), -index)
+        key = (3 * letters + digits, -len(have - set(wanted) - _PLACE_FILLER), -index)
         if best is None or key > best[0]:
             best = (key, index)
     return best[1] if best else None

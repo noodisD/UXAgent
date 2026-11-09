@@ -69,6 +69,17 @@ def test_of_equal_matches_the_shorter_then_the_earlier_wins():
     assert choose_places_suggestion("Kraków", ["Kraków, Polska", "Kraków, Polska"]) == 0
 
 
+def test_a_filler_word_is_no_extra_word_in_the_tie_break():
+    """'Plac' and 'Polska' are in every address; a suggestion that carries them
+    has no more words than the place typed."""
+    assert choose_places_suggestion(
+        "Plac Zbawiciela", ["Plac Zbawiciela, Warszawa", "Zbawiciela, Warszawa"]
+    ) == 0
+    assert choose_places_suggestion(
+        "Kraków", ["Kraków Główny, Kraków", "Kraków, Polska"]
+    ) == 1
+
+
 def test_a_street_prefix_or_the_country_is_not_a_match():
     assert choose_places_suggestion("ul. Długa Kraków", ["ul. Piękna, Warszawa"]) is None
     assert choose_places_suggestion("Warszawa Polska", ["Kraków, Polska"]) is None

@@ -89,11 +89,19 @@ def _persona_gender(text: str) -> str | None:
     return "f" if feminine > masculine else "m"
 
 
+def _name_in_text(name: str, text: str) -> bool:
+    """Whether `name`, in any Polish case ("Piotra", "Anną", "Pawła"), is a word
+    of `text`. A stem is enough: the check only steers the choice."""
+    stem = re.sub(r"(?:[ae][łk]|a)$", "", name, flags=re.IGNORECASE) or name
+    return re.search(rf"\b{re.escape(stem)}", text, re.IGNORECASE) is not None
+
+
 def _ensure_unique_names(personas: list[dict]) -> list[dict]:
     """Guarantee distinct persona names. On a collision (or missing name),
     substitute a distinct Polish name of the persona's gender, replacing
     whole-word occurrences of the old name so the rest of the backstory stays
-    coherent. A replacement never takes a name a later persona already has.
+    coherent. A replacement never takes a name a later persona already has, and
+    prefers one the persona's own text does not already use.
     Mutates and returns the list."""
     used: set[str] = set()
     reserved = {
@@ -112,9 +120,9 @@ def _ensure_unique_names(personas: list[dict]) -> list[dict]:
         pool = {"f": _PL_FEMALE_NAMES, "m": _PL_MALE_NAMES}.get(
             _persona_gender(text), _PL_NAME_POOL
         )
-        fresh = next(
-            (n for n in pool if n.lower() not in used and n.lower() not in reserved), None
-        )
+        free = [n for n in pool if n.lower() not in used and n.lower() not in reserved]
+        # not a name the backstory already gives a relative ("brat Piotr")
+        fresh = next((n for n in free if not _name_in_text(n, text)), free[0] if free else None)
         if fresh is None:  # pool exhausted (n > pool size)
             i = len(used) + 1
             fresh = f"{name or 'Osoba'}-{i}"

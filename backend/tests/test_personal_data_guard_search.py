@@ -64,8 +64,20 @@ def test_a_search_class_alone_does_not_make_a_field_a_search_box(attrs):
     {"id": "siteSearch", "placeholder": "Numer karty"},
 ])
 def test_a_search_box_whose_wording_asks_for_an_identity_is_still_refused(attrs):
-    """Only the identifiers are free to say anything; what a visitor reads in the
-    box is still read."""
+    """What a visitor reads in the box is read for identity words."""
+    assert personal_field_reason(attrs)
+
+
+@pytest.mark.parametrize("attrs", [
+    {"type": "text", "name": "email", "id": "query"},
+    {"type": "text", "name": "first_name", "id": "search"},
+    {"type": "text", "name": "imie", "id": "q"},
+    {"type": "text", "name": "nazwisko", "id": "q"},
+    {"type": "search", "name": "email"},
+    {"type": "text", "name": "q", "id": "billing_email"},
+])
+def test_an_identity_word_in_a_search_boxs_identifier_is_still_refused(attrs):
+    """One search-like identifier does not excuse the other one saying email."""
     assert personal_field_reason(attrs)
 
 
@@ -74,9 +86,29 @@ def test_a_search_box_whose_wording_asks_for_an_identity_is_still_refused(attrs)
     {"name": "mobile-nav-toggle"},
     {"class": "mobile-only"},
     {"placeholder": "Wersja mobile"},
+    {"id": "header_mobile_menu"},
+    {"name": "immobile"},
 ])
-def test_mobile_alone_is_a_layout_word_not_a_phone(attrs):
+def test_mobile_inside_a_layout_name_is_not_a_phone(attrs):
     assert personal_field_reason(attrs) is None
+
+
+@pytest.mark.parametrize("attrs", [
+    {"type": "text", "name": "mobile"},
+    {"type": "text", "id": "mobile", "placeholder": "Enter"},
+    {"type": "text", "placeholder": "Mobile"},
+    {"type": "text", "placeholder": "Mobile *"},
+    {"type": "text", "label": "Mobile:"},
+    {"type": "text", "aria_label": "mobile"},
+    {"type": "text", "name": "billing_mobile"},
+    {"type": "text", "name": "billing[mobile]"},
+    {"type": "text", "name": "userMobile"},
+    {"type": "text", "name": "mobile_2"},
+])
+def test_a_field_that_is_just_mobile_is_a_phone_field(attrs):
+    """In an English form a bare "mobile" is the phone field. It is a layout word
+    only inside a longer name (mobile_menu) or phrase ("Wersja mobile")."""
+    assert personal_field_reason(attrs)
 
 
 @pytest.mark.parametrize("attrs", [
