@@ -260,6 +260,20 @@ def _accessibility_lines(stats: dict) -> list[dict]:
     return lines
 
 
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def pass_failures(stats: dict, pass_id: str) -> int:
+    """For how many participants an analysis pass failed (statistics.audit_failures).
+
+    Matched on the stable pass id. Rows stored before ids existed carry Polish
+    labels only and count as none: the labels are for the reader, not for code.
+    """
+    return sum(1 for r in (stats or {}).get("audit_failures") or []
+               if isinstance(r, dict) and pass_id in (r.get("pass_ids") or []))
+
+
 def _performance_line(pagespeed: dict | None) -> dict | None:
     mobile = (pagespeed or {}).get("mobile") or {}
     if not isinstance(mobile, dict) or mobile.get("error"):
@@ -371,14 +385,31 @@ def compute_ux_score(stats: dict, *, outcomes: dict | None = None,
         "reason": "samoocena uczestników, pokazana w osobnych sekcjach; wliczenie "
                   "jej do oceny liczyłoby tę samą opinię dwa razy",
     })
-    if not _performance_line(pagespeed) and ((pagespeed or {}).get("mobile") or {}).get("error"):
-        # "Failed" alone sat beside a measured desktop card in three runs.
+    mobile = (pagespeed or {}).get("mobile")
+    if (isinstance(mobile, dict) and not _is_number(mobile.get("performance_score"))
+            and not (pagespeed or {}).get("skipped")):
+        # No mobile score: the call failed, or answered with no Lighthouse result
+        # (an empty one was silently skipped here). "Failed" alone sat beside a
+        # measured desktop card in three runs.
         desktop = ((pagespeed or {}).get("desktop") or {}).get("performance_score")
         reason = "pomiar mobilny PageSpeed nie powiódł się — błąd pomiaru nie jest wadą strony"
         if isinstance(desktop, (int, float)):
             reason += (f"; wynik desktopowy ({desktop:g}/100) jest pokazany w raporcie, "
                        "ale ocena liczy tylko wynik mobilny")
         not_counted.append({"label": "Wydajność strony", "reason": reason})
+    # An analysis that failed has no findings, which reads as a clean one; the
+    # score then rests on the participants it did run for, and says so.
+    total_n = int(stats.get("participant_count") or participants)
+    for pass_id, label in (("accessibility", "Analiza dostępności"),
+                           ("heuristic_evaluation", "Ocena heurystyczna")):
+        failed = pass_failures(stats, pass_id)
+        if failed:
+            not_counted.append({
+                "label": label,
+                "reason": f"nie powiodła się dla {failed} z {total_n} uczestników (usterka narzędzia) "
+                          "— brak jej ustaleń nie oznacza braku problemów; ustalenia tych osób "
+                          "nie weszły do oceny",
+            })
 
     return {
         "score": score,

@@ -216,3 +216,63 @@ def test_a_failed_mobile_measurement_says_the_desktop_one_is_not_counted():
     res = scoring.compute_ux_score({"heuristic": {}}, pagespeed=ps)
     reason = [n for n in res["not_counted"] if n["label"] == "Wydajność strony"][0]["reason"]
     assert "mobilny" in reason and "38/100" in reason and "tylko wynik mobilny" in reason
+
+
+# --- an analysis that failed is named, not silently absent ---------------------
+
+def _failure_row(*pass_ids):
+    return {"persona": "P", "persona_dir": "p", "passes": ["x"], "pass_ids": list(pass_ids)}
+
+
+def test_a_failed_accessibility_pass_is_named_as_left_out():
+    """Its findings never existed, so the score cannot show a barrier — and a
+    reader must not take the missing deduction for a clean bill."""
+    plain = compute_ux_score(_stats())
+    stats = _stats()
+    stats["audit_failures"] = [_failure_row("accessibility"), _failure_row("accessibility", "survey")]
+    res = compute_ux_score(stats)
+    assert res["total_deduction"] == plain["total_deduction"] and res["score"] == plain["score"]
+    (entry,) = [n for n in res["not_counted"] if n["label"] == "Analiza dostępności"]
+    assert "2 z 3 uczestników" in entry["reason"]
+    assert "brak jej ustaleń nie oznacza braku problemów" in entry["reason"]
+    assert "usterka narzędzia" in entry["reason"]
+    assert "Analiza dostępności" in breakdown_text(res)
+
+
+def test_a_failed_heuristic_pass_is_named_as_left_out_too():
+    stats = _stats()
+    stats["audit_failures"] = [_failure_row("heuristic_evaluation")]
+    res = compute_ux_score(stats)
+    assert [n["label"] for n in res["not_counted"] if n["label"] == "Ocena heurystyczna"]
+
+
+def test_passes_the_score_does_not_use_are_not_listed_there():
+    stats = _stats()
+    stats["audit_failures"] = [_failure_row("survey", "first_impression", "viewport_scan")]
+    labels = [n["label"] for n in compute_ux_score(stats)["not_counted"]]
+    assert "Analiza dostępności" not in labels and "Ocena heurystyczna" not in labels
+
+
+def test_a_report_stored_without_pass_ids_names_nothing():
+    stats = _stats()
+    stats["audit_failures"] = [{"persona": "P", "passes": ["analiza dostępności"]}]
+    assert "Analiza dostępności" not in [n["label"] for n in compute_ux_score(stats)["not_counted"]]
+
+
+def test_an_empty_pagespeed_result_is_named_not_silently_skipped():
+    """A Lighthouse answer with no score and no error text used to leave the
+    performance line out and say nothing about it."""
+    for mobile in ({"performance_score": None}, {}):
+        res = compute_ux_score({"heuristic": {}}, pagespeed={"mobile": mobile, "desktop": {}})
+        reason = [n for n in res["not_counted"] if n["label"] == "Wydajność strony"][0]["reason"]
+        assert "nie powiódł się" in reason and "nie jest wadą strony" in reason
+
+
+def test_a_good_mobile_score_is_not_called_a_failure():
+    res = compute_ux_score({"heuristic": {}}, pagespeed={"mobile": {"performance_score": 95}})
+    assert "Wydajność strony" not in [n["label"] for n in res["not_counted"]]
+
+
+def test_a_skipped_pagespeed_run_is_not_called_a_failure():
+    res = compute_ux_score({"heuristic": {}}, pagespeed={"skipped": True, "reason": "no_api_key"})
+    assert "Wydajność strony" not in [n["label"] for n in res["not_counted"]]

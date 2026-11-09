@@ -92,6 +92,19 @@ nazwy pola formularza nie dowodzi, że formularz jest zablokowany — nie pisz, 
 VIEWPORT/RESPONSIVENESS FINDINGS:
 {viewport_summary}
 
+STATUS ANALIZ (które analizy nie dały wyniku — to usterki narzędzia, nie cechy strony):
+{measurement_status}
+WAŻNE (niepowodzenia analiz): obszaru wymienionego powyżej NIE MA w danych — puste pola, zera i
+null w zestawieniach to brak pomiaru, a nie wynik („0 przepełnień” przy nieudanym skanie nie
+znaczy, że strona działa). Dla takiego obszaru: nie wystawiaj oceny ani nie opisuj stanu strony
+(`accessibility_assessment`, `first_impression_assessment` i `responsiveness_assessment` napisz
+jednym zdaniem, że nie oceniono, i dlaczego); nie twórz z niego problemu, mocnej strony ani
+rekomendacji — poza „powtórzyć pomiar”; nie wnioskuj o nim z innych danych (np. o dostępności
+z problemów użyteczności); nie obniżaj z jego powodu overall_ux_score. Gdy analiza nie powiodła
+się tylko dla części uczestników, napisz, że ocena obejmuje pozostałych. Niepowodzenia opisz
+wyłącznie w methodology_note. Ten sam warunek jest sprawdzany w kodzie: niezgodne zdania
+zostaną zastąpione informacją, że nie zmierzono.
+
 PAGE SPEED (Google PageSpeed Insights — mobile + desktop):
 {pagespeed_summary}
 Note — Speed Index thresholds: mobile good <3.4s / poor >5.8s; desktop good <1.3s / poor >2.3s.

@@ -487,6 +487,16 @@ class TraceStore:
     def read_audit_status(self) -> dict:
         return self._read_json(self.trace_dir / "audit_status.json", fallback={}) or {}
 
+    def write_analysis_status(self, data: dict) -> None:
+        """Which analysis passes failed or crashed, by pass id (analysis_runner)."""
+        (self.trace_dir / "analysis_status.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_analysis_status(self) -> dict:
+        data = self._read_json(self.trace_dir / "analysis_status.json", fallback={})
+        return data if isinstance(data, dict) else {}
+
     def write_bias_audit(self, data: dict) -> None:
         (self.trace_dir / "bias_audit.json").write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"

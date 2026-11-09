@@ -78,6 +78,7 @@ from .textutil import (  # noqa: E402,F401  (shared with the Word renderer)
     clip_words, decimal_text, display_url, pl_plural, sessions_in,
 )
 from .sus import BENCHMARK_HUMAN, BENCHMARK_NOTE  # noqa: E402
+from .scoring import pass_failures  # noqa: E402
 
 
 def pct_text(value) -> str:
@@ -565,10 +566,62 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
 </div>"""
 
 
+def _count(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def unscored(block: dict) -> bool:
+    """No participant has a score in this section. False for a report stored
+    before the count was kept: it cannot say, so it renders as it always did."""
+    return _count((block or {}).get("scored")) == 0 and (_count((block or {}).get("of")) or 0) > 0
+
+
+def score_coverage_text(stats: dict, section: str, pass_id: str, failed_phrase: str) -> str:
+    """How many participants a section's score rests on — "" when all of them.
+
+    An average over the participants whose pass ran reads as the whole panel's,
+    and an average of nobody printed "—/5" beside a green heading. The reason is
+    named only when the ledger records one. Shared by HTML and Word.
+    """
+    block = stats.get(section) or {}
+    scored, of = _count(block.get("scored")), _count(block.get("of"))
+    if scored is None or of is None or scored >= of:
+        return ""
+    k = pass_failures(stats, pass_id)
+    why = f"; {failed_phrase} dla {k} z {of} uczestników (usterka narzędzia, nie wada strony)" if k else ""
+    if scored == 0:
+        return f"Nie oceniono — brak wyniku dla żadnego z {of} uczestników{why}."
+    return f"Ocena z {scored} z {of} uczestników{why}."
+
+
+def _avg_cell(stats: dict, section: str) -> str:
+    """A section's average as the statistics table prints it."""
+    block = stats.get(section) or {}
+    if unscored(block):
+        return "nie oceniono"
+    avg = block.get("avg_score")
+    if not avg:
+        return "—"
+    scored, of = _count(block.get("scored")), _count(block.get("of"))
+    partial = f" ({scored} z {of} uczestników)" if scored and of and scored < of else ""
+    return f"{avg_text(avg)}/5{partial}"
+
+
 def _fi_header(stats: dict) -> str:
-    """The first-impression average, or "—": a present-but-null value printed "None/5"."""
-    v = (stats.get("first_impression") or {}).get("avg_score")
-    return f"{avg_text(v)}/5" if isinstance(v, (int, float)) else "—"
+    """The first-impression average, or "—": a present-but-null value printed "None/5".
+
+    "nie oceniono" when nobody has a score; the number of participants beside an
+    average that rests on only some of them."""
+    fi = stats.get("first_impression") or {}
+    if unscored(fi):
+        return '<span style="font-size:15px;">nie oceniono</span>'
+    v = fi.get("avg_score")
+    if not isinstance(v, (int, float)):
+        return "—"
+    scored, of = _count(fi.get("scored")), _count(fi.get("of"))
+    partial = (f'<span style="font-size:13px;font-weight:600;color:rgba(255,255,255,.55);">'
+               f'&nbsp;({scored} z {of})</span>' if scored and of and scored < of else "")
+    return f"{avg_text(v)}/5{partial}"
 
 
 def _anything_observed(stats: dict) -> bool:
@@ -826,7 +879,12 @@ def _render_first_impression(stats: dict, narr: dict) -> str:
                   f'<figcaption>{_esc(s.get("persona") or "")}{score}</figcaption></figure>')
     shots = f'<div class="fi-shots">{shots}</div>' if shots else ""
 
-    if dist:
+    coverage = score_coverage_text(stats, "first_impression", "first_impression",
+                                   "test nie powiódł się")
+    if unscored(fi):
+        # Empty bars under a heading read as a score of nothing.
+        body = f'<p class="sv-legend">{_esc(coverage)}</p>'
+    elif dist:
         # Same distribution + anchored-scale technique as the survey: each
         # dimension shows how the participants split 1-5, the average, and what
         # low/high mean — reusing _render_scale_question for one consistent look.
@@ -849,6 +907,8 @@ def _render_first_impression(stats: dict, narr: dict) -> str:
             f'<div class="score-row"><div class="dim-label">{_esc(label)}</div>'
             f'{_score_bar(dim.get(key))}</div>'
             for key, label in _FI_DIM_LABELS.items())
+    if coverage and not unscored(fi):
+        body = f'<p class="sv-legend">{_esc(coverage)}</p>' + body
 
     if assessment:
         body += f'<p style="margin-top:16px;font-size:13px;color:var(--muted);">{assessment}</p>'
@@ -1039,13 +1099,19 @@ def _render_survey(stats: dict, summaries: dict | None = None) -> str:
 
 
 def _render_accessibility(stats: dict, narr: dict) -> str:
-    a11y_avg = (stats.get("accessibility") or {}).get("avg_score")
+    acc = stats.get("accessibility") or {}
+    a11y_avg = acc.get("avg_score")
     assessment = _esc(narr.get("accessibility_assessment", ""))
     color = _score_color(a11y_avg)
+    coverage = score_coverage_text(stats, "accessibility", "accessibility", "analiza nie powiodła się")
+    # "—/5" beside a heading says a score of nothing; nobody was scored.
+    big = ('<div style="font-size:22px;font-weight:800;color:#6c757d;">nie oceniono</div>'
+           if unscored(acc) else
+           f'<div style="font-size:40px;font-weight:800;color:{color};">{avg_text(a11y_avg)}<span style="font-size:18px;">/5</span></div>')
     body = f"""
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;">
-      <div style="font-size:40px;font-weight:800;color:{color};">{avg_text(a11y_avg)}<span style="font-size:18px;">/5</span></div>
-      <div style="font-size:13px;color:#6c757d;">Średnia ocena dostępności</div>
+      {big}
+      <div style="font-size:13px;color:#6c757d;">Średnia ocena dostępności{f'<br>{_esc(coverage)}' if coverage else ''}</div>
     </div>"""
     if assessment:
         body += f"<p>{assessment}</p>"
@@ -1109,17 +1175,35 @@ def _render_recommendations(narr: dict) -> str:
             <div class="action">{action}</div>
             {"" if not impact else f'<div class="impact">Oczekiwany efekt: {impact}</div>'}
             {f'<div class="route-caveat">{_esc(rec["route_caveat"])}</div>' if rec.get("route_caveat") else ""}
+            {f'<div class="route-caveat">{_esc(rec["measurement_caveat"])}</div>' if rec.get("measurement_caveat") else ""}
           </div>
         </div>"""
     return _section("Priorytetowe rekomendacje", f'<div class="rec-list">{items}</div>')
 
 
+_PAGESPEED_WHY = {
+    "timeout": "usługa Google PageSpeed nie odpowiedziała w czasie",
+    "network": "nie udało się połączyć z usługą Google PageSpeed",
+    "quota": "usługa Google PageSpeed odrzuciła zapytanie (limit zapytań)",
+    "http_5xx": "usługa Google PageSpeed zwróciła błąd serwera",
+    "empty": "usługa Google PageSpeed zwróciła odpowiedź bez wyniku",
+}
+
+
 def pagespeed_error_text(data: dict) -> str:
-    """A PageSpeed call that failed, in plain Polish — shared by HTML and Word."""
-    err = str((data or {}).get("error") or "").lower()
-    why = ("usługa Google PageSpeed nie odpowiedziała w czasie"
-           if "timed out" in err or "timeout" in err
-           else "usługa Google PageSpeed zwróciła błąd")
+    """A PageSpeed call that failed, in plain Polish — shared by HTML and Word.
+
+    Called for a result with no score, too: an empty answer carries no error text
+    and is "empty". `error_kind` is what pagespeed.py records; the substring
+    check reads pagespeed.json files written before it existed.
+    """
+    data = data or {}
+    kind = data.get("error_kind")
+    err = str(data.get("error") or "").lower()
+    if kind not in _PAGESPEED_WHY:
+        kind = ("timeout" if "timed out" in err or "timeout" in err
+                else "empty" if not err else None)
+    why = _PAGESPEED_WHY.get(kind, "usługa Google PageSpeed zwróciła błąd")
     return f"Pomiar nie powiódł się — {why}. To błąd pomiaru, nie wada strony; warto go powtórzyć."
 
 
@@ -1144,7 +1228,7 @@ def _render_pagespeed(ps: dict | None) -> str:
 
     def _card(strategy: str) -> str:
         data = ps.get(strategy) or {}
-        if data.get("error"):
+        if data.get("error") or data.get("performance_score") is None:
             # Plain language, in grey. The report printed the raw exception in
             # red — "Błąd: The read operation timed out" — which reads as a
             # fault on the site, in English, in a Polish client document. It is
@@ -1277,10 +1361,20 @@ def _render_scroll_depth(scroll: dict | None) -> str:
 
 
 def unchecked_links_text(links: dict) -> str:
-    n = int((links or {}).get("unchecked_links") or 0)
-    return (f"Nie udało się sprawdzić {n} linków — serwer nie odpowiedział na czas "
-            "lub odrzucił połączenie. Nie liczymy ich ani jako działających, ani "
-            "jako uszkodzonych.") if n else ""
+    """What the link check did not cover: pages it could not open and links whose
+    server did not answer. Shared by HTML and Word; "" when it covered everything."""
+    links = links or {}
+    parts = []
+    failed, total = int(links.get("pages_failed") or 0), int(links.get("pages_total") or 0)
+    if failed:
+        parts.append(f"Nie udało się sprawdzić linków na części stron (stron: {failed} z {total}; "
+                     "usterka narzędzia) — dla nich brak uszkodzonych linków nie jest wynikiem.")
+    n = int(links.get("unchecked_links") or 0)
+    if n:
+        parts.append(f"Nie udało się sprawdzić {n} linków — serwer nie odpowiedział na czas "
+                     "lub odrzucił połączenie. Nie liczymy ich ani jako działających, ani "
+                     "jako uszkodzonych.")
+    return " ".join(parts)
 
 
 def _render_broken_links(links: dict | None) -> str:
@@ -1288,7 +1382,9 @@ def _render_broken_links(links: dict | None) -> str:
         return ""
     total = links.get("total_links_checked", 0)
     if not total:
-        return ""
+        # Every page failed: the check measured nothing, which is not a pass.
+        note = unchecked_links_text(links)
+        return _section("Uszkodzone linki", f'<p class="sb-rules">{_esc(note)}</p>') if note else ""
     broken_urls = links.get("broken_urls") or []
     sessions_broken = links.get("sessions_with_broken_links", 0)
 
@@ -1309,7 +1405,7 @@ def _render_broken_links(links: dict | None) -> str:
     body = f"""
     <p style="font-size:13px;color:#6c757d;margin-bottom:12px;">Sprawdzono {total} linków na odwiedzonych stronach.</p>
     {status_html}"""
-    if links.get("unchecked_links"):
+    if unchecked_links_text(links):
         body += f'<p class="sb-rules">{_esc(unchecked_links_text(links))}</p>' 
     return _section("Uszkodzone linki", body)
 
@@ -1362,8 +1458,6 @@ def stats_table_rows(stats: dict, narr: dict | None = None) -> list[tuple[str, s
     """The "Statystyki zbiorcze" rows — one list for the HTML and the Word file."""
     n = stats.get("participant_count", 0)
     sc = (stats.get("heuristic") or {}).get("severity_counts") or {}
-    fi_avg = (stats.get("first_impression") or {}).get("avg_score")
-    a11y_avg = (stats.get("accessibility") or {}).get("avg_score")
     vp = stats.get("viewport") or {}
     counts = _issue_counts(narr)
     scanned = {d.get("viewport") for d in (vp.get("devices") or [])
@@ -1381,8 +1475,8 @@ def stats_table_rows(stats: dict, narr: dict | None = None) -> list[tuple[str, s
         ("Problemy poważne", str(counts["serious"])),
         ("Problemy drobne", str(counts["minor"])),
         ("Do weryfikacji przez człowieka", str(int(sc.get("needs_verification") or 0))),
-        ("Pierwsze wrażenie (śr.)", f"{avg_text(fi_avg)}/5" if fi_avg else "—"),
-        ("Dostępność (śr.)", f"{avg_text(a11y_avg)}/5" if a11y_avg else "—"),
+        ("Pierwsze wrażenie (śr.)", _avg_cell(stats, "first_impression")),
+        ("Dostępność (śr.)", _avg_cell(stats, "accessibility")),
         ("Overflow mobile", overflow("mobile", "mobile_overflow_sessions")),
         ("Overflow tablet", overflow("tablet", "tablet_overflow_sessions")),
     ]

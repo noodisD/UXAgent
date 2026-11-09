@@ -124,10 +124,8 @@ def _add_measurement_sections(doc, agg: dict) -> None:
         rows = []
         for strategy in ("mobile", "desktop"):
             data = ps.get(strategy) or {}
-            if data.get("error"):
+            if data.get("error") or data.get("performance_score") is None:
                 rows.append((strategy.capitalize(), pagespeed_error_text(data)))
-                continue
-            if data.get("performance_score") is None:
                 continue
             parts = [f"{data['performance_score']}/100 "
                      f"({PAGESPEED_LABELS.get(data.get('performance_label', ''), '—')})"]
@@ -163,11 +161,15 @@ def _add_measurement_sections(doc, agg: dict) -> None:
             _add_caption(doc, f"{scroll_coverage_text(scroll)} {_SCROLL_METHOD}".strip())
 
     links = agg.get("links") or {}
+    from .reporter_html import unchecked_links_text
+    if not links.get("total_links_checked") and unchecked_links_text(links):
+        # Every page failed: the check measured nothing, which is not a pass.
+        doc.add_heading("Uszkodzone linki", level=1)
+        _add_caption(doc, unchecked_links_text(links))
     if links.get("total_links_checked"):
         doc.add_heading("Uszkodzone linki", level=1)
         broken = links.get("broken_urls") or []
         doc.add_paragraph(f"Sprawdzono {links['total_links_checked']} linków na odwiedzonych stronach.")
-        from .reporter_html import unchecked_links_text
         if not broken:
             doc.add_paragraph("Nie wykryto uszkodzonych linków.")
         else:
@@ -567,16 +569,23 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
                 action += f"\nOczekiwany efekt: {r['expected_impact']}"
             if r.get("route_caveat"):
                 action += chr(10) + str(r["route_caveat"])
+            if r.get("measurement_caveat"):
+                action += chr(10) + str(r["measurement_caveat"])
             cells[2].text = action
 
     _add_measurement_sections(doc, agg)
 
     # ── First impression ─────────────────────────────────────────────────
     fi = stats.get("first_impression") or {}
-    if fi.get("avg_score") is not None or fi.get("dimension_avgs"):
+    from .reporter_html import score_coverage_text
+    fi_coverage = score_coverage_text(stats, "first_impression", "first_impression",
+                                      "test nie powiódł się")
+    if fi.get("avg_score") is not None or fi.get("dimension_avgs") or fi_coverage:
         doc.add_heading("Pierwsze wrażenie (test 5 sekund)", level=1)
         if fi.get("avg_score") is not None:
             doc.add_paragraph(f"Średnia ocena: {avg_text(fi['avg_score'])}/5")
+        if fi_coverage:
+            doc.add_paragraph(fi_coverage)
         for s in (fi.get("screenshots") or [])[:3]:
             caption = str(s.get("persona") or "")
             if s.get("score") is not None:
@@ -612,10 +621,14 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
 
     # ── Accessibility ────────────────────────────────────────────────────
     acc = stats.get("accessibility") or {}
-    if acc.get("avg_score") is not None or acc.get("findings"):
+    acc_coverage = score_coverage_text(stats, "accessibility", "accessibility",
+                                       "analiza nie powiodła się")
+    if acc.get("avg_score") is not None or acc.get("findings") or acc_coverage:
         doc.add_heading("Dostępność", level=1)
         if acc.get("avg_score") is not None:
             doc.add_paragraph(f"Średnia ocena dostępności: {avg_text(acc['avg_score'])}/5")
+        if acc_coverage:
+            doc.add_paragraph(acc_coverage)
         if narr.get("accessibility_assessment"):
             doc.add_paragraph(str(narr["accessibility_assessment"]))
         from .scoring import accessibility_severity

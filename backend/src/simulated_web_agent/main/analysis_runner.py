@@ -40,13 +40,45 @@ from .cognitive_walkthrough import run_cognitive_walkthrough
 from .form_analysis import run_form_analysis
 from .iso_metrics import run_iso_metrics
 from .link_checker import run_link_check
-from .reporter import generate_objective_reflection, generate_per_agent_report
+from .reporter import _scan_failure, generate_objective_reflection, generate_per_agent_report
 from .scroll_depth import run_scroll_analysis
 from .survey import run_survey
 from .trace_store import TraceStore
 from .viewport_scan import run_viewport_scan
 
 log = logging.getLogger(__name__)
+
+
+def _crash_text(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"[:300]
+
+
+def _pass_failure(name: str, result: Any) -> str | None:
+    """Why a pass produced nothing usable, or None.
+
+    A pass that raised is its exception. One that returned can still have
+    failed: the survey stores {"error"} or {"raw"} as its result, and a scan
+    whose every page errored returns a list of errors. [] and None are runs with
+    nothing to do, not failures.
+    """
+    if isinstance(result, BaseException):
+        return _crash_text(result)
+    if name == "survey" and isinstance(result, dict):
+        if result.get("error"):
+            return str(result["error"])[:300]
+        if result.get("raw"):
+            return "unparseable_reply"
+    if name in ("viewport_scan", "link_check"):
+        return _scan_failure(result)
+    return None
+
+
+def _write_status(store: TraceStore, status: dict) -> None:
+    # Bookkeeping: failing to record a failure must not cost the report.
+    try:
+        store.write_analysis_status(status)
+    except Exception:
+        log.exception("[analysis_runner] could not write analysis_status for %s", store.trace_dir)
 
 
 async def run_all_analyses(
@@ -78,22 +110,36 @@ async def run_all_analyses(
         "cognitive_walkthrough": run_cognitive_walkthrough(store),
     }
     results = await asyncio.gather(*parallel.values(), return_exceptions=True)
+    # One ledger, by stable pass id: a pass that raised wrote no artifact, so
+    # without this it was indistinguishable from one that found nothing.
+    status: dict[str, str | None] = {}
     for name, result in zip(parallel.keys(), results):
         if isinstance(result, BaseException):
             log.exception(
                 "[analysis_runner] %s failed for %s", name, store.trace_dir,
                 exc_info=result,
             )
+        status[name] = _pass_failure(name, result)
+    _write_status(store, status)
 
     # Cheap post-hoc passes (read files already written by the agent loop)
+    later_crash = False
+
+    def _crashed(name: str, exc: Exception) -> None:
+        nonlocal later_crash
+        status[name] = _crash_text(exc)
+        later_crash = True
+
     try:
         run_scroll_analysis(store)
-    except Exception:
+    except Exception as e:
         log.exception("[analysis_runner] scroll analysis failed for %s", store.trace_dir)
+        _crashed("scroll_depth", e)
     try:
         run_form_analysis(store)
-    except Exception:
+    except Exception as e:
         log.exception("[analysis_runner] form analysis failed for %s", store.trace_dir)
+        _crashed("form_analysis", e)
 
     # Each stage is isolated: a malformed artifact from one pass (e.g. an LLM
     # returning the wrong JSON shape) must not skip every later pass for this
@@ -102,24 +148,31 @@ async def run_all_analyses(
     report = {}
     try:
         report = await generate_per_agent_report(store)
-    except Exception:
+    except Exception as e:
         log.exception("[analysis_runner] per-agent report failed for %s", store.trace_dir)
+        _crashed("per_agent_report", e)
     try:
         await generate_objective_reflection(store)
-    except Exception:
+    except Exception as e:
         log.exception("[analysis_runner] objective reflection failed for %s", store.trace_dir)
+        _crashed("objective_reflection", e)
 
     # Post-reflection passes: ISO metrics (sync, reads reflection) and the
     # bias audit (LLM, reads findings + reflection rationale).
     try:
         questions = questionnaire.get("questions") if isinstance(questionnaire, dict) else None
         run_iso_metrics(store, questions if isinstance(questions, list) else None)
-    except Exception:
+    except Exception as e:
         log.exception("[analysis_runner] iso metrics failed for %s", store.trace_dir)
+        _crashed("iso_metrics", e)
     try:
         await run_bias_audit(store)
-    except Exception:
+    except Exception as e:
         log.exception("[analysis_runner] bias audit failed for %s", store.trace_dir)
+        _crashed("bias_audit", e)
+
+    if later_crash:
+        _write_status(store, status)
 
     log.info("[analysis_runner] Done for %s", store.trace_dir)
     return report

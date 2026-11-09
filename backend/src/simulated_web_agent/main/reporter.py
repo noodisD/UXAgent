@@ -36,7 +36,7 @@ from .recurring import annotate_routes, failed_click_names, group_recurring_repo
 from .textutil import clip_words, decimal_text, pl_plural, view_key
 from .scoring import (
     RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
-    compute_ux_score, rationale_text,
+    compute_ux_score, pass_failures as _pass_failures, rationale_text,
 )
 from .attribution import harness_suspect_causes, restates_a_gated_finding
 from .iso_metrics import current_effectiveness, effective_outcome
@@ -480,6 +480,16 @@ def _survey_failure(survey) -> str | None:
     # A non-empty result with no usable answer (answers missing, empty, valueless,
     # or under an unexpected key) is the same failure in another shape.
     return "ankieta nie zawiera żadnej odpowiedzi"
+
+
+def _scan_failure(findings) -> str | None:
+    """"all_pages_failed" when a page scan (viewport, link check) recorded nothing
+    but errors, else None. [] is a scan with no pages to visit, not a failure."""
+    if not isinstance(findings, list) or not findings:
+        return None
+    if all(isinstance(f, dict) and f.get("error") for f in findings):
+        return "all_pages_failed"
+    return None
 
 
 def _has_answer(a) -> bool:
@@ -1195,6 +1205,11 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     # regardless of the run's device choice, so it stays comparable between
     # runs; which width the *walkthrough* used is session_devices below.
     device_detail: dict[str, dict] = {}
+    # Scans that errored measured nothing; counted so "0 overflow" is not read as
+    # "scanned and fine" (the int counters below stay as they are). A page at a
+    # width counts as failed only when no participant's scan of it succeeded.
+    scans_ok: set[tuple] = set()
+    scans_err: set[tuple] = set()
     for r in reports:
         vp = r.get("viewport_findings") or []
         if any(v.get("viewport") == "mobile" and v.get("horizontal_overflow") for v in vp):
@@ -1202,6 +1217,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         if any(v.get("viewport") == "tablet" and v.get("horizontal_overflow") for v in vp):
             tablet_overflow += 1
         for v in vp:
+            if isinstance(v, dict):
+                (scans_err if v.get("error") else scans_ok).add(
+                    (view_key(v.get("url")) or str(v.get("url") or ""), str(v.get("viewport") or "")))
             if not isinstance(v, dict) or v.get("error"):
                 continue
             label = str(v.get("viewport") or "").strip()
@@ -1367,6 +1385,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         "participant_count": n,
         "first_impression": {
             "avg_score": _avg(fi_scores),
+            # How many participants the average rests on, of how many took part.
+            "scored": len(fi_scores),
+            "of": n,
             "dimension_avgs": {k: _avg(v) for k, v in fi_dimension_scores.items()},
             # Per-dimension response distribution (1-5), so the report can show the
             # spread + anchored scale like the survey, not just a bar.
@@ -1417,6 +1438,8 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         "prioritization": prioritize(all_findings, outcomes) if outcomes else [],
         "accessibility": {
             "avg_score": _avg(a11y_scores),
+            "scored": len(a11y_scores),
+            "of": n,
             # The actual barriers, deduplicated by category — the section used
             # to be a bare number with nothing a developer could act on.
             "findings": a11y_findings,
@@ -1431,6 +1454,9 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # Working sets stripped: they are not JSON and not for the reader.
             "devices": [{k: v for k, v in device_detail[key].items() if not k.startswith("_")}
                         for key in sorted(device_detail)],
+            "measured": bool(device_detail),
+            "scan_errors": {"pages_failed": len(scans_err - scans_ok),
+                            "pages_total": len(scans_err | scans_ok)},
             # What the walkthrough itself ran on, as {device: session count}.
             "session_devices": session_devices,
         },
@@ -1503,11 +1529,17 @@ def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
     checked_urls: set[str] = set()
     per_page_count: dict[str, int] = {}
     unchecked: set[str] = set()
+    # Pages whose check errored, as for the viewport scan: failed only when no
+    # participant's check of that page succeeded.
+    pages_ok: set[str] = set()
+    pages_err: set[str] = set()
 
     for store in stores:
         findings = store.read_link_findings()
         session_broken = set()
         for page_result in findings:
+            (pages_err if page_result.get("error") else pages_ok).add(
+                str(page_result.get("url") or ""))
             # Distinct links, not a sum over pages and personas: the same
             # header and footer sit on every page and every persona revisits the
             # same pages. The summed figure reached the report as a strength
@@ -1538,9 +1570,14 @@ def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
         # Links whose server did not answer the check (timeout, refused
         # connection) — neither working nor broken.
         "unchecked_links": len(unchecked - checked_urls),
+        "pages_failed": len(pages_err - pages_ok),
+        "pages_total": len(pages_err | pages_ok),
     }
 
-    if not total_checked:
+    if not total_checked and data["pages_total"] and data["pages_failed"] == data["pages_total"]:
+        text = (f"(test linków nie powiódł się na żadnej z odwiedzonych stron (stron: {data['pages_total']}) — "
+                "usterka narzędzia: linki nie zostały sprawdzone, to nie jest wynik)")
+    elif not total_checked:
         text = "(link check not available — run with new traces)"
     elif not all_broken:
         text = f"No broken links detected across {total_checked} links checked."
@@ -1552,6 +1589,15 @@ def _aggregate_links(stores: list[TraceStore]) -> tuple[dict, str]:
             f"Broken: {', '.join(all_broken[:5])}"
             + (" …" if len(all_broken) > 5 else "")
         )
+    # What the check did not cover, so "no broken links" is not read as "all
+    # links work": pages it could not open and links whose server did not answer.
+    if total_checked and data["pages_failed"]:
+        text += (f" UWAGA: nie udało się sprawdzić części stron (stron: {data['pages_failed']} z "
+                 f"{data['pages_total']}; usterka narzędzia) — dla nich brak uszkodzonych linków "
+                 "nie jest wynikiem.")
+    if total_checked and data["unchecked_links"]:
+        text += (f" Nie udało się sprawdzić {data['unchecked_links']} linków (serwer nie "
+                 "odpowiedział) — nie są ani działające, ani uszkodzone.")
 
     return data, text
 
@@ -1628,31 +1674,285 @@ _AUDIT_PASS_PL = {
     "heuristic_evaluation": "ocena heurystyczna",
     "first_impression": "test pierwszego wrażenia",
     "accessibility": "analiza dostępności",
+    "survey": "ankieta",
+    "viewport_scan": "skan responsywności",
+    "link_check": "test linków",
 }
+# What one run_audit_analysis covers: if it raises, all three failed.
+_AUDIT_PASS_IDS = ("heuristic_evaluation", "first_impression", "accessibility")
 
 
-def _audit_failures(stores: list) -> list[dict]:
-    """Participants for whom an audit pass failed, and which.
+def _failed_pass_ids(s) -> set[str]:
+    """The stable ids of the passes that failed or crashed for one participant.
 
-    A failed heuristic pass wrote [], indistinguishable from "no problems", so a
-    persona's findings could vanish from the report with nothing to say so.
-    "no_evidence" is not a failure — there was nothing to judge — and is left
-    out. Sessions audited before audit_status.json existed still show their
-    first-impression and accessibility errors, which were always recorded.
+    analysis_status.json (analysis_runner) names the crashes, which wrote no
+    artifact at all. The artifacts still decide for sessions analysed before it
+    existed, and for a survey or scan that returned an error instead of raising.
     """
-    out = []
-    for s in stores:
+    ledger = s.read_analysis_status()
+    failed: set[str] = set()
+    if ledger.get("audit"):
+        # It raised before writing anything, audit_status.json included.
+        failed.update(_AUDIT_PASS_IDS)
+    else:
         status = s.read_audit_status() or {}
         if not status:
             fi = s.read_first_impression() or {}
             acc = s.read_accessibility_findings() or {}
             status = {"first_impression": fi.get("error") if isinstance(fi, dict) else None,
                       "accessibility": acc.get("error") if isinstance(acc, dict) else None}
-        failed = [_AUDIT_PASS_PL[k] for k in _AUDIT_PASS_PL
-                  if status.get(k) and status.get(k) != "no_evidence"]
-        if failed:
+        failed.update(k for k in _AUDIT_PASS_IDS
+                      if status.get(k) and status.get(k) != "no_evidence")
+    # A truncated session's survey is left out of the averages on purpose
+    # (aggregate_statistics), so it is not a failed one.
+    if ((ledger.get("survey") or _survey_failure(s.read_survey_result()))
+            and not _is_truncated_session(s.read_ux_report() or {})):
+        failed.add("survey")
+    if ledger.get("viewport_scan") or _scan_failure(s.read_viewport_findings()):
+        failed.add("viewport_scan")
+    if ledger.get("link_check") or _scan_failure(s.read_link_findings()):
+        failed.add("link_check")
+    return failed
+
+
+def _audit_failures(stores: list) -> list[dict]:
+    """Participants for whom an analysis pass failed, and which.
+
+    A failed heuristic pass wrote [], indistinguishable from "no problems", so a
+    persona's findings could vanish from the report with nothing to say so.
+    "no_evidence" is not a failure — there was nothing to judge — and is left
+    out. `pass_ids` are the stable ids; `passes` the Polish labels for the
+    reader. Later code matches on the ids, never on the labels.
+    """
+    out = []
+    for s in stores:
+        failed = _failed_pass_ids(s)
+        ids = [k for k in _AUDIT_PASS_PL if k in failed]
+        if ids:
             out.append({"persona": _persona_label(s.read_ux_report() or {}) or s.trace_dir.name,
-                        "persona_dir": s.trace_dir.name, "passes": failed})
+                        "persona_dir": s.trace_dir.name,
+                        "passes": [_AUDIT_PASS_PL[k] for k in ids], "pass_ids": ids})
+    return out
+
+
+def _scanned_devices(vp: dict) -> set | None:
+    """The widths the scan measured at least one page on; None for a report
+    stored before the per-device list existed, which cannot say."""
+    if "devices" not in (vp or {}):
+        return None
+    return {d.get("viewport") for d in vp.get("devices") or []
+            if isinstance(d, dict) and d.get("pages_scanned")}
+
+
+def _pagespeed_state(pagespeed: dict | None, strategy: str) -> str:
+    """"ok" (a score), "failed" (an error, or an answer with no score), "skipped"
+    or "missing" (no PageSpeed result stored at all)."""
+    if not isinstance(pagespeed, dict) or not pagespeed:
+        return "missing"
+    if pagespeed.get("skipped"):
+        return "skipped"
+    data = pagespeed.get(strategy)
+    if not isinstance(data, dict):
+        return "missing"
+    score = data.get("performance_score")
+    if isinstance(score, (int, float)) and not isinstance(score, bool):
+        return "ok"
+    return "failed"
+
+
+def measurement_status(stats: dict, pagespeed: dict | None, links: dict | None = None) -> dict:
+    """What was not measured, from the failure ledger and the measurements.
+
+    A pass that failed left an empty result that reads the same as a clean one,
+    so the narrator was given zeros, nulls and blanks and wrote findings from
+    them. This is the one place that says which are not results. A report stored
+    without a ledger yields no failures: it cannot tell failed from not recorded.
+    """
+    n = int(stats.get("participant_count") or 0)
+    out: dict = {"participants": n}
+    for pid in ("accessibility", "first_impression", "heuristic_evaluation"):
+        out[pid] = {"failed": _pass_failures(stats, pid), "of": n,
+                    "scored": (stats.get(pid) or {}).get("scored")}
+    survey = [f for f in (stats.get("survey") or {}).get("failed_surveys") or [] if isinstance(f, dict)]
+    out["survey"] = {"failed": len(survey), "of": n}
+    scanned = _scanned_devices(stats.get("viewport") or {})
+    out["viewport"] = (None if scanned is None else {
+        "missing": [d for d in ("mobile", "tablet") if d not in scanned],
+        "scan_errors": (stats.get("viewport") or {}).get("scan_errors") or {}})
+    out["links"] = {"pages_failed": int((links or {}).get("pages_failed") or 0),
+                    "pages_total": int((links or {}).get("pages_total") or 0)}
+    out["pagespeed"] = {s: _pagespeed_state(pagespeed, s) for s in ("mobile", "desktop")}
+    return out
+
+
+def _unmeasured_items(status: dict) -> list[str]:
+    """One line per area that has no result, for the narrator's prompt."""
+    n = status.get("participants") or 0
+    items = []
+    for pid, label in (("accessibility", "analiza dostępności"),
+                       ("first_impression", "test pierwszego wrażenia"),
+                       ("heuristic_evaluation", "ocena heurystyczna"),
+                       ("survey", "ankieta")):
+        k = (status.get(pid) or {}).get("failed") or 0
+        if k:
+            items.append(f"{label}: błąd narzędzia dla {k} z {n} uczestników")
+    vp = status.get("viewport") or {}
+    if vp.get("missing"):
+        items.append(f"responsywność ({', '.join(vp['missing'])}): skan nie dał wyników")
+    errors = vp.get("scan_errors") or {}
+    if errors.get("pages_failed") and not vp.get("missing"):
+        items.append("responsywność: część stron na danym ekranie nie została przeskanowana "
+                     f"(stron na ekranie: {errors['pages_failed']} z {errors.get('pages_total')})")
+    links = status.get("links") or {}
+    if links.get("pages_failed"):
+        items.append("test linków: część stron nie została sprawdzona "
+                     f"(stron: {links['pages_failed']} z {links.get('pages_total')})")
+    ps = status.get("pagespeed") or {}
+    failed = [s for s in ("mobile", "desktop") if ps.get(s) == "failed"]
+    if failed:
+        items.append(f"PageSpeed {' i '.join(failed)}: pomiar nie powiódł się")
+    return items
+
+
+def measurement_status_text(status: dict) -> str:
+    """The aggregate prompt's block listing what has no result."""
+    items = _unmeasured_items(status)
+    if not items:
+        return "(brak — każda analiza dała wynik)"
+    return ("NIE ZMIERZONO / NIE POWIODŁO SIĘ — usterka narzędzia, nie wada strony:\n"
+            + "\n".join(f"- {i}" for i in items))
+
+
+_PERFORMANCE_WORDS = re.compile(
+    r"pagespeed|page speed|lighthouse|core web vitals|wydajno|czas\w*\s+ładowania"
+    r"|szybko\w*\s+(?:ładowania|strony|serwisu|witryny)"
+    r"|time(?:d)?[\s-]?out|przekroczeni\w*\s+(?:limitu\s+)?czasu", re.IGNORECASE)
+
+_PERF_REPEAT_ACTION = "Powtórzyć pomiar PageSpeed — poprzedni się nie powiódł (błąd pomiaru, nie wada strony)."
+_PERF_CAVEAT = ("Rekomendacja dotyczyła wydajności strony, ale pomiar PageSpeed nie powiódł się — "
+                "nie ma dowodu na problem z wydajnością.")
+_PERF_METHOD_NOTE = ("Pomiar PageSpeed nie powiódł się (usterka narzędzia, nie wada strony), więc "
+                     "wydajności strony nie oceniono; stwierdzenia o niej usunięto z podsumowania.")
+
+
+def _without_sentences(text: str, pattern: re.Pattern) -> str:
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return " ".join(p for p in parts if not pattern.search(p))
+
+
+# pass id -> (narrative field, what nothing scored reads, what a partial one reads)
+_ASSESSMENT_GUARDS = {
+    "accessibility": (
+        "accessibility_assessment",
+        "Analiza dostępności nie dała oceny: nie powiodła się dla {k} z {n} uczestników "
+        "(usterka narzędzia, nie wada strony), więc dostępności nie oceniono.",
+        "Ocena dostępności obejmuje {covered} z {n} uczestników: analiza nie powiodła się "
+        "dla {k} (usterka narzędzia)."),
+    "first_impression": (
+        "first_impression_assessment",
+        "Test pierwszego wrażenia nie dał oceny: nie powiódł się dla {k} z {n} uczestników "
+        "(usterka narzędzia, nie wada strony), więc pierwszego wrażenia nie oceniono.",
+        "Ocena pierwszego wrażenia obejmuje {covered} z {n} uczestników: test nie powiódł się "
+        "dla {k} (usterka narzędzia)."),
+}
+
+
+def guard_unmeasured(narr: dict, stats: dict, pagespeed: dict | None = None,
+                     links: dict | None = None) -> dict:
+    """Take back what the narrator wrote about an area that has no result.
+
+    The prompt tells the model which analyses failed and it does not always
+    listen: a failed accessibility pass became an accessibility assessment, and
+    a PageSpeed timeout became recommendation #2. This is the same rule in code,
+    applied to the free-text fields. A claim is replaced by the plain statement
+    that nothing was measured, not deleted without a trace (redaction.py's
+    stance), and the function can run on its own output. A report stored without
+    a failure ledger keeps its accessibility and first-impression text (it cannot
+    tell failed from not recorded); PageSpeed is judged from its own file.
+    Mutates and returns `narr`.
+    """
+    if not isinstance(narr, dict):
+        return narr
+    status = measurement_status(stats, pagespeed, links)
+
+    for pid, (field, none_scored, partial) in _ASSESSMENT_GUARDS.items():
+        entry = status[pid]
+        k, n, scored = entry["failed"], entry["of"], entry["scored"]
+        if not k:
+            continue
+        covered = n - k if scored is None else scored
+        if covered <= 0:
+            # Nothing was scored, so whatever the narrator wrote has no
+            # measurement under it: replaced, not qualified.
+            narr[field] = none_scored.format(k=k, n=n)
+        else:
+            sentence = partial.format(k=k, n=n, covered=covered)
+            current = str(narr.get(field) or "")
+            if sentence not in current:
+                narr[field] = (current + " " + sentence).strip()
+
+    missing = (status["viewport"] or {}).get("missing") or []
+    if len(missing) == 2:
+        narr["responsiveness_assessment"] = (
+            "Nie zmierzono responsywności: skan ekranów nie dał żadnego wyniku — to brak "
+            "pomiaru, a nie brak problemów.")
+    elif missing:
+        sentence = (f"Nie zmierzono responsywności na: {', '.join(missing)} — skan nie dał "
+                    "wyników; to brak pomiaru, a nie brak problemów.")
+        current = str(narr.get("responsiveness_assessment") or "")
+        if sentence not in current:
+            narr["responsiveness_assessment"] = (current + " " + sentence).strip()
+
+    ps = status["pagespeed"]
+    has_deduction = any(isinstance(d, dict) and d.get("kind") == "performance"
+                        for d in (stats.get("score_breakdown") or {}).get("deductions") or [])
+    if ps["mobile"] == "failed" and ps["desktop"] == "failed" and not has_deduction:
+        # No score from either strategy: a claim about performance has no
+        # measurement under it. Recommendations are rewritten into "repeat the
+        # measurement"; issues are already set aside by _attach_issue_evidence.
+        for rec in narr.get("priority_recommendations") or []:
+            if not isinstance(rec, dict):
+                continue
+            text = " ".join(str(rec.get(k) or "") for k in ("area", "action", "expected_impact"))
+            if _PERFORMANCE_WORDS.search(text):
+                rec["area"], rec["action"] = "Pomiar PageSpeed", _PERF_REPEAT_ACTION
+                rec["expected_impact"], rec["measurement_caveat"] = "", _PERF_CAVEAT
+        stripped = False
+        summary = narr.get("executive_summary")
+        if isinstance(summary, str) and _PERFORMANCE_WORDS.search(summary):
+            narr["executive_summary"] = (_without_sentences(summary, _PERFORMANCE_WORDS)
+                                         or "Nie zmierzono wydajności strony.")
+            stripped = True
+        strengths = narr.get("key_strengths")
+        if isinstance(strengths, list):
+            kept = [x for x in strengths
+                    if not (isinstance(x, str) and _PERFORMANCE_WORDS.search(x))]
+            stripped = stripped or len(kept) != len(strengths)
+            narr["key_strengths"] = kept
+        note = str(narr.get("methodology_note") or "")
+        if stripped and _PERF_METHOD_NOTE not in note:
+            narr["methodology_note"] = (note + " " + _PERF_METHOD_NOTE).strip()
+    return narr
+
+
+def _viewport_for_prompt(vp: dict) -> dict:
+    """statistics.viewport as the aggregate narrator reads it.
+
+    A device whose scan failed has an overflow count of 0, the same 0 as a page
+    scanned and fine; the narrator wrote "the site works on tablet" from it.
+    Those counters go out as null, with the reason, in this copy only: the
+    stored integers feed the renderers and the dashboard unchanged.
+    """
+    out = dict(vp or {})
+    scanned = _scanned_devices(out)
+    if scanned is None:
+        return out
+    missing = [d for d in ("mobile", "tablet") if d not in scanned]
+    for d in missing:
+        out[f"{d}_overflow_sessions"] = None
+    if missing:
+        out["pomiar"] = (f"niedostępny dla: {', '.join(missing)} — skan się nie powiódł lub nie "
+                         "zwrócił wyników; to brak pomiaru, nie brak problemów")
     return out
 
 
@@ -1865,7 +2165,7 @@ async def generate_aggregated_report(
         stats["heuristic"]["by_heuristic"][:10], ensure_ascii=False, indent=2
     )
     a11y_summary = json.dumps(_a11y_for_prompt(stats["accessibility"]), ensure_ascii=False, indent=2)
-    vp_summary = json.dumps(stats["viewport"], ensure_ascii=False, indent=2)
+    vp_summary = json.dumps(_viewport_for_prompt(stats["viewport"]), ensure_ascii=False, indent=2)
     sc = stats["heuristic"]["severity_counts"]
     top_issues = _top_issues_text(stats)
     survey_summary = json.dumps(_survey_for_prompt(stats.get("survey")), ensure_ascii=False, indent=2)
@@ -1898,6 +2198,7 @@ async def generate_aggregated_report(
         log.exception("[reporter] contradicting accounts failed (non-fatal): %s", e)
         route_conflicts = []
 
+    unmeasured = measurement_status(stats, pagespeed_data, link_data)
     prompt = prompt_template.format(
         outcome_distribution=outcome_distribution,
         root_cause_summary=root_cause_summary,
@@ -1912,6 +2213,7 @@ async def generate_aggregated_report(
         heuristic_summary=heuristic_summary,
         accessibility_summary=a11y_summary,
         viewport_summary=vp_summary,
+        measurement_status=measurement_status_text(unmeasured),
         pagespeed_summary=pagespeed_summary,
         scroll_summary=scroll_text,
         link_summary=link_text,
@@ -1946,6 +2248,7 @@ async def generate_aggregated_report(
     # match the breakdown printed beneath it.
     if isinstance(narrative, dict) and "error" not in narrative:
         narrative = clean_narrative(narrative)
+        guard_unmeasured(narrative, stats, pagespeed_data, link_data)
         narrative["overall_ux_score"] = score_result["score"]
         # The explanation too: the files take it from the breakdown at render
         # time, but the dashboard shows the stored narrative, and the model's
@@ -2340,6 +2643,10 @@ def _wcag_demotion_reason(issue: dict, key: str) -> str | None:
     return None
 
 
+_NARRATOR_FAILED_NOTE = (" Uwaga: analiza narracyjna modelu nie powiodła się (usterka narzędzia), "
+                         "więc to podsumowanie złożono automatycznie z liczb, bez interpretacji.")
+
+
 def resolve_narrative(agg: dict) -> dict:
     """The narrative to render, with the LLM-failure fallback already applied.
 
@@ -2353,7 +2660,12 @@ def resolve_narrative(agg: dict) -> dict:
     stats = agg.get("statistics") or {}
     narr = agg.get("narrative") or {}
     if not narr or "error" in narr or not narr.get("executive_summary"):
+        # A stored narrative that is an error (or has no summary) means the call
+        # was made and failed; none at all means it never was.
+        attempted = bool(narr)
         narr = _narrative_from_stats(stats)
+        if attempted:
+            narr["executive_summary"] += _NARRATOR_FAILED_NOTE
     # Also here, not only when the narrative is written: runs stored before this
     # was cleaned (and a model that ignores the prompt) still render without the
     # tool's field names in the client's prose.
@@ -2373,6 +2685,9 @@ def resolve_narrative(agg: dict) -> dict:
     _normalise_issue_severity(narr)
     _attach_issue_evidence(narr, stats, measurements={
         "links": agg.get("links"), "pagespeed": agg.get("pagespeed")})
+    # After the evidence join, which already sets aside an issue no measurement
+    # backs; stored runs get the same rule as new ones.
+    guard_unmeasured(narr, stats, agg.get("pagespeed"), agg.get("links"))
     return narr
 
 
@@ -2405,6 +2720,11 @@ def _narrative_from_stats(stats: dict) -> dict:
     by_h = heur.get("by_heuristic") or []
     a11y_avg = (stats.get("accessibility") or {}).get("avg_score")
     vp = stats.get("viewport") or {}
+    scanned = _scanned_devices(vp)
+
+    def _overflow(device: str, key: str) -> str:
+        return ("nie zmierzono" if scanned is not None and device not in scanned
+                else f"{vp.get(key, 0)}/{n}")
 
     # Bucket by worst_severity. `critical` used to have no bucket at all, so a
     # heuristic whose worst finding was krytyczny matched neither list and was
@@ -2456,7 +2776,7 @@ def _narrative_from_stats(stats: dict) -> dict:
         "serious_issues": [_to_issue(h) for h in serious],
         "minor_issues": [_to_issue(h) for h in minor],
         "accessibility_assessment": f"Średnia ocena dostępności: {a11y_avg}/5." if a11y_avg else "",
-        "responsiveness_assessment": f"Sesje z overflowem tabletowym: {vp.get('tablet_overflow_sessions', 0)}/{n}. Sesje z overflowem mobilnym: {vp.get('mobile_overflow_sessions', 0)}/{n}.",
+        "responsiveness_assessment": f"Sesje z overflowem tabletowym: {_overflow('tablet', 'tablet_overflow_sessions')}. Sesje z overflowem mobilnym: {_overflow('mobile', 'mobile_overflow_sessions')}.",
         "first_impression_assessment": f"Pierwsze wrażenie: {fi_avg:.2f}/5. Najsłabszy wymiar: wezwanie do działania ({dim.get('call_to_action', '—')}/5)." if fi_avg else "",
         "priority_recommendations": recs,
         "methodology_note": f"Badanie przeprowadzono przy użyciu agentów LLM symulujących rzeczywistych użytkowników, z których każdy otrzymał to samo zadanie. Ocena opiera się na heurystykach Nielsena, teście pierwszego wrażenia (5 sekund), analizie dostępności WCAG 2.1 oraz sprawdzeniu responsywności na urządzeniach mobilnych i tabletach.",

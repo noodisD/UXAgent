@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -33,6 +34,15 @@ _LCP_THRESHOLDS: dict[str, float] = {"good": 2500, "poor": 4000}   # ms
 
 # FCP thresholds
 _FCP_THRESHOLDS: dict[str, float] = {"good": 1800, "poor": 3000}   # ms
+
+# One retry for a failure that is the service's or the network's, never for one
+# that is ours (a bad key answers 400/403 every time).
+_RETRY_DELAY_S = 5
+_RETRYABLE = ("timeout", "network", "quota", "http_5xx")
+
+
+class EmptyResult(RuntimeError):
+    """The API answered, but with no Lighthouse result to read."""
 
 
 def _threshold_status(numeric_ms: float | None, good: float, poor: float) -> str:
@@ -69,8 +79,8 @@ async def run_pagespeed_check(url: str, runs_dir: Path) -> dict:
 
     findings = {
         "url": url,
-        "mobile":  results[0] if not isinstance(results[0], Exception) else {"error": str(results[0])},
-        "desktop": results[1] if not isinstance(results[1], Exception) else {"error": str(results[1])},
+        "mobile":  results[0] if not isinstance(results[0], Exception) else _failure(results[0]),
+        "desktop": results[1] if not isinstance(results[1], Exception) else _failure(results[1]),
     }
 
     _write(findings, runs_dir)
@@ -85,6 +95,26 @@ async def run_pagespeed_check(url: str, runs_dir: Path) -> dict:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _classify(exc: BaseException) -> str:
+    """Why a call failed: timeout, quota, http_5xx, empty, network or other."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return "quota" if exc.code == 429 else "http_5xx" if exc.code >= 500 else "other"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, urllib.error.URLError):
+        return "timeout" if isinstance(exc.reason, TimeoutError) else "network"
+    if isinstance(exc, OSError):
+        # A connection dropped while the answer was being read is not wrapped in a URLError.
+        return "network"
+    if isinstance(exc, EmptyResult):
+        return "empty"
+    return "other"
+
+
+def _failure(exc: BaseException) -> dict:
+    return {"error": str(exc) or type(exc).__name__, "error_kind": _classify(exc)}
+
+
 async def _fetch_strategy(url: str, strategy: str, api_key: str) -> dict:
     params = urllib.parse.urlencode({
         "url": url,
@@ -93,8 +123,15 @@ async def _fetch_strategy(url: str, strategy: str, api_key: str) -> dict:
         "category": "performance",
     })
     api_url = f"{_API_BASE}?{params}"
-    raw = await asyncio.to_thread(_http_get, api_url)
-    return _extract_metrics(json.loads(raw), strategy)
+    for attempt in (1, 2):
+        try:
+            raw = await asyncio.to_thread(_http_get, api_url)
+            return _extract_metrics(json.loads(raw), strategy)
+        except Exception as e:
+            if attempt == 2 or _classify(e) not in _RETRYABLE:
+                raise
+            log.warning("[pagespeed] %s failed (%s) — retrying in %ss", strategy, e, _RETRY_DELAY_S)
+            await asyncio.sleep(_RETRY_DELAY_S)
 
 
 def _http_get(url: str) -> bytes:
@@ -107,7 +144,8 @@ def _http_get(url: str) -> bytes:
 
 
 def _extract_metrics(data: dict, strategy: str) -> dict:
-    lhr    = data.get("lighthouseResult", {})
+    lhr = data.get("lighthouseResult") if isinstance(data, dict) else None
+    lhr = lhr if isinstance(lhr, dict) else {}
     cats   = lhr.get("categories", {})
     audits = lhr.get("audits", {})
 
@@ -121,7 +159,12 @@ def _extract_metrics(data: dict, strategy: str) -> dict:
         }
 
     perf_raw = cats.get("performance", {}).get("score")
-    perf_pct = round(perf_raw * 100) if perf_raw is not None else None
+    # An answer with no performance score (no Lighthouse result at all, or one
+    # without the category) is a failed run: stored as a measurement it printed
+    # "Performance None/100" and was named nowhere as unmeasured.
+    if perf_raw is None:
+        raise EmptyResult("PageSpeed zwrócił odpowiedź bez wyniku wydajności")
+    perf_pct = round(perf_raw * 100)
 
     si = _audit("speed-index")
     si_ms = si["numeric_ms"]
@@ -190,23 +233,27 @@ def read_pagespeed(runs_dir: Path) -> dict | None:
 def format_pagespeed_summary(ps: dict | None) -> str:
     """
     Produce a concise plain-text summary for LLM prompts.
-    Returns empty string if data is absent or skipped.
+
+    Absent or skipped data is worded as an unavailable measurement, in the words
+    the prompt's rule keys on: "(Page speed data not available)" read to the
+    narrator as an unremarkable blank.
     """
     if not ps or ps.get("skipped"):
-        return "(Page speed data not available)"
+        return ("pomiar niedostępny (PageSpeed nie został wykonany lub nie dał wyniku; "
+                "to nie wada strony)")
 
     lines = [f"URL: {ps.get('url', '—')}"]
 
     for strategy in ("mobile", "desktop"):
         data = ps.get(strategy) or {}
-        if data.get("error"):
+        score = data.get("performance_score")
+        if data.get("error") or not isinstance(score, (int, float)):
             # A measurement failure is not a site defect — phrase it so the
             # narrator does not read it as a page problem and lower the score.
             lines.append(f"{strategy.capitalize()}: pomiar niedostępny "
                          f"(błąd techniczny pomiaru, nie wada strony)")
             continue
 
-        score = data.get("performance_score")
         label = data.get("performance_label", "").upper()
         si    = data.get("speed_index") or {}
         fcp   = data.get("fcp") or {}

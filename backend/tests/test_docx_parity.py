@@ -74,3 +74,85 @@ def test_participants_accounts_carry_their_caveats(tmp_path):
     _, text = _doc(tmp_path)
     assert OBJECTIVES_NOTE in text
     assert SELF_REPORTED_CAVEAT in text
+
+
+# --- what failed is said in both formats --------------------------------------
+
+import copy  # noqa: E402
+
+from simulated_web_agent.main.reporter_html import generate_html_report  # noqa: E402
+
+
+def _failed_agg(**stats_over):
+    agg = copy.deepcopy(AGG)
+    agg["statistics"].update({
+        "participant_count": 3,
+        "audit_failures": [{"persona": "Ala", "persona_dir": "p0", "passes": ["analiza dostępności"],
+                            "pass_ids": ["accessibility"]}] * 3,
+        "accessibility": {"avg_score": None, "scored": 0, "of": 3},
+        "first_impression": {"avg_score": None, "scored": 0, "of": 3},
+        "survey": {"questions": [], "surveys_included": 0,
+                   "failed_surveys": [{"persona_dir": f"p{i}", "persona": f"P{i}"} for i in range(3)]},
+    })
+    agg["statistics"].update(stats_over)
+    return agg
+
+
+def _both(agg, tmp_path):
+    html = generate_html_report(agg)
+    d = Document(build_docx(agg, tmp_path, tmp_path / "r.docx"))
+    heads = [p.text for p in d.paragraphs if p.style.name == "Heading 1"]
+    text = "\n".join(p.text for p in d.paragraphs) + "\n" + "\n".join(
+        c.text for t in d.tables for row in t.rows for c in row.cells)
+    return html, heads, text
+
+
+def test_an_accessibility_pass_nobody_has_a_score_for_is_in_the_word_file(tmp_path):
+    """The Word file left the section out when there was nothing to average;
+    the HTML printed it. Both say "nie oceniono" and why."""
+    html, heads, text = _both(_failed_agg(), tmp_path)
+    for name, body in (("html", html), ("docx", text)):
+        assert "Nie oceniono — brak wyniku dla żadnego z 3 uczestników" in body, name
+        assert "analiza nie powiodła się dla 3 z 3 uczestników" in body, name
+    assert "Dostępność" in heads and "Pierwsze wrażenie (test 5 sekund)" in heads
+    assert "nie oceniono" in text, "the statistics table row"
+
+
+def test_a_partial_accessibility_score_says_how_many_it_covers_in_both(tmp_path):
+    agg = _failed_agg(accessibility={"avg_score": 3.5, "scored": 2, "of": 3},
+                      audit_failures=[{"persona": "Ala", "persona_dir": "p0", "passes": ["x"],
+                                       "pass_ids": ["accessibility"]}])
+    html, _, text = _both(agg, tmp_path)
+    for name, body in (("html", html), ("docx", text)):
+        assert "Ocena z 2 z 3 uczestników; analiza nie powiodła się dla 1 z 3" in body, name
+        assert "3,50" in body, name
+
+
+def test_every_survey_failing_still_leaves_a_survey_section_with_the_note(tmp_path):
+    html, heads, text = _both(_failed_agg(), tmp_path)
+    assert "Wyniki ankiety" in heads and "Wyniki ankiety" in html
+    for name, body in (("html", html), ("docx", text)):
+        assert "Ankiety nie powiodły się dla: P0, P1, P2" in body, name
+        assert "(n=0 z 3)" in body, name
+
+
+def test_a_link_check_that_opened_no_page_is_a_section_not_a_silence(tmp_path):
+    agg = _failed_agg()
+    agg["links"] = {"total_links_checked": 0, "broken_urls": [], "pages_failed": 2, "pages_total": 2}
+    html, heads, text = _both(agg, tmp_path)
+    assert "Uszkodzone linki" in heads
+    for name, body in (("html", html), ("docx", text)):
+        assert "(stron: 2 z 2; usterka narzędzia)" in body, name
+        assert "nie jest wynikiem" in body, name
+
+
+def test_pagespeed_with_no_score_reads_as_not_measured_in_both(tmp_path):
+    agg = _failed_agg()
+    agg["pagespeed"] = {"url": "https://x.pl/", "mobile": {"performance_score": None},
+                        "desktop": {"error": "HTTP Error 429", "error_kind": "quota"}}
+    html, _, text = _both(agg, tmp_path)
+    for name, body in (("html", html), ("docx", text)):
+        assert "zwróciła odpowiedź bez wyniku" in body, name
+        assert "odrzuciła zapytanie (limit zapytań)" in body, name
+        assert "nie wada strony" in body, name
+    assert "None/100" not in html and "None/100" not in text
