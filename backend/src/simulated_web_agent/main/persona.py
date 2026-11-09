@@ -32,9 +32,11 @@ _PL_MALE_NAMES = [
 _PL_NAME_POOL = [n for pair in zip(_PL_FEMALE_NAMES, _PL_MALE_NAMES) for n in pair]
 
 # "Płeć: kobieta" is what the persona format asks for; "Gender:" is the English
-# example's spelling. [ \t]* and not \s*, which would run on into the next line.
+# example's spelling; a list marker and bold ("- **Płeć:** Kobieta") are what a
+# model makes of it. [ \t]* and not \s*, which would run on into the next line.
 _GENDER_LINE_RE = re.compile(
-    r"^[ \t]*(?:Płeć|Plec|Gender)[ \t]*:[ \t]*(\S.*)$", re.MULTILINE | re.IGNORECASE
+    r"^[ \t]*(?:[-*•][ \t]+)?\**(?:Płeć|Plec|Gender)\**[ \t]*:\**[ \t]*(\S.*)$",
+    re.MULTILINE | re.IGNORECASE,
 )
 _FEMALE_VALUE_RE = re.compile(r"(?:kobiet|female|woman|k\b)", re.IGNORECASE)
 _MALE_VALUE_RE = re.compile(r"(?:m[ęe]żczyzn|male\b|man\b|m\b)", re.IGNORECASE)
@@ -45,6 +47,7 @@ _FEMININE_L_ENDINGS = ("ła", "łam")
 _NOT_A_PERSONA_VERB = frozenset({
     "mała", "cała", "biała", "stała", "wspaniała", "doskonała", "szkoła", "siła",
     "skała", "stół", "kościół", "udział", "dział", "podział", "materiał", "kapitał",
+    "pół", "zespół", "ból", "wół", "anioł",
 })
 _POSSESSIVE_RE = re.compile(r"\b(jego|jej)\b", re.IGNORECASE)
 
@@ -60,7 +63,7 @@ def _persona_gender(text: str) -> str | None:
     decides, and a tie or no cue is None rather than a guess."""
     m = _GENDER_LINE_RE.search(text or "")
     if m:
-        value = m.group(1).strip()
+        value = m.group(1).strip().lstrip("*")
         if _FEMALE_VALUE_RE.match(value):
             return "f"
         if _MALE_VALUE_RE.match(value):

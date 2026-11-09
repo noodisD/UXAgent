@@ -137,3 +137,19 @@ def test_gender_cues_do_not_fire_on_nouns_names_or_english():
     assert _persona_gender("Persona: A\nTło: mała firma, cała rodzina, szkoła, Paweł i Rafał.") is None
     assert _persona_gender("Persona: A\nBackground: she is focusing on research on AI.") is None
     assert _persona_gender("Persona: A\nTło: był i była, jego i jej.") is None  # tie
+
+
+def test_a_gender_line_in_a_list_or_in_bold_is_read():
+    for line in ("- Płeć: Kobieta", "* Płeć: Kobieta", "• Płeć: Kobieta", "**Płeć:** Kobieta",
+                 "**Płeć**: Kobieta", "- **Płeć:** **Kobieta**", "  - Gender: Female"):
+        assert _persona_gender(f"Persona: A\n{line}") == "f", line
+    assert _persona_gender("Persona: A\n- **Płeć:** Mężczyzna") == "m"
+    # not a gender line: the word has to open the line
+    assert _persona_gender("Persona: A\nTo jest opis. Płeć: kobieta") is None
+
+
+def test_nouns_that_end_in_l_are_not_masculine_verbs():
+    """pół, zespół, ból, wół and anioł match the past-tense ending -ł; they
+    turned a woman's two feminine verbs into a tie."""
+    text = "Persona: A\nTło: Pracowała pół roku, ból głowy, zespół, była nauczycielką."
+    assert _persona_gender(text) == "f"
