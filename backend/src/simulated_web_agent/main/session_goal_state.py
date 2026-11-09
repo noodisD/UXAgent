@@ -70,9 +70,6 @@ _PARTIAL_FLOOR = "cart_has_items"
 # The trailing slash keeps a bare /products listing from counting as a product.
 _PRODUCT_URL_MARKERS = ("/p/", "/produkt", "/product/", "/products/")
 _CART_URL_MARKERS = ("koszyk", "/cart", "checkout", "/kasa")
-# What shows that the site has the shop the ladder measures: a product, cart or
-# checkout page. Search and listing markers are left out — a bank has a search box.
-_SHOP_URL_MARKERS = _PRODUCT_URL_MARKERS + _CART_URL_MARKERS
 _SEARCH_URL_MARKERS = ("?query", "&query", "/search", "/szukaj", "szukaj=", "q=")
 _CHECKOUT_URL_MARKERS = ("checkout", "/kasa")
 # The checkout ceiling is login-gated: on dm, clicking "Do kasy" leads to
@@ -329,14 +326,15 @@ def resolve_target_rung(store: TraceStore) -> tuple[str | None, str]:
 
 # --- does the ladder apply to this site? ------------------------------------
 
-def _shop_url_seen(store: TraceStore, target_url: str) -> bool:
-    """Did this session reach a same-site product, cart or checkout URL? Decided
-    the way compute_goal_state decides the product and cart rungs."""
-    for entry in store.read_observations():
-        url = _active_url(entry)
-        if url and same_site(url, target_url) and _url_has(url.lower(), _SHOP_URL_MARKERS):
-            return True
-    return False
+_SHOP_RUNG = _RUNG_INDEX["product_viewed"]
+
+
+def _shop_seen(store: TraceStore, target_url: str) -> bool:
+    """Did this session reach a product page, or any rung above it? Asked of the
+    ladder itself: an add-to-cart toast shows a shop as well as a product URL does,
+    and a product page whose URL carries no marker still counts once something is
+    in the cart (dm adds on the product page and never opens /koszyk)."""
+    return compute_goal_state(store, target_url)["reached_index"] >= _SHOP_RUNG
 
 
 def ladder_applies(store: TraceStore, target_url: str, own_shop_seen: bool) -> bool:
@@ -347,9 +345,9 @@ def ladder_applies(store: TraceStore, target_url: str, own_shop_seen: bool) -> b
     has no product URLs, so every persona scored `failed`, whatever the persona
     achieved (bnpparibas.pl: 6 of 6, over a goal each of them judged achieved).
 
-    It applies when any session of the run reached a product, cart or checkout
-    page: then a persona that never got there really did fail. When none did, the
-    site has nothing for the ladder to measure and the caller keeps the declared
+    It applies when any session of the run reached a product page or beyond (cart,
+    checkout): then a persona that never got there really did fail. When none did,
+    the site has nothing for the ladder to measure and the caller keeps the declared
     outcome. A run whose siblings cannot be read (a fixture, a run from before
     run_manifest.json) is judged as it always was: the ladder applies.
     """
@@ -362,7 +360,7 @@ def ladder_applies(store: TraceStore, target_url: str, own_shop_seen: bool) -> b
         for sibling in sorted(run_dir.iterdir()):
             if sibling.name == store.trace_dir.name or not (sibling / "basic_info.json").is_file():
                 continue
-            if _shop_url_seen(TraceStore(sibling), target_url):
+            if _shop_seen(TraceStore(sibling), target_url):
                 return True
     except Exception:
         return True
@@ -381,10 +379,7 @@ def observed_outcome(store: TraceStore, target_url: str) -> dict:
     # author saying the site has what it names. None = not evaluated.
     applies = None
     if source == "inferred" and gs["same_site_steps"] > 0:
-        ladder = gs["ladder"]
-        applies = ladder_applies(
-            store, target_url,
-            ladder["product_viewed"]["reached"] or ladder["cart_reached"]["reached"])
+        applies = ladder_applies(store, target_url, gs["reached_index"] >= _SHOP_RUNG)
     decidable = target is not None and gs["same_site_steps"] > 0 and applies is not False
 
     if not decidable:

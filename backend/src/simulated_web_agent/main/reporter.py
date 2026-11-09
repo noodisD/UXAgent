@@ -2015,7 +2015,7 @@ def _survey_for_prompt(survey_stats: dict | None) -> dict:
 
 
 def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
-                                 sources: dict | None = None) -> str:
+                                 sources: dict | None = None, no_shop: bool = False) -> str:
     """Task-completion summary for the aggregate narrator, labelled by source.
 
     It used to open with "zmierzone z zapisu sesji … nie samoocena agenta"
@@ -2024,6 +2024,11 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
     own verdict, and the narrator was told that verdict was trace evidence. The
     aggregate prompt calls measured completion its strongest evidence, so this
     sentence decided the score. It now says what it is.
+
+    `no_shop`: no session reached a product page (effectiveness.ladder_applies is
+    False). That is a bank, but it is also a shop that stopped every participant on
+    its listing pages, and the record cannot tell the two apart — so the text must
+    not say the task is of a type the record cannot assess.
     """
     if not n:
         return "Brak danych o ukończeniu zadania."
@@ -2037,11 +2042,14 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
             parts.append(f"porzucono: {c['persona_abandoned']}/{n}")
         if c.get("unknown"):
             parts.append(f"wynik nieustalony: {c['unknown']}/{n}")
-        return ("UKOŃCZENIE ZADANIA — DEKLAROWANE, nie zmierzone. Zapis sesji nie "
-                "pozwala automatycznie ocenić tego typu zadania, więc poniższe liczby "
-                "to werdykt modelu o przebiegu każdej sesji (ocena deklarowana), a nie "
-                "pomiar ani ocena samych uczestników. Traktuj je jako słabszy dowód niż "
-                "zweryfikowane problemy i zaznacz w podsumowaniu, że są to "
+        why = ("Żadna sesja nie dotarła do strony produktu ani koszyka: strona może nie "
+               "mieć sklepu albo żaden uczestnik do niego nie dotarł, a zapis sesji tego nie "
+               "rozróżnia" if no_shop else
+               "Zapis sesji nie pozwala automatycznie ocenić tego typu zadania")
+        return ("UKOŃCZENIE ZADANIA — DEKLAROWANE, nie zmierzone. " + why + ", więc "
+                "poniższe liczby to werdykt modelu o przebiegu każdej sesji (ocena "
+                "deklarowana), a nie pomiar ani ocena samych uczestników. Traktuj je jako "
+                "słabszy dowód niż zweryfikowane problemy i zaznacz w podsumowaniu, że są to "
                 "deklaracje, a nie pomiar:\n- " + "; ".join(parts) + ".")
     succ, part, fail = c.get("success", 0), c.get("partial", 0), c.get("failed", 0)
     ab = c.get("persona_abandoned", 0)
@@ -2123,6 +2131,7 @@ async def generate_aggregated_report(
     # prompt treats measured completion as its strongest evidence.
     outcome_sources: dict[str, str] = {}
     reached_rungs: list[str] = []
+    no_shop = False
     for s in stores:
         # Current code, as effective_outcome computes it — not the stored file.
         eff = current_effectiveness(s)
@@ -2131,6 +2140,7 @@ async def generate_aggregated_report(
         outcome_sources[s.trace_dir.name] = source
         if eff.get("outcome_source") == "observed":
             reached_rungs.append(str(eff.get("reached_rung") or ""))
+        no_shop = no_shop or eff.get("ladder_applies") is False
 
     # Questionnaire (from the run manifest) supplies real prompts + scales for
     # the survey section — without it the report shows bare question ids.
@@ -2173,7 +2183,7 @@ async def generate_aggregated_report(
     # Measured task-completion — anchors the score to observed reality (§4.2),
     # not only synthetic self-report. Also recorded in stats for the payload.
     outcome_distribution = _format_outcome_distribution(
-        outcomes, reached_rungs, n, outcome_sources)
+        outcomes, reached_rungs, n, outcome_sources, no_shop=no_shop)
     stats["outcomes"] = {
         "counts": dict(Counter(outcomes.values())),
         "participant_count": n,

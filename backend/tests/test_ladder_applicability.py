@@ -14,11 +14,12 @@ The ladder now applies only when some session of the run reached a product, cart
 or checkout page. Then a persona that never got there really did fail.
 """
 import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from simulated_web_agent.main.iso_metrics import compute_iso_metrics, effective_outcome
-from simulated_web_agent.main.reporter import _format_outcome_distribution
+from simulated_web_agent.main.reporter import _format_outcome_distribution, generate_aggregated_report
 from simulated_web_agent.main.scoring import compute_ux_score
 from simulated_web_agent.main.session_goal_state import (
     compute_goal_state,
@@ -26,6 +27,7 @@ from simulated_web_agent.main.session_goal_state import (
     observed_outcome,
 )
 from simulated_web_agent.main.trace_store import TraceStore
+from tests.conftest import make_agent_report, make_finding
 
 BNP_URL = "https://www.bnpparibas.pl"
 BNP_GOAL = (
@@ -46,14 +48,14 @@ def _run(tmp_path, start_url, manifest=True):
     return run_dir
 
 
-def _persona(run_dir, name, urls, intent, declared="success"):
+def _persona(run_dir, name, urls, intent, declared="success", texts=None):
     store = TraceStore(run_dir / name)
     store.write_basic_info({"intent": intent})
     store.write_action_trace(
         [json.dumps({"action": "click", "description": "c"})] * len(urls))
     for i, url in enumerate(urls):
         store.append_observation({"tabs": [{"url": url, "is_active": True}]})
-        store.write_observation_step_text(i, "strona")
+        store.write_observation_step_text(i, texts[i] if texts else "strona")
     store.write_objective_reflection({"outcome": declared})
     store.write_session_result({"steps_taken": len(urls), "ended_reason": "terminated"})
     return store
@@ -176,6 +178,65 @@ def test_a_folder_that_is_not_a_persona_is_not_read(tmp_path):
     stray = TraceStore(run_dir / "stray")  # no basic_info.json
     stray.append_observation({"tabs": [{"url": BNP_URL + "/p/1", "is_active": True}]})
     assert observed_outcome(a, BNP_URL)["outcome"] == "unknown"
+
+
+# --- a shop is more than a URL ------------------------------------------------
+
+SHOP_URL = "https://shop.example.pl"
+SHOP_GOAL = "Znajdź poduszkę i sprawdź jej cenę."
+
+
+def _toast_shop_run(tmp_path):
+    """A shop whose product pages carry none of the URL markers (/poduszka-123.html),
+    which is how the ladder can only know one was reached: dm adds to the cart on the
+    product page, shows a toast, and most sessions never open /koszyk."""
+    run_dir = _run(tmp_path, SHOP_URL)
+    adder = _persona(
+        run_dir, "adder", [SHOP_URL + "/", SHOP_URL + "/poduszka-kremowa-123.html"], SHOP_GOAL,
+        texts=["strona", "Dodano do koszyka!"])
+    searcher = _persona(
+        run_dir, "searcher", [SHOP_URL + "/", SHOP_URL + "/szukaj?q=poduszka"], SHOP_GOAL, "failed")
+    return adder, searcher
+
+
+def test_an_add_to_cart_toast_is_a_shop_without_a_product_url(tmp_path):
+    adder, _ = _toast_shop_run(tmp_path)
+    oo = observed_outcome(adder, SHOP_URL)
+    assert oo["reached_rung"] == "cart_has_items"
+    assert oo["ladder_applies"] is True and oo["outcome"] == "success"
+    assert effective_outcome(adder) == ("success", "observed")
+
+
+def test_a_siblings_add_to_cart_toast_makes_the_ladder_apply_to_the_rest(tmp_path):
+    _, searcher = _toast_shop_run(tmp_path)
+    oo = observed_outcome(searcher, SHOP_URL)
+    assert oo["ladder_applies"] is True and oo["outcome"] == "failed"
+    assert effective_outcome(searcher) == ("failed", "observed")
+
+
+# --- and the report says why, when nothing was measured -----------------------
+
+def test_the_report_does_not_call_a_stopped_shop_an_unassessable_task():
+    outcomes = {"a": "failed", "b": "failed"}
+    sources = {"a": "declared", "b": "declared"}
+    text = _format_outcome_distribution(outcomes, [], 2, sources, no_shop=True)
+    assert "Żadna sesja nie dotarła do strony produktu ani koszyka" in text
+    assert "tego typu zadania" not in text
+    assert "DEKLAROWANE" in text and "porażka: 2/2" in text
+    assert "tego typu zadania" in _format_outcome_distribution(outcomes, [], 2, sources)
+
+
+@pytest.mark.asyncio
+async def test_the_narrator_is_told_no_session_reached_a_product_page(tmp_path):
+    stores = _bnp_run(tmp_path)
+    for s in stores:
+        s.write_ux_report(make_agent_report(findings=[make_finding()]))
+    chat = AsyncMock(return_value=json.dumps({"executive_summary": "x", "overall_ux_score": 3}))
+    with patch("simulated_web_agent.main.reporter.async_chat", new=chat):
+        await generate_aggregated_report(stores=stores, task_description="Z", website_url=BNP_URL)
+    prompts = [str(c.args[0]) for c in chat.call_args_list]
+    assert any("Żadna sesja nie dotarła do strony produktu ani koszyka" in p for p in prompts)
+    assert not any("tego typu zadania" in p for p in prompts)
 
 
 # --- what a product page looks like ------------------------------------------
