@@ -38,6 +38,12 @@ intent) or the trace has no on-site evidence, `observed_outcome` returns
 `unknown` and the caller (iso_metrics) keeps the declared outcome, labelled.
 The same when the site has no shop: an inferred target is only measured if some
 session of the run reached a product, cart or checkout page (`ladder_applies`).
+
+A task can presuppose what the site does not show (premise_check). A cart the run
+verified absent caps an inferred target at product_viewed ("capped:cart"): the
+rung cannot be reached, so not reaching it is no failure. The other presupposed
+features (pickup, stock in a store) have no rung; they are listed in
+`premise_gaps` and the outcome speaks for the part of the task that could be done.
 """
 from __future__ import annotations
 
@@ -66,9 +72,11 @@ _PARTIAL_FLOOR = "cart_has_items"
 
 # --- URL markers (primary evidence; substring match on the lowered URL) -----
 #
-# "/products/" is the Shopify-style product page (pepco.pl: /products/poduszka-324777).
-# The trailing slash keeps a bare /products listing from counting as a product.
-_PRODUCT_URL_MARKERS = ("/p/", "/produkt", "/product/", "/products/")
+_PRODUCT_URL_MARKERS = ("/p/", "/produkt", "/product/")
+# The Shopify-style product page (pepco.pl: /products/poduszka-324777?Colour=..).
+# It needs a handle after the segment: the bare /products/ index is a listing, and
+# '/collections/x/products/y' is still a product.
+_PRODUCT_HANDLE_RE = re.compile(r"/products/[^/?#]+")
 _CART_URL_MARKERS = ("koszyk", "/cart", "checkout", "/kasa")
 _SEARCH_URL_MARKERS = ("?query", "&query", "/search", "/szukaj", "szukaj=", "q=")
 _CHECKOUT_URL_MARKERS = ("checkout", "/kasa")
@@ -129,6 +137,11 @@ def _url_has(url: str, markers) -> bool:
     return any(m in url for m in markers)
 
 
+def is_product_url(url: str) -> bool:
+    """Is this URL a product page? One definition for the ladder, the claim
+    verifier and the premise probe."""
+    u = (url or "").lower()
+    return _url_has(u, _PRODUCT_URL_MARKERS) or bool(_PRODUCT_HANDLE_RE.search(u))
 
 
 def _checkout_initiated_step(store: TraceStore, min_step: int = 0) -> tuple[int, str] | None:
@@ -189,7 +202,7 @@ def compute_goal_state(store: TraceStore, target_url: str) -> dict:
 
         if _url_has(u, _SEARCH_URL_MARKERS) or has_marker(o, _SEARCH_OBS_MARKERS):
             _mark("searched", step, url)
-        if _url_has(u, _PRODUCT_URL_MARKERS):
+        if is_product_url(u):
             _mark("product_viewed", step, url)
         if _url_has(u, _CART_URL_MARKERS):
             _mark("cart_reached", step, url)
@@ -313,13 +326,20 @@ def infer_target_rung(intent: str) -> str | None:
 
 def resolve_target_rung(store: TraceStore) -> tuple[str | None, str]:
     """(target_rung, source). An explicit `success_condition` wins; else infer
-    from the intent; else abstain."""
+    from the intent; else abstain. An inferred target that needs a cart the run
+    verified the site does not show (premise_check) is capped at product_viewed:
+    "capped:cart"."""
+    from .premise_check import premise_gaps
+
     info = store.read_basic_info() or {}
     explicit = info.get("success_condition")
     if isinstance(explicit, str) and explicit in _RUNG_INDEX:
         return explicit, "explicit"
     inferred = infer_target_rung(info.get("intent") or "")
     if inferred:
+        if (_RUNG_INDEX[inferred] >= _RUNG_INDEX["cart_has_items"]
+                and "cart" in premise_gaps(store)):
+            return "product_viewed", "capped:cart"
         return inferred, "inferred"
     return None, "abstain"
 
@@ -373,12 +393,14 @@ def observed_outcome(store: TraceStore, target_url: str) -> dict:
     """Evidence-grounded outcome. `unknown` (→ caller falls back to declared)
     when the target is undecidable, there is no on-site evidence, or the site has
     no shop for an inferred target to be measured on (`ladder_applies`)."""
+    from .premise_check import premise_gaps
+
     gs = compute_goal_state(store, target_url)
     target, source = resolve_target_rung(store)
     # Only an inferred target is checked: an explicit success_condition is the
     # author saying the site has what it names. None = not evaluated.
     applies = None
-    if source == "inferred" and gs["same_site_steps"] > 0:
+    if source in ("inferred", "capped:cart") and gs["same_site_steps"] > 0:
         applies = ladder_applies(store, target_url, gs["reached_index"] >= _SHOP_RUNG)
     decidable = target is not None and gs["same_site_steps"] > 0 and applies is not False
 
@@ -405,6 +427,10 @@ def observed_outcome(store: TraceStore, target_url: str) -> dict:
         "reached_index": gs["reached_index"],
         "target_rung": target,
         "target_source": source,
+        # What the task presupposed and the run verified the site does not show
+        # (premise_check). No rung is invented for it: the outcome speaks for the
+        # part of the task that could be done.
+        "premise_gaps": premise_gaps(store),
         "evidence": gs["evidence"],
         "same_site_steps": gs["same_site_steps"],
     }
@@ -422,7 +448,6 @@ def session_capabilities(store: TraceStore) -> dict:
     urls = [(u or "").lower() for u in (store.visited_urls() or [])
             if same_site(u, target)]
     return {
-        "product_pages_opened": sum(
-            1 for u in urls if _url_has(u, _PRODUCT_URL_MARKERS)),
+        "product_pages_opened": sum(1 for u in urls if is_product_url(u)),
         "reached_cart": any(_url_has(u, _CART_URL_MARKERS) for u in urls),
     }

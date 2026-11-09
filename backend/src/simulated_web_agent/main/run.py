@@ -18,6 +18,7 @@ from . import cancellation, run_storage
 from .experiment import experiment_async
 from .pagespeed import run_pagespeed_check
 from .persona import generate_personas
+from .premise_check import check_stores, write_premise_check
 from .reporter import generate_aggregated_report
 from .trace_store import TraceStore
 
@@ -320,6 +321,16 @@ async def run_async(
         log.info("Run %s cancelled — skipping analysis and report phases", run_id)
         _finalize("cancelled")
         return run_id
+
+    # What the task presupposed and no session found on the site: written before the
+    # audit passes, which are told it. Always recomputed — a resumed run's sessions
+    # are not the ones an older file was made from.
+    if stores:
+        try:
+            result = await asyncio.to_thread(check_stores, stores, [general_intent])
+            write_premise_check(stores[0].trace_dir.parent, result)
+        except Exception as e:
+            log.exception("Premise check failed (non-fatal): %s", e)
 
     # ── 3) Per-agent: survey + audit + viewport scan (parallel across agents) ─
     total_post = len(stores)

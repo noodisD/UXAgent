@@ -39,7 +39,11 @@ Calibrate your evaluation against the site's declared purpose above:
 - If a missing capability (e.g. online purchase) causes a meaningful
   expectation mismatch, you MAY note it as a strategic opportunity
   with severity "drobny" and explicit framing as a business recommendation.
-- If site_context is empty, apply standard heuristic evaluation.
+- If no site context was declared (the text above says so), do not assume the
+  site is a shop: judge only what the observations show.
+- A line that begins "Zadanie zakłada funkcję" names a feature the task assumed
+  and the sessions did not find on the site. Its absence is not a defect: do not
+  report it and do not recommend "repairing" it.
 
 ## Standard conventions are NOT defects — do not report these
 
@@ -87,10 +91,26 @@ usability problems is a false positive (real site teams reject them):
   interaction failures. A real user with a mouse would not have hit them, so
   they say nothing about the site and must never become a finding — whatever the
   session reflections say about them.
+- A complaint that follows from the persona's own preference ("I prefer physical
+  shops", "I rarely buy online", "I like to see things in person"). It describes
+  the person, not the site.
+- A limit inherent to the medium: a screen cannot be touched, a garment cannot be
+  tried on, a true colour or the feel of a fabric cannot be judged online. That is
+  true of every website.
 
 Still fully reportable (do NOT suppress): an action the site ALLOWS and then
 fails on (e.g. add-to-cart succeeds then errors), genuinely broken links, real
-data loss, content that is objectively unreadable.
+data loss, content that is objectively unreadable — and information the site
+could supply and withholds (no material composition, no dimensions, a single
+photo, no care instructions), even when the persona's reflection is about not
+being able to touch the product.
+
+## Persona — declared habits, NOT evidence about the site
+
+{persona_disposition}
+
+The reflections below are written in this persona's voice. What the persona prefers
+or avoids says something about the person, never about the site.
 
 ## Session data
 

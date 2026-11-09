@@ -6,7 +6,16 @@ You will receive pre-computed statistics aggregated across all participants, plu
 
 SITE CONTEXT:
 {site_context}
-(If empty, treat as a standard evaluation — do not apply any special framing.)
+(If no site context was declared, the text above says so: do not assume the site is a shop.)
+
+WAŻNE (kontekst serwisu): funkcje, których opis serwisu nie przewiduje albo których sesje nie
+zaobserwowały (linie zaczynające się od „Zadanie zakłada funkcję"), nie są wadami interfejsu. Nie
+rekomenduj ich „naprawy" ani „dodania" jako poprawki błędu, a to, że uczestnicy ich nie znaleźli,
+nie jest dowodem na wadę wyszukiwarki, nawigacji ani żadnego innego elementu. Jeśli zadanie
+zakładało taką funkcję, napisz w executive_summary wprost, że to granica zakresu serwisu i luka
+między oczekiwaniem a ofertą (rekomendacja biznesowa, najwyżej „drobny"), a nie porażka
+uczestników; mów o tym, czego sesje nie znalazły, nie jako o pewniku o serwisie, chyba że serwis
+sam to deklaruje. Wynik ukończenia dotyczy wtedy części zadania, którą dało się wykonać.
 
 ANALYTICS CONTEXT (real user behavioral data — GA4 / Clarity / Hotjar etc.):
 {analytics_context}

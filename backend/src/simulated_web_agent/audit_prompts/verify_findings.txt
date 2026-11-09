@@ -33,6 +33,9 @@ For each claim you get:
   add-to-cart feedback" or that cart/status feedback is missing — such a claim
   is "unsupported" (you cannot judge feedback for an action never performed).
 
+PERSONA (the participant's declared habits — NOT evidence about the site):
+{persona}
+
 CLAIMS:
 {findings_json}
 
@@ -77,6 +80,14 @@ Hard rules:
    grounded at all, however plausible it sounds.
 7. "reason" must be ONE short sentence IN POLISH, naming what in the
    observation decided the verdict (quote a fragment when possible).
+8. If the claim's support is the persona's own stated preference or reluctance
+   (see PERSONA: "prefers physical shops", "rarely buys online") or a limit
+   inherent to the medium (a screen cannot be touched, a fabric cannot be felt,
+   a true colour cannot be judged online), the verdict is "unsupported" with the
+   reason "preferencja persony / ograniczenie medium, nie wada strony". The one
+   exception: when observation_full shows the site withholding information it
+   could supply (no material composition, no dimensions, a single photo), the
+   claim is about the site, and rules 1-6 decide it.
 
 ## Output
 

@@ -300,6 +300,10 @@ const scopeRows = computed(() => {
   // reader needs to know a catalog was judged as a catalog, not a shop.
   const ctx = props.meta?.siteContext
   if (ctx && ctx.trim()) rows.push({ label: t('rep.scope.siteContext'), value: ctx })
+  // Features the task assumed and no session found: a limit of the site's scope,
+  // not a defect the report asks to repair.
+  const gaps = (props.meta?.premiseGaps ?? []).map(g => g.text).filter(Boolean)
+  if (gaps.length) rows.push({ label: t('rep.scope.premiseGaps'), value: gaps.join(' ') })
   return rows
 })
 

@@ -111,3 +111,13 @@ def test_a_session_whose_only_trouble_is_a_consent_banner_is_not_a_tool_failure(
               "heuristic_findings": [], "accessibility": {"findings": []}, "survey_result": {"answers": []}}
     (row,) = aggregate_statistics([report], stores=[store])["objective_reflections"]
     assert row["self_reported_only"] is False
+
+
+def test_a_habit_of_the_persona_is_not_a_blocker():
+    # "woli sklepy stacjonarne" described the person, and was written up as a barrier.
+    from simulated_web_agent.main.reporter import _REFLECTION_SYSTEM
+
+    assert "Nawyki i preferencje persony" in _REFLECTION_SYSTEM
+    assert "nie są\n  barierą" in _REFLECTION_SYSTEM
+    assert "ograniczenie samego medium" in _REFLECTION_SYSTEM
+    assert "chyba że strona nie podaje informacji, które mogłaby podać" in _REFLECTION_SYSTEM

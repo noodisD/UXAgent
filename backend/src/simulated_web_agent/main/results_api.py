@@ -24,6 +24,7 @@ from typing import Any
 from . import run_storage
 from .iso_metrics import _numeric_survey_avg, current_effectiveness, effective_outcome, reversed_ids
 from .persona_matrix import build_persona_task_matrix
+from .premise_check import run_gaps
 # The report's own definitions. The dashboard used to average survey answers
 # its own way, so a placeholder "3" from a persona who never reached payment
 # ("nie mogę ocenić") sat in the dashboard's averages after the report had
@@ -536,6 +537,9 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
         # Older runs never stored it (it lived only in each persona's basic_info),
         # so fall back to reading it off the first persona when absent.
         "siteContext": manifest.get("site_context") or _first_persona_site_context(run_dir),
+        # What the task presupposed and the sessions did not find on the site
+        # (premise_check); [] when nothing was verified or the run predates it.
+        "premiseGaps": run_gaps(run_dir),
         "pagespeed": {
             "performance": ps_score,
             "device": ps_device,

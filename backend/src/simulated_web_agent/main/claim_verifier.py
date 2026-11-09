@@ -42,7 +42,7 @@ from .trace_store import TraceStore, parse_action as _parse_action
 # `session_capabilities` is re-exported (moved to session_goal_state so there is
 # one "what the session did" module); imported here for the deterministic
 # override below and for callers/tests that import it from claim_verifier.
-__all__ = ["run_claim_verification", "session_capabilities"]
+__all__ = ["persona_disposition", "run_claim_verification", "session_capabilities"]
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +52,21 @@ _VALID_VERDICTS = {"supported", "partial", "unsupported"}
 # prompt (the a11y pass once built a 1.66M-char prompt this way).
 _MAX_OBS_CHARS = 4000
 _MAX_REASON_CHARS = 300
+_MAX_PERSONA_CHARS = 1200
+
+
+def persona_disposition(store: TraceStore, limit: int = _MAX_PERSONA_CHARS) -> str:
+    """The persona's own description, cut at a word: what the participant says it
+    likes and avoids. The heuristic pass and this verifier are given it as a label,
+    not as evidence — a persona who prefers physical shops complains about fabric
+    it cannot touch, and that is the person, not the site."""
+    card = store.read_persona_card() or {}
+    text = (card.get("description") or "").strip() or (
+        (store.read_basic_info() or {}).get("persona") or "").strip()
+    text = " ".join(text.split())
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0] + "…"
+    return text or "(brak opisu persony)"
 
 
 
@@ -179,6 +194,7 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
     prompt = (
         _prompts.get("verify_findings")
         .replace("{session_facts}", json.dumps(caps, ensure_ascii=False))
+        .replace("{persona}", persona_disposition(store))
         .replace("{findings_json}", json.dumps(payload, ensure_ascii=False, indent=1))
     )
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
+from .site_scope import site_context_for
 from .trace_store import TraceStore
 
 logger = logging.getLogger(__name__)
@@ -54,8 +55,10 @@ async def run_survey(
         for q in questionnaire.get("questions", [])
     ] + _POST_TASK_QUESTIONS
 
-    # Prepend site_context so the persona answers calibrated to the site's purpose
-    site_context = store.read_basic_info().get("site_context", "") or ""
+    # Prepend site_context so the persona answers calibrated to the site's purpose.
+    # No default here: the persona answers as itself, and an undeclared site needs no
+    # block telling it how to judge one.
+    site_context = site_context_for(store, default="")
     if site_context:
         site_context_block = (
             "SITE CONTEXT (read before answering — calibrate your answers accordingly):\n"

@@ -51,6 +51,37 @@ def target_url_for(store) -> str:
         return ""
 
 
+# What a pass is told when nothing was declared. One sentence for all of them: the
+# first-impression pass had it and the heuristic pass had a blank, so the same
+# undeclared site was judged as a shop by one and not by the other.
+UNDECLARED_SITE_CONTEXT = ("(nie podano — nie zakładaj, że to sklep internetowy; oceniaj "
+                           "wyłącznie na podstawie tego, co widać)")
+
+
+def site_context_for(store, declared: str | None = None,
+                     default: str = UNDECLARED_SITE_CONTEXT, run_level: bool = False) -> str:
+    """What every judgement pass is told the site is: the declared description (the
+    store's own unless `declared` is given), else `default`, then one line for each
+    feature the task presupposes and the run verified the site does not show
+    (premise_check). The audit passes only — the agent loop is not told what is on
+    the site it is exploring.
+
+    `run_level`: the aggregate report speaks for every participant, so it carries the
+    gaps of every intent rather than this store's.
+    """
+    from .premise_check import gap_context_lines
+
+    if declared is None:
+        declared = (store.read_basic_info() or {}).get("site_context")
+    text = str(declared or "").strip() or default
+    try:
+        gaps = gap_context_lines(store, run_level=run_level)
+    except Exception as e:
+        log.warning("[site_scope] premise gaps unreadable for %s: %s", store.trace_dir, e)
+        gaps = []
+    return "\n".join(part for part in [text, *gaps] if part)
+
+
 # Second-level suffixes under which each name is a separate site. With plain
 # last-two-labels, every *.com.pl was "com.pl": for www.euro.com.pl the off-site
 # guard let the persona onto komputronik.com.pl and neonet.com.pl, and their

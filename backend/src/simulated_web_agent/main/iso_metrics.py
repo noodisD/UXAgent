@@ -186,6 +186,8 @@ def compute_iso_metrics(store: TraceStore, q_meta: list | None = None) -> dict:
             "ladder_applies": observed["ladder_applies"],
             "target_rung": observed["target_rung"],
             "target_source": observed["target_source"],
+            # Features the task presupposed that the run verified the site does not show
+            "premise_gaps": observed["premise_gaps"],
             "reached_rung": observed["reached_rung"],
             "disagreement": bool(disagreement),
             "evidence": observed["evidence"],

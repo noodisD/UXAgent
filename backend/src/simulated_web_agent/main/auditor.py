@@ -20,10 +20,11 @@ from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .a11y_checks import extract_a11y_candidates, extract_generic_name_findings
 from .attribution import flag_harness_suspects, session_blocked_by_bot_wall
-from .claim_verifier import run_claim_verification
+from .claim_verifier import persona_disposition, run_claim_verification
 from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
-from .site_scope import flag_off_site, target_url_for
+from .premise_check import ensure_premise_check
+from .site_scope import flag_off_site, site_context_for, target_url_for
 from .trace_store import TraceStore, parse_action
 
 log = logging.getLogger(__name__)
@@ -143,15 +144,12 @@ async def _run_first_impression(store: TraceStore) -> dict:
                     "persona-specific", store.trace_dir)
         persona = "(brak danych o osobie — oceniaj jako przeciętny pierwszy użytkownik)"
 
-    # Without this, purpose_clarity and every other dimension are judged against
-    # an implicit "this is an online shop" frame — a catalog/store-locator site
-    # like pepco.pl then gets marked down for having no cart. See auditor's
-    # module docstring / CLAUDE.md "site_context" note.
-    site_context = (store.read_basic_info().get("site_context") or "").strip()
-    if not site_context:
-        site_context = "(nie podano — nie zakładaj, że to sklep internetowy; oceniaj wyłącznie na podstawie tego, co widać na zrzucie ekranu)"
-
-    prompt = _prompts.get("first_impression").format(persona=persona, site_context=site_context)
+    # Without the site context, purpose_clarity and every other dimension are
+    # judged against an implicit "this is an online shop" frame — a
+    # catalog/store-locator site like pepco.pl then gets marked down for having no
+    # cart. See site_scope.site_context_for.
+    prompt = _prompts.get("first_impression").format(
+        persona=persona, site_context=site_context_for(store))
 
     messages = [
         {
@@ -211,10 +209,9 @@ async def _heuristic_pass(store: TraceStore) -> tuple[list, str | None]:
         log.warning("[auditor] No memory data found in %s", store.trace_dir)
         return [], "no_evidence"
 
-    site_context = store.read_basic_info().get("site_context", "") or ""
-
     prompt = _prompts.get("heuristic_evaluate").format(
-        site_context=site_context,
+        site_context=site_context_for(store),
+        persona_disposition=persona_disposition(store),
         observations="\n".join(f"- {o}" for o in observations) or "(none)",
         reflections="\n".join(f"- {r}" for r in reflections) or "(none)",
         actions="\n".join(f"- {a}" for a in actions) or "(none)",
@@ -286,6 +283,9 @@ async def run_audit_analysis(store: TraceStore) -> dict:
       first_impression.json, heuristic_findings.json, accessibility_findings.json
     """
     log.info("[auditor] Starting audit for %s", store.trace_dir)
+    # The passes below are told what the task presupposed and the sessions did not
+    # find; a reaudit of a finished run starts here with no such record.
+    ensure_premise_check(store.trace_dir.parent)
 
     first_impression, (heuristic_findings, heuristic_error), accessibility_findings = await asyncio.gather(
         _run_first_impression(store),

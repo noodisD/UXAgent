@@ -172,3 +172,51 @@ async def test_accessibility_findings_json_is_saved(store: TraceStore):
     assert a11y is not None, "accessibility_findings.json must be created"
     assert "overall_score" in a11y
     assert "findings" in a11y
+
+
+# ---------------------------------------------------------------------------
+# A persona's habits are not findings; information the site withholds is
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_finding_about_missing_material_composition_is_not_suppressed(store: TraceStore):
+    """The heuristic prompt tells the model a persona's preference and the limits of the
+    medium are not findings. The carve-out is that the site withholding what it could say
+    (here: the fabric) stays reportable — and no code path may drop it afterwards."""
+    from simulated_web_agent.main.severity import excluded_from_report
+
+    _setup_store(store)
+    store.write_basic_info({"persona": "Julia woli sklepy stacjonarne.", "intent": "Kup poduszkę"})
+    for i in range(3):
+        store.append_observation({"tabs": [{"url": "https://pepco.pl/products/poduszka-1", "is_active": True}]})
+        store.write_observation_step_text(
+            i, "Poduszka dekoracyjna. Kolory: beżowy. Rozmiary: ONE. Szczegóły. 20 zł.")
+    finding = {
+        "heuristic_id": 2, "heuristic_name": "Zgodność systemu z rzeczywistością",
+        "severity": "poważny", "url": "https://pepco.pl/products/poduszka-1", "step": 1,
+        "evidence": "Strona produktu nie podaje składu materiału ani wymiarów poduszki.",
+        "recommendation": "Dodać skład materiału i wymiary.", "confidence": "medium",
+    }
+
+    async def mock_chat(messages, **kwargs):
+        kind = _route_mock(messages)
+        if kind == "first_impression":
+            return _FIRST_IMPRESSION_RESPONSE
+        if kind == "heuristic":
+            return json.dumps([finding])
+        return _ACCESSIBILITY_RESPONSE
+
+    mock = AsyncMock(side_effect=mock_chat)
+    verifier = AsyncMock(return_value=json.dumps(
+        {"verdicts": [{"id": 0, "verdict": "supported", "reason": "Obserwacja nie podaje składu."}]}))
+    with patch("simulated_web_agent.main.auditor.async_chat", new=mock),             patch("simulated_web_agent.main.claim_verifier.async_chat", new=verifier):
+        await run_audit_analysis(store)
+
+    prompt = next(c.args[0][0]["content"] for c in mock.await_args_list
+                  if isinstance(c.args[0][0]["content"], str) and "Nielsen" in c.args[0][0]["content"])
+    assert "Julia woli sklepy stacjonarne." in prompt
+    assert "persona's own preference" in prompt and "inherent to the medium" in prompt
+    kept = store.read_heuristic_findings()
+    assert len(kept) == 1 and "składu materiału" in kept[0]["evidence"]
+    assert not excluded_from_report(kept[0])
+    assert not kept[0].get("harness_suspect") and not kept[0].get("off_site")

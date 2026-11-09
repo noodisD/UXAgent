@@ -104,6 +104,8 @@ export type IsoMetrics = {
     observed_outcome?: string
     target_rung?: string | null
     target_source?: string
+    /** Features the task presupposed that the run verified the site does not show. */
+    premise_gaps?: string[]
     reached_rung?: string
     disagreement?: boolean
     evidence?: { rung: string; step: number | null; url: string }[]
@@ -185,6 +187,8 @@ export type RunMeta = {
   scope?: RunScope | null
   /** Declared site purpose the judgements were calibrated against. */
   siteContext?: string | null
+  /** What the task presupposed and the sessions did not find on the site (premise_check). */
+  premiseGaps?: { premise: string; label: string; text: string }[]
 }
 
 export type AggIssueExample = {

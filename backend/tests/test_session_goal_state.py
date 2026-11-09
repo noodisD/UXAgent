@@ -208,3 +208,35 @@ def test_a_shopify_style_product_page_is_a_product_page(tmp_path):
     ], intent="Znajdź poduszkę i sprawdź jej cenę.")
     assert observed_outcome(store, pepco)["outcome"] == "success"
     assert session_capabilities(store)["product_pages_opened"] == 1
+
+
+# --- Shopify-style product pages --------------------------------------------
+
+PEPCO = "https://www.pepco.pl"
+
+
+def test_shopify_products_url_reaches_product_viewed(tmp_path):
+    # The real pepco URL shapes: a handle after /products/, a variant in the query.
+    for n, path in enumerate(("/products/poduszka-324777?Colour=Ivory+Cream&Size=ONE",
+                              "/products/plaski-pokrowiec-na-odziez-do-przechowywania",
+                              "/collections/dom/products/poduszka-324777")):
+        store = _store(tmp_path / f"yes{n}", [(PEPCO + path, "x")])
+        assert compute_goal_state(store, PEPCO)["ladder"]["product_viewed"]["reached"], path
+        assert session_capabilities(store)["product_pages_opened"] == 1, path
+    # Listings, search and the bare /products/ index are not a product page.
+    for n, path in enumerate(("/collections/dom/tekstylia-domowe", "/search?searchString=lampka",
+                              "/products/", "/products", "/products/?page=2", "/collections/dom")):
+        store = _store(tmp_path / f"no{n}", [(PEPCO + path, "x")])
+        assert not compute_goal_state(store, PEPCO)["ladder"]["product_viewed"]["reached"], path
+        assert session_capabilities(store)["product_pages_opened"] == 0, path
+
+
+def test_pepco_style_session_is_not_scored_failed_for_viewing_products(tmp_path):
+    store = _store(tmp_path, [
+        (f"{PEPCO}/", "Pepco."),
+        (f"{PEPCO}/search?searchString=poduszki", "Wyniki wyszukiwania"),
+        (f"{PEPCO}/products/poduszka-324777?Colour=Ivory+Cream&Size=ONE", "Poduszka. 20 zł."),
+    ], intent="Znajdź poduszkę i sprawdź czy jest dostępna w pobliskim sklepie")
+    out = observed_outcome(store, PEPCO)
+    assert (out["target_rung"], out["outcome"]) == ("product_viewed", "success")
+    assert out["decidable"] and out["premise_gaps"] == []

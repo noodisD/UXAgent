@@ -40,6 +40,8 @@ from .scoring import (
 )
 from .attribution import harness_suspect_causes, restates_a_gated_finding
 from .iso_metrics import current_effectiveness, effective_outcome
+from .premise_check import LABELS as _PREMISE_LABELS, ensure_premise_check, run_gaps
+from .site_scope import site_context_for
 from .redaction import (
     clean as _redact, clean_narrative, describes_interaction_trouble, describes_session_crash,
     mentions_harness_fault,
@@ -332,6 +334,10 @@ Zasady:
   zgodnego z tym, czym strona jest (np. znalazła produkt i sklep stacjonarny
   zamiast kupić online), to jest "success" — nie karz personę za ograniczenie
   strony, którego nie mogła obejść.
+- Nawyki i preferencje persony (np. woli sklepy stacjonarne, rzadko kupuje online) nie są
+  barierą: w blockers trafia tylko to, co strona uniemożliwiła lub utrudniła. Tak samo
+  ograniczenie samego medium (ekran nie pozwala dotknąć tkaniny ani ocenić jej koloru),
+  chyba że strona nie podaje informacji, które mogłaby podać (skład, wymiary).
 - blockers i wins: maksymalnie po 4 pozycje, krótkie i konkretne. Mogą być puste ([]).
 - Pisz rzeczowo. Nie opisuj metodologii. Zwróć tylko poprawny JSON.\
 """
@@ -381,7 +387,7 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
         # What the site actually is (e.g. "catalog, no online checkout"), so a
         # persona correctly stopping at the site's real ceiling is not scored
         # the same as one who got stuck. See _REFLECTION_SYSTEM's site_context rule.
-        "site_context": basic.get("site_context", "") or "(nie podano)",
+        "site_context": site_context_for(store),
         "demographics": persona_card.get("demographics", {}),
         "first_impression_score": first_impression.get("overall_score"),
         "first_impression_summary": first_impression.get("clarity_summary", ""),
@@ -2026,8 +2032,27 @@ def _survey_for_prompt(survey_stats: dict | None) -> dict:
     return out
 
 
+def _premise_gap_line(premise_gaps: dict | None, n: int) -> str:
+    """How many tasks asked for something the sessions did not find on the site.
+
+    Said as what the sessions did not find, not as what the site lacks. The outcome
+    above it speaks for the part of the task that could be done (an unreachable
+    cart caps the target; pickup and store stock have no rung of their own), and
+    the narrator was reading "3/3 success" as a task done in full.
+    """
+    gaps = {k: v for k, v in (premise_gaps or {}).items() if v}
+    if not gaps or not n:
+        return ""
+    labels = [_PREMISE_LABELS[p] for p in _PREMISE_LABELS
+              if any(p in v for v in gaps.values())]
+    return (f"\n- {len(gaps)}/{n} zadań zakładało funkcję, której sesje nie zaobserwowały w "
+            f"serwisie ({'; '.join(labels)}). Wynik dotyczy części zadania, którą dało się "
+            "wykonać; nie jest to wada interfejsu.")
+
+
 def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
-                                 sources: dict | None = None, no_shop: bool = False) -> str:
+                                 sources: dict | None = None, no_shop: bool = False,
+                                 premise_gaps: dict | None = None) -> str:
     """Task-completion summary for the aggregate narrator, labelled by source.
 
     It used to open with "zmierzone z zapisu sesji … nie samoocena agenta"
@@ -2044,6 +2069,7 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
     """
     if not n:
         return "Brak danych o ukończeniu zadania."
+    gap_line = _premise_gap_line(premise_gaps, n)
     src = Counter((sources or {}).values())
     observed_n, declared_n = src.get("observed", 0), src.get("declared", 0)
     c = Counter((v or "").lower() for v in outcomes.values())
@@ -2062,7 +2088,7 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
                 "poniższe liczby to werdykt modelu o przebiegu każdej sesji (ocena "
                 "deklarowana), a nie pomiar ani ocena samych uczestników. Traktuj je jako "
                 "słabszy dowód niż zweryfikowane problemy i zaznacz w podsumowaniu, że są to "
-                "deklaracje, a nie pomiar:\n- " + "; ".join(parts) + ".")
+                "deklaracje, a nie pomiar:\n- " + "; ".join(parts) + "." + gap_line)
     succ, part, fail = c.get("success", 0), c.get("partial", 0), c.get("failed", 0)
     ab = c.get("persona_abandoned", 0)
     parts = [f"sukces: {succ}/{n}", f"częściowo: {part}/{n}", f"porażka: {fail}/{n}"]
@@ -2082,7 +2108,7 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
         mixed = (f"\n- Uwaga: {observed_n}/{n} wyników zmierzono z zapisu sesji, "
                  f"{declared_n}/{n} to ocena deklarowana (werdykt modelu, niezmierzony).")
     return ("UKOŃCZENIE ZADANIA — zmierzone z zapisu sesji (dowód z przebiegu, "
-            "nie samoocena agenta):\n- " + "; ".join(parts) + "." + line2 + mixed)
+            "nie samoocena agenta):\n- " + "; ".join(parts) + "." + line2 + mixed + gap_line)
 
 
 async def generate_aggregated_report(
@@ -2126,9 +2152,14 @@ async def generate_aggregated_report(
         log.warning("[reporter] No per-agent reports found for aggregation")
         return {}
 
-    # Derive site_context / analytics_context from first store if not supplied by caller
-    if not site_context and stores:
-        site_context = stores[0].read_basic_info().get("site_context", "") or ""
+    # What the task presupposed and the sessions did not find (premise_check). Made
+    # here when the run directory has none: the reaudit and reanalyse scripts start
+    # from a finished run, and the outcome below is computed against it.
+    ensure_premise_check(stores[0].trace_dir.parent)
+
+    # The caller's description, else the first store's, else the one default — plus
+    # a line for each verified gap of the task.
+    site_context = site_context_for(stores[0], declared=site_context or None, run_level=True)
     if not analytics_context and stores:
         analytics_context = stores[0].read_basic_info().get("analytics_context", "") or ""
 
@@ -2144,12 +2175,14 @@ async def generate_aggregated_report(
     outcome_sources: dict[str, str] = {}
     reached_rungs: list[str] = []
     no_shop = False
+    persona_gaps: dict[str, list[str]] = {}
     for s in stores:
         # Current code, as effective_outcome computes it — not the stored file.
         eff = current_effectiveness(s)
         outcome, source = effective_outcome(s)
         outcomes[s.trace_dir.name] = outcome
         outcome_sources[s.trace_dir.name] = source
+        persona_gaps[s.trace_dir.name] = list(eff.get("premise_gaps") or [])
         if eff.get("outcome_source") == "observed":
             reached_rungs.append(str(eff.get("reached_rung") or ""))
         no_shop = no_shop or eff.get("ladder_applies") is False
@@ -2195,7 +2228,10 @@ async def generate_aggregated_report(
     # Measured task-completion — anchors the score to observed reality (§4.2),
     # not only synthetic self-report. Also recorded in stats for the payload.
     outcome_distribution = _format_outcome_distribution(
-        outcomes, reached_rungs, n, outcome_sources, no_shop=no_shop)
+        outcomes, reached_rungs, n, outcome_sources, no_shop=no_shop,
+        premise_gaps=persona_gaps)
+    # For the methodology note of every renderer (resolve_narrative).
+    stats["premise_gaps"] = run_gaps(runs_dir)
     stats["outcomes"] = {
         "counts": dict(Counter(outcomes.values())),
         "participant_count": n,
@@ -2700,6 +2736,21 @@ _NARRATOR_FAILED_NOTE = (" Uwaga: analiza narracyjna modelu nie powiodła się (
                          "więc to podsumowanie złożono automatycznie z liczb, bez interpretacji.")
 
 
+def _premise_note(narr: dict, gaps) -> None:
+    """Say in the methodology note, whatever the model wrote, what the task
+    presupposed and the sessions did not find. The HTML, the PDF, the Word file and
+    the dashboard all print that field; the model is only asked to mention it."""
+    texts = [str(g.get("text") or "") for g in gaps or [] if isinstance(g, dict)]
+    texts = [t for t in texts if t]
+    if not texts:
+        return
+    added = ("Zadanie zakładało funkcje, których sesje nie zaobserwowały w serwisie — to "
+             "granica zakresu serwisu, nie wada interfejsu. " + " ".join(texts))
+    note = str(narr.get("methodology_note") or "")
+    if added not in note:
+        narr["methodology_note"] = (note + " " + added).strip()
+
+
 def resolve_narrative(agg: dict) -> dict:
     """The narrative to render, with the LLM-failure fallback already applied.
 
@@ -2723,6 +2774,7 @@ def resolve_narrative(agg: dict) -> dict:
     # was cleaned (and a model that ignores the prompt) still render without the
     # tool's field names in the client's prose.
     narr = clean_narrative(narr)
+    _premise_note(narr, stats.get("premise_gaps"))
     # Every render path — HTML, PDF, Word, the LLM-failure fallback — shows the
     # computed score when there is one, so the headline can never disagree with
     # the breakdown printed under it. Runs made before scoring.py have no

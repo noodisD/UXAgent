@@ -286,3 +286,71 @@ def test_verify_findings_prompt_has_reflection_primary_rule():
     assert "refleksj" in lower
     # the rule must explicitly distinguish "reflection-only" from "partial"
     assert '"unsupported" — not "partial"' in lower
+
+
+# --- Shopify-style product pages feed the verifier's product-link override ----
+
+def _shopify_store(tmp_path, products=2):
+    store = TraceStore(tmp_path / "persona")
+    urls = [f"https://pepco.pl/products/poduszka-{i}?Colour=Cream&Size=ONE" for i in range(products)]
+    urls += ["https://pepco.pl/collections/dom", "https://pepco.pl/search?searchString=lampka"]
+    store.write_action_trace([json.dumps({"action": "click", "description": "c"})] * len(urls))
+    for i, url in enumerate(urls):
+        store.append_observation({"tabs": [{"url": url, "is_active": True}]})
+        store.write_observation_step_text(i, LONG_OBS)
+    return store
+
+
+def test_session_capabilities_counts_shopify_product_pages(tmp_path):
+    caps = session_capabilities(_shopify_store(tmp_path))
+    assert caps["product_pages_opened"] == 2
+    assert caps["reached_cart"] is False
+
+
+async def test_product_links_do_work_on_a_shopify_site(tmp_path):
+    findings = [_f(step=2, url="https://pepco.pl/collections/dom",
+                   evidence="Linki do produktów nie działają — kafel nie reaguje.")]
+    mock = AsyncMock(return_value=_reply("supported"))
+    with patch("simulated_web_agent.main.claim_verifier.async_chat", new=mock):
+        await run_claim_verification(_shopify_store(tmp_path), findings)
+    assert findings[0]["claim_verdict"] == "unsupported"
+    assert "otwarto 2 stron produktów" in findings[0]["claim_verdict_reason"]
+
+
+# --- a persona's habits and the medium's limits are not site findings ----------
+
+PERSONA = "Julia, 20 lat. Woli sklepy stacjonarne, bo chce dotknąć tkaniny przed zakupem."
+
+
+def _persona_store(tmp_path):
+    store = _store(tmp_path)
+    store.write_persona_card({"name": "Julia", "description": PERSONA})
+    return store
+
+
+async def test_the_verifier_is_given_the_persona_and_the_rule_about_habits(tmp_path):
+    findings = [_f(evidence="Nie da się ocenić tkaniny online, a persona woli sklepy stacjonarne.")]
+    mock = AsyncMock(return_value=_reply("unsupported"))
+    with patch("simulated_web_agent.main.claim_verifier.async_chat", new=mock):
+        await run_claim_verification(_persona_store(tmp_path), findings)
+    sent = mock.await_args.args[0][0]["content"]
+    assert PERSONA in sent
+    assert "preferencja persony / ograniczenie medium, nie wada strony" in sent
+    assert "withholding information it" in sent, "the carve-out for information the site could give"
+    assert "{persona}" not in sent and "{findings_json}" not in sent
+    assert findings[0]["claim_verdict"] == "unsupported"
+    assert excluded_from_report(findings[0]) is True
+
+
+def test_a_long_persona_is_cut_at_a_word(tmp_path):
+    from simulated_web_agent.main.claim_verifier import persona_disposition
+
+    store = _store(tmp_path)
+    store.write_persona_card({"name": "J", "description": "słowo " * 1000})
+    text = persona_disposition(store)
+    assert len(text) <= 1201 and text.endswith("słowo…")
+    store.write_persona_card({"name": "J", "description": ""})
+    store.write_basic_info({"persona": "Persona z basic_info."})
+    assert persona_disposition(store) == "Persona z basic_info."
+    store.write_basic_info({})
+    assert persona_disposition(store) == "(brak opisu persony)"

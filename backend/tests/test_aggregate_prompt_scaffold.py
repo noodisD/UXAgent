@@ -55,3 +55,15 @@ def test_completion_is_not_called_measured_unconditionally():
     assert "MEASURED FROM THE SESSION TRACE" not in PROMPT
     assert "ZMIERZONY" in PROMPT and "DEKLAROWANY" in PROMPT
     assert "ustalaniu\noverall_ux_score" not in PROMPT
+
+
+def test_the_prompt_says_how_to_use_the_site_context():
+    # A function the site does not offer is a limit of its scope, not a defect to
+    # repair: the pepco report's top recommendation was to fix a store locator for a
+    # feature the site never had. The rule adds no placeholder (the guard above).
+    assert "WAŻNE (kontekst serwisu)" in PROMPT
+    assert "nie są wadami interfejsu" in PROMPT
+    assert "Nie\nrekomenduj ich" in PROMPT
+    assert "granica zakresu serwisu" in PROMPT
+    assert "Zadanie zakłada funkcję" in PROMPT
+    assert "do not assume the site is a shop" in PROMPT
