@@ -751,6 +751,10 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
     sessions_by_device = Counter(device_by_dir[d] for d in _participant_dirs if d in device_by_dir)
 
     fi_dimension_scores: dict[str, list[float]] = defaultdict(list)
+    # The same scores by the device the participant used (first_impression_by_device).
+    fi_by_device: dict[str, list[float]] = defaultdict(list)
+    fi_dimensions_by_device: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    split_run = len([d for d, k in sessions_by_device.items() if k]) >= 2
     # Why each dimension scored what it did. first_impression.txt asks for a
     # per-dimension rationale ("the biggest barrier for this person, and why
     # that score") and for strengths/weaknesses, all grounded in the step-0
@@ -770,6 +774,8 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         fi = r.get("first_impression") or {}
         who = _persona_label(r)
         p_dir = str(r.get("trace_dir", "")).replace("\\", "/").rstrip("/").split("/")[-1]
+        device = device_by_dir.get(p_dir, "")
+        on = {"device": device} if split_run and device else {}
         shot = _stores_by_dir.get(p_dir)
         if p_dir and shot is not None and shot.first_impression_screenshot().exists():
             fi_screens.append({
@@ -778,11 +784,16 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 # what was actually judged.
                 "screenshot": f"{p_dir}/screenshot/{shot.first_impression_screenshot().name}",
                 "score": fi.get("overall_score"),
+                **on,
             })
+        if device and fi.get("overall_score") is not None:
+            fi_by_device[device].append(fi["overall_score"])
         scores = fi.get("scores") or {}
         for k, v in scores.items():
             if v is not None:
                 fi_dimension_scores[k].append(float(v))
+                if device:
+                    fi_dimensions_by_device[device][k].append(float(v))
         # "Co można zaproponować do zmiany?" — the reviewer's follow-up to the
         # missing why. One change per dimension, answering that dimension's
         # barrier, so the proposal travels with the reason it answers. Older
@@ -794,14 +805,14 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             if str(why or "").strip():
                 fi_dimension_reasons[k].append(
                     {"persona": who, "score": scores.get(k), "why": str(why).strip(),
-                     "change": str(changes.get(k) or "").strip()}
+                     "change": str(changes.get(k) or "").strip(), **on}
                 )
         for w in fi.get("weaknesses") or []:
             if str(w or "").strip():
-                fi_weaknesses.append({"persona": who, "text": str(w).strip()})
+                fi_weaknesses.append({"persona": who, "text": str(w).strip(), **on})
         for s_ in fi.get("strengths") or []:
             if str(s_ or "").strip():
-                fi_strengths.append({"persona": who, "text": str(s_).strip()})
+                fi_strengths.append({"persona": who, "text": str(s_).strip(), **on})
 
     # What each persona was actually trying to do, and how it went. Produced by
     # generate_objective_reflection for every persona and rendered nowhere — so
@@ -1388,6 +1399,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # How many participants the average rests on, of how many took part.
             "scored": len(fi_scores),
             "of": n,
+            **first_impression_by_device(fi_by_device, fi_dimensions_by_device),
             "dimension_avgs": {k: _avg(v) for k, v in fi_dimension_scores.items()},
             # Per-dimension response distribution (1-5), so the report can show the
             # spread + anchored scale like the survey, not just a bar.
@@ -2429,6 +2441,37 @@ def device_split(affected_dirs, device_by_dir: dict, sessions_by_device) -> dict
 
 _DEVICE_ORDER = {"desktop": 0, "mobile": 1, "tablet": 2}
 
+# First-impression averages this far apart (on the 1-5 scale) are one site seen two ways.
+FI_DEVICE_GAP = 1.0
+
+
+def first_impression_by_device(overall: dict, dimensions: dict) -> dict:
+    """The first-impression averages by device — {} unless two devices have a score.
+
+    A run on both devices blends two different first screens into one mean: on the
+    pepco.pl run desktop scored 3.07 and mobile 1.47, the report printed 2.27 and
+    blamed a notice that is a thin strip on desktop and fills the screen on mobile.
+    `overall` is {device: [score, ...]}, `dimensions` {device: {dimension: [score, ...]}}.
+    A single device, or a run stored before the device was recorded, has nothing to
+    split. `n` is the participants on that device with a score.
+    """
+    devices = sorted((d for d, scores in overall.items() if scores),
+                     key=lambda d: _DEVICE_ORDER.get(d, 9))
+    if len(devices) < 2:
+        return {}
+    by_device = {
+        d: {"avg_score": round(statistics.mean(overall[d]), 2), "n": len(overall[d]),
+            "dimension_avgs": {k: round(statistics.mean(v), 2)
+                               for k, v in (dimensions.get(d) or {}).items() if v}}
+        for d in devices}
+    # From the rounded averages, as printed: 3,07 against 2,07 is a gap of 1,00.
+    gap = round(max(v["avg_score"] for v in by_device.values())
+                - min(v["avg_score"] for v in by_device.values()), 2)
+    out = {"by_device": by_device, "device_gap": gap, "device_dependent": gap >= FI_DEVICE_GAP}
+    if out["device_dependent"]:
+        out["weakest_device"] = min(devices, key=lambda d: by_device[d]["avg_score"])
+    return out
+
 
 def _examples_for_issue(issue: dict, examples: list) -> tuple[list, list]:
     """(examples to show as this issue's proof, examples of the same heuristic left out).
@@ -2750,8 +2793,12 @@ def _narrative_from_stats(stats: dict) -> dict:
         f"{sc.get('krytyczny', 0)} krytycznych, {sc.get('poważny', 0)} poważnych "
         f"i {sc.get('drobny', 0)} drobnych naruszeń heurystyk Nielsena."
     ]
+    # Two devices a point or more apart: the mean over both is no device's first impression.
+    from .reporter_html import first_impression_device_line
+    fi_devices = first_impression_device_line(stats) if fi.get("device_dependent") is True else ""
+    fi_by_device = f"Pierwsze wrażenie według urządzenia: {fi_devices}." if fi_devices else ""
     if fi_avg is not None:
-        exec_parts.append(f"Pierwsze wrażenie oceniono na {fi_avg:.2f}/5.")
+        exec_parts.append(fi_by_device or f"Pierwsze wrażenie oceniono na {fi_avg:.2f}/5.")
 
     strengths = []
     if dim.get("trustworthiness", 0) >= 3.5:
@@ -2787,7 +2834,7 @@ def _narrative_from_stats(stats: dict) -> dict:
         "minor_issues": [_to_issue(h) for h in minor],
         "accessibility_assessment": f"Średnia ocena dostępności: {a11y_avg}/5." if a11y_avg else "",
         "responsiveness_assessment": f"Sesje z overflowem tabletowym: {_overflow('tablet', 'tablet_overflow_sessions')}. Sesje z overflowem mobilnym: {_overflow('mobile', 'mobile_overflow_sessions')}.",
-        "first_impression_assessment": f"Pierwsze wrażenie: {fi_avg:.2f}/5. Najsłabszy wymiar: wezwanie do działania ({dim.get('call_to_action', '—')}/5)." if fi_avg else "",
+        "first_impression_assessment": (fi_by_device or f"Pierwsze wrażenie: {fi_avg:.2f}/5. Najsłabszy wymiar: wezwanie do działania ({dim.get('call_to_action', '—')}/5).") if fi_avg else "",
         "priority_recommendations": recs,
         "methodology_note": f"Badanie przeprowadzono przy użyciu agentów LLM symulujących rzeczywistych użytkowników, z których każdy otrzymał to samo zadanie. Ocena opiera się na heurystykach Nielsena, teście pierwszego wrażenia (5 sekund), analizie dostępności WCAG 2.1 oraz sprawdzeniu responsywności na urządzeniach mobilnych i tabletach.",
     }

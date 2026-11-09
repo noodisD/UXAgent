@@ -33,6 +33,19 @@ nie pomiar. (Sama ocena liczbowa jest wyliczona z dowodów w kodzie, nie ustalas
 FIRST IMPRESSION STATISTICS:
 {first_impression_stats}
 
+WAŻNE (pierwsze wrażenie a urządzenia): jeśli powyższe statystyki mają `by_device`, to dla każdego
+urządzenia (desktop, mobile) podają osobno średnią (`avg_score`), liczbę ocenionych uczestników (`n`)
+i średnie wymiarów (`dimension_avgs`); `device_gap` to różnica między najwyższą a najniższą średnią,
+a opinie (`dimension_reasons`, `weaknesses`, `strengths`) mają pole `device`. Gdy `device_dependent`
+jest true (średnie różnią się o 1,0 lub więcej), `first_impression_assessment` MUSI wskazać urządzenie
+odpowiedzialne za niski wynik (`weakest_device`), podać średnią każdego urządzenia i opisać przyczynę
+na podstawie opinii z TEGO urządzenia. NIE wolno w nim przedstawiać ogólnej średniej (`avg_score`)
+jako pierwszego wrażenia strony: łączy ona dwa różne ekrany startowe i nie opisuje żadnego z nich.
+Nie przypisuj drugiemu urządzeniu przyczyny, którą opinie opisują tylko na pierwszym (np. baner
+zajmujący cały ekran telefonu, który na komputerze jest wąskim paskiem). Gdy `device_dependent` jest
+false, ogólna średnia uczciwie opisuje stronę; średnie urządzeń możesz podać obok. Gdy `by_device` nie
+ma w danych (jedno urządzenie albo starszy zapis), nie pisz w ocenie pierwszego wrażenia nic o urządzeniach.
+
 HEURISTIC VIOLATION SUMMARY (grouped by heuristic, sorted by frequency):
 {heuristic_summary}
 
@@ -235,6 +248,7 @@ Produce exactly this JSON structure (no markdown fences in the final block). ALL
 Rules:
 - REGUŁA JĘZYKOWA (obowiązkowa): NIGDY nie podawaj częstotliwości jako procentu „użytkowników" (np. „72% użytkowników porzuci koszyk"). Odnoś się do „symulowanych person" lub „przebiegów"; traktuj częstotliwości jako hipotezy syntetyczne, nie statystykę populacyjną.
 - first_impression_assessment (rzetelność liczb): każdą średnią przypisz dokładnie do wymiaru, którego dotyczy (jasność celu, widoczność nawigacji, wezwanie do działania, hierarchia wizualna, wiarygodność) — nie łącz kilku wymiarów w jedno zdanie z jedną liczbą. Nie opisuj elementu jako dobrze widocznego ani czytelnego, jeśli średnia jego wymiaru jest poniżej 3.
+- first_impression_assessment (urządzenia): przy `device_dependent` równym true nazwij urządzenie z niskim wynikiem i podaj średnią każdego urządzenia; ogólnej średniej nie przedstawiaj jako pierwszego wrażenia strony (zob. WAŻNE o urządzeniach przy statystykach pierwszego wrażenia).
 - Przyczyny: opisuj objaw widoczny w dowodach (np. wartość „null kW" na karcie silnika), a NIE jego domniemaną przyczynę techniczną (baza danych, serwer, API, pamięć podręczna, skrypt) — zapis sesji jej nie pokazuje. W rekomendacji wskaż, co ma być poprawnie wyświetlone, nie który komponent zawiódł.
 - Tekst alternatywny: skalę (liczbę obrazów i stron) podawaj tylko dla obrazów treści; nie pisz, że problem „występuje na X z X stron", gdy dotyczy ikon i elementów poza treścią.
 - Rozbieżne relacje: jeśli temat rekomendacji jest na liście ROZBIEŻNYCH RELACJI, NIE pisz, że

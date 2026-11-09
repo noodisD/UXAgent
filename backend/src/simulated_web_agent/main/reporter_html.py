@@ -102,6 +102,34 @@ def devices_text(devices) -> str:
     return " · ".join(parts) if len(parts) >= 2 else ""
 
 
+_DEVICE_NAMES_PL = {"desktop": "komputer", "mobile": "telefon", "tablet": "tablet"}
+FI_DEVICE_FLAG = "wynik zależy od urządzenia"
+
+
+def first_impression_device_line(stats: dict) -> str:
+    """"komputer 3,07 (n=3) · telefon 1,47 (n=3) — wynik zależy od urządzenia" — the
+    first-impression average of each device, flagged when they are 1,0 or more apart.
+
+    "" unless the run used two devices: a single-device report, or one stored before
+    the split existed (no `by_device`), has nothing to compare and reads as before.
+    One mean over both devices hides which of them the score is about.
+    """
+    fi = (stats or {}).get("first_impression")
+    fi = fi if isinstance(fi, dict) else {}
+    by_device = fi.get("by_device")
+    parts = []
+    for name, v in (by_device.items() if isinstance(by_device, dict) else ()):
+        if not isinstance(v, dict) or isinstance(v.get("avg_score"), bool) \
+                or not isinstance(v.get("avg_score"), (int, float)):
+            continue
+        n = v.get("n")
+        count = f" (n={n})" if isinstance(n, int) and not isinstance(n, bool) else ""
+        parts.append(f"{_DEVICE_NAMES_PL.get(name, name)} {avg_text(v['avg_score'])}{count}")
+    if len(parts) < 2:
+        return ""
+    return " · ".join(parts) + (f" — {FI_DEVICE_FLAG}" if fi.get("device_dependent") is True else "")
+
+
 DEVICES_NOTE = (
     "Podział na urządzenia pokazuje, ilu uczestników na danym urządzeniu napotkało problem. "
     "Każdy uczestnik używał jednego urządzenia, więc „0 z 3” znaczy tylko, że tych trzech osób "
@@ -562,7 +590,7 @@ def _render_header(agg: dict, stats: dict, narr: dict | None = None) -> str:
       <span class="val">{_fi_header(stats)}</span>
       <span class="lbl">Pierwsze wrażenie</span>
     </div>
-  </div>{_excluded_sessions_note(stats)}{_audit_failures_note(stats)}
+  </div>{_excluded_sessions_note(stats)}{_audit_failures_note(stats)}{_fi_device_note(stats)}
 </div>"""
 
 
@@ -651,6 +679,12 @@ def audit_failures_text(stats: dict) -> str:
 def _audit_failures_note(stats: dict) -> str:
     text = audit_failures_text(stats)
     return f'<div class="header-note">{_esc(text)}</div>' if text else ""
+
+
+def _fi_device_note(stats: dict) -> str:
+    line = first_impression_device_line(stats)
+    return (f'<div class="header-note">Pierwsze wrażenie według urządzenia: {_esc(line)}.</div>'
+            if line else "")
 
 
 def _excluded_sessions_note(stats: dict) -> str:
@@ -874,9 +908,11 @@ def _render_first_impression(stats: dict, narr: dict) -> str:
         if not path:
             continue
         score = f" · {avg_text(s['score'])}/5" if s.get("score") is not None else ""
+        device = _DEVICE_NAMES_PL.get(str(s.get("device") or ""), "")
+        device = f" · {device}" if device else ""
         shots += (f'<figure class="fi-shot"><a href="{_esc(path)}" target="_blank">'
                   f'<img src="{_esc(path)}" alt="pierwszy ekran — {_esc(s.get("persona") or "")}"/></a>'
-                  f'<figcaption>{_esc(s.get("persona") or "")}{score}</figcaption></figure>')
+                  f'<figcaption>{_esc(s.get("persona") or "")}{device}{score}</figcaption></figure>')
     shots = f'<div class="fi-shots">{shots}</div>' if shots else ""
 
     coverage = score_coverage_text(stats, "first_impression", "first_impression",
@@ -909,6 +945,9 @@ def _render_first_impression(stats: dict, narr: dict) -> str:
             for key, label in _FI_DIM_LABELS.items())
     if coverage and not unscored(fi):
         body = f'<p class="sv-legend">{_esc(coverage)}</p>' + body
+    by_device = first_impression_device_line(stats)
+    if by_device:
+        body = f'<p class="sv-legend"><strong>Według urządzenia:</strong> {_esc(by_device)}.</p>' + body
 
     if assessment:
         body += f'<p style="margin-top:16px;font-size:13px;color:var(--muted);">{assessment}</p>'
@@ -1468,6 +1507,7 @@ def stats_table_rows(stats: dict, narr: dict | None = None) -> list[tuple[str, s
             return "nie zmierzono"
         return f"{vp.get(key, 0)}/{n} sesji"
 
+    fi_split = first_impression_device_line(stats)
     return [
         ("Uczestnicy", str(n)),
         ("Łącznie problemów", str(counts["total"])),
@@ -1476,6 +1516,7 @@ def stats_table_rows(stats: dict, narr: dict | None = None) -> list[tuple[str, s
         ("Problemy drobne", str(counts["minor"])),
         ("Do weryfikacji przez człowieka", str(int(sc.get("needs_verification") or 0))),
         ("Pierwsze wrażenie (śr.)", _avg_cell(stats, "first_impression")),
+        *([("Pierwsze wrażenie wg urządzenia", fi_split)] if fi_split else []),
         ("Dostępność (śr.)", _avg_cell(stats, "accessibility")),
         ("Overflow mobile", overflow("mobile", "mobile_overflow_sessions")),
         ("Overflow tablet", overflow("tablet", "tablet_overflow_sessions")),

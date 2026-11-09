@@ -577,17 +577,25 @@ def build_docx(agg: dict, run_dir: Path, out_path: Path) -> Path:
 
     # ── First impression ─────────────────────────────────────────────────
     fi = stats.get("first_impression") or {}
-    from .reporter_html import score_coverage_text
+    from .reporter_html import _DEVICE_NAMES_PL, first_impression_device_line, score_coverage_text
     fi_coverage = score_coverage_text(stats, "first_impression", "first_impression",
                                       "test nie powiódł się")
     if fi.get("avg_score") is not None or fi.get("dimension_avgs") or fi_coverage:
         doc.add_heading("Pierwsze wrażenie (test 5 sekund)", level=1)
         if fi.get("avg_score") is not None:
             doc.add_paragraph(f"Średnia ocena: {avg_text(fi['avg_score'])}/5")
+        fi_devices = first_impression_device_line(stats)
+        if fi_devices:
+            p = doc.add_paragraph()
+            p.add_run("Według urządzenia: ").bold = True
+            p.add_run(fi_devices)
         if fi_coverage:
             doc.add_paragraph(fi_coverage)
         for s in (fi.get("screenshots") or [])[:3]:
             caption = str(s.get("persona") or "")
+            device = _DEVICE_NAMES_PL.get(str(s.get("device") or ""), "")
+            if device:
+                caption = f"{caption} · {device}".lstrip(" ·")
             if s.get("score") is not None:
                 caption = f"{caption} · {avg_text(s['score'])}/5".lstrip(" ·")
             _add_picture(doc, run_dir, s.get("screenshot"), caption)

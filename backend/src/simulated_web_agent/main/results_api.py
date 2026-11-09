@@ -478,6 +478,31 @@ def _report_issue_counts(report: dict | None) -> dict | None:
     return counts
 
 
+def _first_impression_by_device(report: dict | None) -> dict | None:
+    """The first-impression average of each device, as the report prints it.
+
+    None unless the run used two devices — a single-device run, or a report stored
+    before the split existed, has nothing to compare. `text` is the report's own
+    Polish line, so no screen has to rebuild it from the numbers.
+    """
+    from .reporter_html import FI_DEVICE_FLAG, first_impression_device_line
+
+    stats = _as_dict(_as_dict(report).get("statistics"))
+    text = first_impression_device_line(stats)
+    if not text:
+        return None
+    fi = _as_dict(stats.get("first_impression"))
+    dependent = fi.get("device_dependent") is True
+    return {
+        "text": text,
+        "devices": {name: {"avg": v.get("avg_score"), "n": v.get("n")}
+                    for name, v in _as_dict(fi.get("by_device")).items() if isinstance(v, dict)},
+        "gap": fi.get("device_gap") if _is_number(fi.get("device_gap")) else None,
+        "deviceDependent": dependent,
+        "flag": FI_DEVICE_FLAG if dependent else None,
+    }
+
+
 def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
     # Opening a run this instance did not execute (or executed before a
     # restart) fetches it from the bucket first; a no-op when local or when no
@@ -537,6 +562,8 @@ def build_run(run_id: str, runs_root: Path = RUNS_ROOT) -> dict | None:
         "score": _report_score(report),
         # The report's own issue counts, for the overview (see _report_issue_counts).
         "issueCounts": _report_issue_counts(report),
+        # The first impression of each device, when the run used two (see above).
+        "firstImpressionByDevice": _first_impression_by_device(report),
         "scoreBreakdown": _score_breakdown(report),
         # Survey averages and distributions without the not-assessable answers,
         # which are counted separately (see _run_survey).
