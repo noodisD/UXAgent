@@ -14,12 +14,39 @@ logger = logging.getLogger(__name__)
 # 4x "Ewa", 4x "Alex"). This is the deterministic guarantee; the prompt also asks
 # for a distinct Polish first name (audience-appropriate).
 _PERSONA_NAME_RE = re.compile(r"^Persona:\s*(\S+)", re.MULTILINE | re.IGNORECASE)
-_PL_NAME_POOL = [
+_PL_FEMALE_NAMES = [
     "Anna", "Katarzyna", "Małgorzata", "Agnieszka", "Barbara", "Ewa", "Magdalena",
     "Joanna", "Zofia", "Aleksandra", "Monika", "Karolina", "Marta", "Halina",
+    "Beata", "Dorota", "Iwona", "Teresa", "Jolanta", "Krystyna", "Renata",
+    "Natalia", "Justyna", "Paulina", "Izabela", "Sylwia", "Weronika", "Maria",
+    "Elżbieta", "Alicja",
+]
+_PL_MALE_NAMES = [
     "Piotr", "Krzysztof", "Andrzej", "Tomasz", "Paweł", "Michał", "Marcin",
     "Jakub", "Grzegorz", "Łukasz", "Adam", "Mateusz", "Rafał", "Marek", "Jan",
+    "Stanisław", "Robert", "Jacek", "Wojciech", "Dariusz", "Mariusz", "Kamil",
+    "Damian", "Sebastian", "Bartosz", "Maciej", "Dawid", "Artur", "Kacper",
+    "Szymon",
 ]
+# Alternating, so a persona of unknown gender does not drain one half first.
+_PL_NAME_POOL = [n for pair in zip(_PL_FEMALE_NAMES, _PL_MALE_NAMES) for n in pair]
+
+# "Płeć: kobieta" is what the persona format asks for; "Gender:" is the English
+# example's spelling. [ \t]* and not \s*, which would run on into the next line.
+_GENDER_LINE_RE = re.compile(
+    r"^[ \t]*(?:Płeć|Plec|Gender)[ \t]*:[ \t]*(\S.*)$", re.MULTILINE | re.IGNORECASE
+)
+_FEMALE_VALUE_RE = re.compile(r"(?:kobiet|female|woman|k\b)", re.IGNORECASE)
+_MALE_VALUE_RE = re.compile(r"(?:m[ęe]żczyzn|male\b|man\b|m\b)", re.IGNORECASE)
+# Past-tense verbs agree with the persona: byla/miala/pracowala vs byl/mial/pracowal.
+_L_FORM_RE = re.compile(r"\b\w{2,}?(ła|łam|łem|ł)\b", re.IGNORECASE)
+_FEMININE_L_ENDINGS = ("ła", "łam")
+# -ł/-ła words that agree with some other noun, not with the persona.
+_NOT_A_PERSONA_VERB = frozenset({
+    "mała", "cała", "biała", "stała", "wspaniała", "doskonała", "szkoła", "siła",
+    "skała", "stół", "kościół", "udział", "dział", "podział", "materiał", "kapitał",
+})
+_POSSESSIVE_RE = re.compile(r"\b(jego|jej)\b", re.IGNORECASE)
 
 
 def _persona_name(text: str) -> str:
@@ -27,12 +54,50 @@ def _persona_name(text: str) -> str:
     return (m.group(1).rstrip(".,;:") if m else "").strip()
 
 
+def _persona_gender(text: str) -> str | None:
+    """'f', 'm', or None when it cannot be told. The stated line wins; without
+    one, a clear majority of Polish gendered cues (past-tense endings, jego/jej)
+    decides, and a tie or no cue is None rather than a guess."""
+    m = _GENDER_LINE_RE.search(text or "")
+    if m:
+        value = m.group(1).strip()
+        if _FEMALE_VALUE_RE.match(value):
+            return "f"
+        if _MALE_VALUE_RE.match(value):
+            return "m"
+        return None  # stated, but not a binary value a name can be paired with
+    own_names = {n.lower() for n in _PL_NAME_POOL} | {_persona_name(text).lower()}
+    feminine = masculine = 0
+    for m in _L_FORM_RE.finditer(text or ""):
+        word = m.group(0).lower()
+        if word in _NOT_A_PERSONA_VERB or word in own_names:
+            continue  # "Paweł", "Rafał" end in -ł without being a verb
+        if m.group(1).lower() in _FEMININE_L_ENDINGS:
+            feminine += 1
+        else:
+            masculine += 1
+    for m in _POSSESSIVE_RE.finditer(text or ""):
+        if m.group(1).lower() == "jej":
+            feminine += 1
+        else:
+            masculine += 1
+    if feminine == masculine:
+        return None
+    return "f" if feminine > masculine else "m"
+
+
 def _ensure_unique_names(personas: list[dict]) -> list[dict]:
     """Guarantee distinct persona names. On a collision (or missing name),
-    substitute a distinct Polish name, replacing whole-word occurrences of the
-    old name so the rest of the backstory stays coherent. Mutates and returns
-    the list."""
+    substitute a distinct Polish name of the persona's gender, replacing
+    whole-word occurrences of the old name so the rest of the backstory stays
+    coherent. A replacement never takes a name a later persona already has.
+    Mutates and returns the list."""
     used: set[str] = set()
+    reserved = {
+        _persona_name(p.get("persona", "") or "").lower()
+        for p in personas
+        if isinstance(p, dict)
+    }
     for p in personas:
         if not isinstance(p, dict):
             continue
@@ -41,7 +106,12 @@ def _ensure_unique_names(personas: list[dict]) -> list[dict]:
         if name and name.lower() not in used:
             used.add(name.lower())
             continue
-        fresh = next((n for n in _PL_NAME_POOL if n.lower() not in used), None)
+        pool = {"f": _PL_FEMALE_NAMES, "m": _PL_MALE_NAMES}.get(
+            _persona_gender(text), _PL_NAME_POOL
+        )
+        fresh = next(
+            (n for n in pool if n.lower() not in used and n.lower() not in reserved), None
+        )
         if fresh is None:  # pool exhausted (n > pool size)
             i = len(used) + 1
             fresh = f"{name or 'Osoba'}-{i}"
