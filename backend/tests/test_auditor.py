@@ -220,3 +220,40 @@ async def test_a_finding_about_missing_material_composition_is_not_suppressed(st
     assert len(kept) == 1 and "składu materiału" in kept[0]["evidence"]
     assert not excluded_from_report(kept[0])
     assert not kept[0].get("harness_suspect") and not kept[0].get("off_site")
+
+
+# ---------------------------------------------------------------------------
+# The participant's own route is given to the heuristic pass as a measured fact
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_heuristic_prompt_contains_session_facts(store: TraceStore):
+    """Filip alternated between a results list and the same few products, and the audit filed
+    that as the site's inefficient comparison. The count of reopened pages and the rule that
+    such a claim describes the participant's route go into the prompt."""
+    from simulated_web_agent.main.auditor import _heuristic_pass
+
+    steps = [("click", "https://x.pl/p/a"), ("back", "https://x.pl/list"), ("click", "https://x.pl/p/a"),
+             ("back", "https://x.pl/list"), ("click", "https://x.pl/p/b"), ("terminate", "https://x.pl/p/b")]
+    store.write_action_trace([json.dumps({"action": a, "target": "t", "description": f"Krok {i}"})
+                              for i, (a, _) in enumerate(steps)])
+    for i, url in enumerate(["https://x.pl/list"] + [u for _, u in steps[:-1]]):
+        store.append_observation({"tabs": [{"url": url, "is_active": True}], "error": None})
+        store.write_observation_step_text(i, f"Strona {i}")
+
+    chat = AsyncMock(return_value="[]")
+    with patch("simulated_web_agent.main.auditor.async_chat", new=chat):
+        await _heuristic_pass(store)
+    prompt = chat.call_args.args[0][0]["content"]
+    facts = prompt.split("SESSION FACTS (measured from the trace, not opinion):\n")[1].split("\n\nOBSERVATIONS:")[0]
+    assert "opened 4 pages" in facts and "3 of them distinct" in facts
+    assert "x.pl/p/a (2 times)" in facts
+    assert "reopening pages they had already seen" in prompt and "the participant's own route" in prompt
+
+
+def test_session_facts_say_so_when_nothing_was_reopened(store: TraceStore):
+    from simulated_web_agent.main.auditor import _session_facts
+
+    store.write_action_trace([json.dumps({"action": "click", "target": "a", "description": "x"})])
+    store.append_observation({"tabs": [{"url": "https://x.pl/", "is_active": True}], "error": None})
+    assert "No page was opened more than once." in _session_facts(store)

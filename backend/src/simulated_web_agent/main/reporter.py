@@ -38,7 +38,10 @@ from .scoring import (
     RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
     compute_ux_score, pass_failures as _pass_failures, rationale_text,
 )
-from .attribution import harness_suspect_causes, restates_a_gated_finding
+from .attribution import (
+    harness_suspect_causes, names_last_executed_control, restates_a_gated_finding,
+    session_end_note, tool_failed_controls, unseen_last_action,
+)
 from .iso_metrics import current_effectiveness, effective_outcome
 from .premise_check import LABELS as _PREMISE_LABELS, ensure_premise_check, run_gaps
 from .site_scope import site_context_for
@@ -112,6 +115,10 @@ def _harness_reason(cause: dict | None) -> str:
     if code == "repeat":
         return (f"{at} to samo działanie powtórzono wielokrotnie bez skutku — nie wiadomo, czy "
                 "element nie działa, czy narzędzie go nie trafia")
+    if code == "outcome_unseen":
+        after = f" po akcji w kroku {step - 1}" if isinstance(step, int) and step > 0 else ""
+        return (f"sesja urwała się, zanim uczestnik zobaczył stronę{after} — "
+                "brak reakcji strony nie został zaobserwowany")
     if code == "claim_contradicted":
         return "wniosek przeczy przebiegowi sesji albo dotyczy elementu, który się zaciął"
     return ("możliwa usterka narzędzia w tym kroku lub tuż przed nim — zapis nie rozstrzyga, "
@@ -236,6 +243,14 @@ def _human_check_base(finding: dict) -> str:
         if code == "perception_gap":
             return ("Otwórz stronę i sprawdź, czy opisana treść jest na niej widoczna — "
                     "narzędzie mogło jej nie odczytać.")
+        if code == "outcome_unseen":
+            cause = finding.get("harness_cause") or {}
+            control = str(cause.get("detail") or "").strip()
+            if control and cause.get("action") == "click":
+                what = f"Kliknij „{control}”"
+            else:
+                what = f"Powtórz tę akcję („{control}”)" if control else "Powtórz tę akcję"
+            return f"{what} w zwykłej przeglądarce i sprawdź, co pokazuje strona — uczestnik tego nie zobaczył."
         return "Powtórz tę interakcję ręcznie i sprawdź, czy strona reaguje."
     if finding.get("claim_verdict") in ("unsupported", "partial"):
         return ("Sprawdź na stronie, czy opisany problem występuje — zapis sesji "
@@ -338,6 +353,12 @@ Zasady:
   barierą: w blockers trafia tylko to, co strona uniemożliwiła lub utrudniła. Tak samo
   ograniczenie samego medium (ekran nie pozwala dotknąć tkaniny ani ocenić jej koloru),
   chyba że strona nie podaje informacji, które mogłaby podać (skład, wymiary).
+- Pole "tool_failures" wymienia kontrolki, których narzędzie badania nie zdołało użyć
+  (kliknięcie zablokowała inna warstwa, przekroczony czas). To usterka narzędzia, nie
+  strony: nie opisuj jej jako wady strony i nie wpisuj do blockers ani do priorityFix.
+- Jeśli session.ended_reason to "error", sesję przerwała awaria narzędzia, a "unseen_last_action"
+  to ostatnia akcja, której wyniku persona nigdy nie zobaczyła. Nie twierdź, co ta akcja dała
+  ani że nic nie dała, i nigdy nie wpisuj samej awarii sesji do blockers.
 - blockers i wins: maksymalnie po 4 pozycje, krótkie i konkretne. Mogą być puste ([]).
 - Pisz rzeczowo. Nie opisuj metodologii. Zwróć tylko poprawny JSON.\
 """
@@ -391,6 +412,9 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
         "demographics": persona_card.get("demographics", {}),
         "first_impression_score": first_impression.get("overall_score"),
         "first_impression_summary": first_impression.get("clarity_summary", ""),
+        # Only what stands. A finding the gates held back (a result nobody saw, a
+        # click the tool failed) was restated here as the participant's own blocker
+        # and shipped; restates_a_gated_finding catches that after the fact.
         "heuristic_findings": [
             {
                 "heuristic_id": f.get("heuristic_id"),
@@ -399,7 +423,11 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
                 "recommendation": f.get("recommendation", ""),
             }
             for f in heuristic_findings
+            if not excluded_from_report(f)
         ],
+        "tool_failures": tool_failed_controls(store),
+        "unseen_last_action": unseen_last_action(store),
+        "session_note": session_end_note(store),
         "accessibility_score": accessibility.get("overall_score"),
         "accessibility_summary": accessibility.get("summary", ""),
         "scroll_summary": scroll,
@@ -915,13 +943,15 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 # The tool crashed this session. The participant's account of why
                 # it ended describes OUR failure, so it must not reach the client
                 # as a site problem or as "the most important fix"; what they did
-                # and saw before the crash stands.
+                # and saw before the crash stands. The fix is blank whatever it
+                # says (it is drawn from the same account), and so is a blocker
+                # about the control of the last action: its result was never seen.
                 entry["session_error"] = {"steps": _session.get("steps_taken")}
                 entry["summary"] = ""
+                entry["priority_fix"] = ""
                 entry["blockers"] = [b for b in entry["blockers"] if not describes_session_crash(b)
-                                     and not describes_interaction_trouble(b)]
-                if describes_session_crash(entry["priority_fix"]) or describes_interaction_trouble(entry["priority_fix"]):
-                    entry["priority_fix"] = ""
+                                     and not describes_interaction_trouble(b)
+                                     and not names_last_executed_control(store, b)]
         objective_reflections.append(entry)
 
     # Heuristic findings aggregation — annotate each finding with its persona

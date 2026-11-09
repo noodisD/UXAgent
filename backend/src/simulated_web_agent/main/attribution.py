@@ -18,7 +18,7 @@ import logging
 import re
 
 from .evidence import _QUOTED, _visible_text
-from .loop_phrases import FORCED_BACK_MARKERS
+from .loop_phrases import FORCED_BACK_MARKERS, injected_kind
 from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger(__name__)
@@ -185,6 +185,135 @@ def _executor_error_detail(err: str) -> str:
     return "akcja nie została wykonana"
 
 
+def _observation_errors(store: TraceStore) -> list[tuple[int, str]]:
+    """(observation index, executor error) for every observation that carries one."""
+    out = []
+    for i, obs in enumerate(store.read_observations() or []):
+        if not isinstance(obs, dict):
+            continue
+        err = str(obs.get("error") or "")
+        if any(m in err.lower() for m in _EXECUTOR_ERROR_MARKERS):
+            out.append((i, err))
+    return out
+
+
+def tool_failed_actions(store: TraceStore) -> dict[int, str]:
+    """Action index -> why, for every action the executor could not carry out.
+
+    observations[i] is the state recorded before action i, so the error it carries
+    belongs to action i-1."""
+    return {i - 1: _executor_error_detail(err) for i, err in _observation_errors(store) if i >= 1}
+
+
+def injected_back_steps(store: TraceStore) -> dict[int, str]:
+    """Action index -> kind (loop_phrases.KIND_*) for every back the harness ran in
+    place of the participant's own choice."""
+    out = {}
+    for i, raw in enumerate(store.read_action_trace() or []):
+        kind = injected_kind(raw)
+        if kind:
+            out[i] = kind
+    return out
+
+
+def unperceived_steps(store: TraceStore) -> list[int]:
+    """Observation steps that were recorded and never read by the participant.
+
+    experiment.py records a step's observation, then the participant's perceiver and
+    planner answer, and only then is the step's text written beside its action. The
+    one observation no action follows, with no text, is a session cut inside that
+    call (an API rate limit, a refused reply): the page was captured, nobody read it.
+    A session that ended normally has none — its last observation is appended only
+    when another step is about to run."""
+    try:
+        n_actions = len(store.read_action_trace() or [])
+        n_observations = len(store.read_observations() or [])
+    except Exception:
+        return []
+    return [i for i in range(n_actions, n_observations)
+            if not store.read_observation_step_text(i).strip()]
+
+
+def unseen_last_action(store: TraceStore) -> str | None:
+    """What the last action was, when its result is a page nobody read."""
+    unseen = unperceived_steps(store)
+    actions = store.read_action_trace() or []
+    if not unseen or not 1 <= unseen[0] <= len(actions):
+        return None
+    last = _parse_action(actions[unseen[0] - 1])
+    return str(last.get("description") or last.get("action") or "") or None
+
+
+def session_end_note(store: TraceStore) -> str | None:
+    """One sentence for the passes written after a session the tool cut short, or None.
+
+    Such a session ends on an action with nothing after it, and a model reading that
+    memory concludes the action failed: Filip's crash right after 'Wyszukaj sklep'
+    became "the Wyszukaj sklep function failed" in his survey and his reflection."""
+    if str((store.read_session_result() or {}).get("ended_reason") or "") != "error":
+        return None
+    unseen = unperceived_steps(store)
+    if not unseen or unseen[0] < 1:
+        return None
+    return (f"Sesja urwała się awarią narzędzia tuż po akcji [step {unseen[0] - 1}]; jej wyniku "
+            "uczestnik nigdy nie zobaczył — nie wnioskuj, czy zadziałała.")
+
+
+# The name the participant gave the control it used, as its description quotes it:
+# "Click on the 'Wyszukaj sklep' button ...".
+_CONTROL_LABEL_RE = re.compile(r"['‘’\"„”]([^'‘’\"„”]{3,60})['‘’\"„”]")
+
+
+def _action_control(action: dict) -> str:
+    """The control an action used, in the words a person would look for it by."""
+    m = _CONTROL_LABEL_RE.search(str(action.get("description") or ""))
+    if m:
+        return m.group(1).strip()
+    return str(action.get("target") or "").replace("_", " ").strip()
+
+
+def tool_failed_controls(store: TraceStore) -> list[dict]:
+    """[{"control", "what"}] for each control the executor could not use, once each."""
+    actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
+    out, seen = [], set()
+    for k, detail in sorted(tool_failed_actions(store).items()):
+        control = _action_control(actions[k]) if k < len(actions) else ""
+        if control and control not in seen:
+            seen.add(control)
+            out.append({"control": control, "what": detail})
+    return out
+
+
+def last_executed_control(store: TraceStore) -> dict:
+    """{"step", "control", "target", "description"} of the participant's last action,
+    {} when there is none or the harness chose it (it names no control of theirs)."""
+    actions = store.read_action_trace() or []
+    if not actions or injected_kind(actions[-1]):
+        return {}
+    last = _parse_action(actions[-1])
+    return {"step": len(actions) - 1, "control": _action_control(last),
+            "target": str(last.get("target") or ""), "description": str(last.get("description") or "")}
+
+
+def _stems4(text: str) -> set[str]:
+    return {w[:4] for w in re.findall(r"[a-ząćęłńóśźż]{4,}", str(text or "").lower())}
+
+
+def names_last_executed_control(store: TraceStore, text: str) -> bool:
+    """Does this text speak of the control of the participant's last action?
+
+    By the label its description quotes, or by two stems of its parser id
+    ("wyszukaj_sklep" -> wysz, skle): the persona's own words rarely repeat the id."""
+    last = last_executed_control(store)
+    if not last:
+        return False
+    low = str(text or "").lower()
+    label = last["control"].lower()
+    if len(label) >= 4 and label in low:
+        return True
+    return len(_stems4(last["target"]) & _stems4(low)) >= 2
+
+
 def harness_suspect_steps(store: TraceStore, progress_runs: bool = True) -> set[int]:
     """Step indices whose action is a harness interaction failure.
 
@@ -229,14 +358,10 @@ def harness_suspect_causes(store: TraceStore, progress_runs: bool = True) -> dic
     # This is the strongest harness-vs-site signal in the run and it was written
     # to disk every session while nothing read it. It is what turned pepco.pl's
     # consent overlay into "critical site defects".
-    for i, obs in enumerate(store.read_observations() or []):
-        if not isinstance(obs, dict):
-            continue
-        err = str(obs.get("error") or "")
-        if any(m in err.lower() for m in _EXECUTOR_ERROR_MARKERS):
-            detail = _executor_error_detail(err)
-            mark(i - 1, "executor_error", detail)
-            mark(i, "executor_error", detail)
+    for i, err in _observation_errors(store):
+        detail = _executor_error_detail(err)
+        mark(i - 1, "executor_error", detail)
+        mark(i, "executor_error", detail)
 
     # A consent notice was on screen and would not go away, so every
     # interaction from that point may have been intercepted by the overlay.
@@ -329,6 +454,39 @@ _ACTION_CLAIM = re.compile(
     r"zmieni(?:ł|ła|ło|ły|ć)\b|przeni(?:ós|es)|cofa|resetu|(?<![a-ząćęłńóśźż])wraca|nieaktywn|zablokowa|"
     r"nie\s+(?:reaguj|działa|zmieni|aktualizu)",
     re.I)
+
+# "No feedback came": the claim an action's unseen result invites, whatever verb it uses.
+_NO_FEEDBACK_CLAIM = re.compile(r"brak\s+(?:informacji\s+zwrotnej|komunikatu|reakcji)|nie\s+pojawi", re.I)
+
+
+def _claims_result_of_last_action(finding: dict, unseen_step: int) -> bool:
+    """Is this finding about what the action before `unseen_step` produced?
+
+    By its verbs (clicked, did not respond), by the absence of feedback it reports, or
+    by citing the unseen step itself ("w obserwacji kroku 27"). A claim about what the
+    page showed one step earlier is none of these and stays."""
+    text = " ".join(str(finding.get(k) or "") for k in ("evidence", "description", "issue"))
+    return bool(_ACTION_CLAIM.search(text) or _NO_FEEDBACK_CLAIM.search(text)
+                or re.search(rf"\bkro\w*\s+{unseen_step}\b", text, re.I))
+
+
+def _outcome_unseen_cause(finding: dict, unseen: list[int], actions: list) -> dict | None:
+    """Why this finding rests on a page nobody read, or None.
+
+    Held when it cites a step the participant never perceived (nothing was read there,
+    so no quote can support it), or the step before one and claims what the action
+    there did. Per claim, not per step: a remark on the page the participant did read
+    stays confirmed."""
+    try:
+        step = int(finding.get("step"))
+    except (TypeError, ValueError):
+        return None
+    for i in unseen:
+        if step == i or (step == i - 1 and _claims_result_of_last_action(finding, i)):
+            ran = _parse_action(actions[i - 1]) if 0 < i <= len(actions) else {}
+            return {"code": "outcome_unseen", "detail": _action_control(ran), "step": i,
+                    "action": ran.get("action")}
+    return None
 
 
 def _finding_quotes(finding: dict) -> list[str]:
@@ -784,7 +942,9 @@ def _cause_of(f: dict, causes: dict, suspected: bool, control, misquoted) -> dic
 def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     """Stamp each finding with `harness_suspect` / `requires_human_check` when it
     is attributable to a harness interaction failure — either its cited step
-    lands on one, or its evidence text names an element that was stuck in one.
+    lands on one, or its evidence text names an element that was stuck in one —
+    or when its claim is about the result of an action whose page the participant
+    never read (outcome_unseen).
     Returns the same list (findings mutated in place); non-dicts pass through."""
     causes = harness_suspect_causes(store)
     suspect = set(causes)
@@ -809,6 +969,10 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     if progress:
         strict = harness_suspect_steps(store, progress_runs=False)
         strict_targets = _suspect_targets(store, strict)
+    # Pages captured and never read: a session cut inside the participant's own
+    # perceive/plan call. What its last action did is not something anyone observed.
+    unseen = unperceived_steps(store)
+    actions = [_parse_action(a) for a in (store.read_action_trace() or [])] if unseen else []
 
     def _is_suspect(f: dict, suspect=suspect, targets=targets) -> bool:
         step = f.get("step")
@@ -836,7 +1000,8 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
             continue
         control = _unresponsive_control(f, retried)
         misquoted = quoted_only_in_observation(f, page_text, observation_text)
-        suspected = _is_suspect(f) or control is not None or bool(misquoted)
+        unseen_cause = _outcome_unseen_cause(f, unseen, actions) if unseen else None
+        suspected = _is_suspect(f) or control is not None or bool(misquoted) or unseen_cause is not None
         # Named so the report can say exactly what a person should click.
         f["unresponsive_control"] = control
         # And which quoted words to look for on the page.
@@ -849,10 +1014,12 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
             if re.search(rf"(?<!\w){re.escape(n)}(?!\w)", text_low)] or None
         # Why, as far as the trace says: the signature that marked the cited
         # step, or what matched the finding's text. None when it is not suspect.
-        f["harness_cause"] = _cause_of(f, causes, suspected, control, misquoted) if suspected else None
+        # The unseen page comes first: it is about this claim, the step-wide signals are not.
+        f["harness_cause"] = (unseen_cause or _cause_of(f, causes, suspected, control, misquoted)
+                              if suspected else None)
         # The control whose repeated clicks worked, when that is the only reason.
         f["repeated_with_progress"] = None
-        if suspected and progress and control is None and not misquoted \
+        if suspected and progress and control is None and not misquoted and unseen_cause is None \
                 and not _is_suspect(f, strict, strict_targets):
             try:
                 f["repeated_with_progress"] = progress.get(int(f.get("step")))

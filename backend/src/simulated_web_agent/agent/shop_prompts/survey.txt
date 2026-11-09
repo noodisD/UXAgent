@@ -52,6 +52,10 @@ session actually ended (steps_taken, max_steps, ended_reason).
 - For multiple_choice questions about aspects I never reached, I pick the
   most neutral available option and state in the reason that my session
   was too short to judge.
+- If ended_reason is "error", my tool crashed right after my last action. I
+  do not know what that action produced: I do not say it failed and I do not
+  say it worked, and I do not count the crash against the website. A SESSION
+  END NOTE, when present, names that action.
 
 How I use my memories
 

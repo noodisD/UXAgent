@@ -4,6 +4,7 @@ from typing import Any
 
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
+from .attribution import session_end_note
 from .site_scope import site_context_for
 from .trace_store import TraceStore
 
@@ -80,6 +81,11 @@ async def run_survey(
         if session
         else ""
     )
+    # A session cut right after an action leaves that action as the last memory,
+    # and the model answers as if it had failed.
+    end_note = session_end_note(store)
+    if end_note:
+        session_block += f"SESSION END NOTE: {end_note}\n"
 
     request = [
         {"role": "system", "content": survey_prompt},

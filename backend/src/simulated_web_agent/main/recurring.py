@@ -19,8 +19,11 @@ import json
 import logging
 import re
 
+from .attribution import injected_back_steps, tool_failed_actions, unperceived_steps
+from .loop_phrases import KIND_REFUSED
 from .redaction import clean_narrative
 from .textutil import clip_words
+from .trace_store import parse_action
 
 log = logging.getLogger(__name__)
 
@@ -74,11 +77,26 @@ def _actions_with_failures(store) -> list[tuple[dict, bool]]:
 
 
 def route_summary(store, last: int = 14) -> list[str]:
-    """The participant's last steps, each marked when its click failed (for the aggregate prompt)."""
+    """The participant's last steps, each marked when the tool failed it, when the harness
+    went back in their place, and when its result was never seen (for the aggregate prompt)."""
+    try:
+        raw_actions = store.read_action_trace() or []
+        failed = tool_failed_actions(store)
+        injected = injected_back_steps(store)
+        unseen = set(unperceived_steps(store))
+    except Exception:
+        return []
     out = []
-    for k, (a, failed) in enumerate(_actions_with_failures(store)):
-        what = str(a.get("description") or f"{a.get('action', '')} {a.get('target', '')}").strip()
-        out.append(f"{k}: {what[:90]}{' (nieudane)' if failed else ''}")
+    for k, raw in enumerate(raw_actions):
+        a = parse_action(raw)
+        if k in injected:
+            # Not their choice, and its own sentence ("ta metoda nie działała") reads as theirs.
+            what = ("[cofnięcie wynikające z reguł badania]" if injected[k] == KIND_REFUSED
+                    else "[cofnięcie wymuszone przez narzędzie]")
+        else:
+            what = str(a.get("description") or f"{a.get('action', '')} {a.get('target', '')}").strip()[:90]
+        marks = [m for m, on in ((" (nieudane)", k in failed), (" (wynik nieznany)", k + 1 in unseen)) if on]
+        out.append(f"{k}: {what}{''.join(marks)}")
     return out[-last:]
 
 

@@ -117,3 +117,73 @@ def test_observed_agrees_with_declared_no_disagreement(tmp_path):
     assert eff["outcome_source"] == "observed"
     assert eff["observed_outcome"] == "partial"
     assert eff["disagreement"] is False
+
+
+# --- the participant's own route: pages opened, distinct, reopened -----------------------------
+
+def _browsed(tmp_path, steps, landing="https://x.pl/", cut=False):
+    """steps: [(action, url the page is at afterwards)].
+
+    A session that ended on its own records one observation per action (the page after
+    the last one is never captured) and says so with a final terminate; a cut one has
+    the page after its last action, recorded and never read."""
+    s = TraceStore(tmp_path / "route")
+    actions = [a for a, _ in steps] + ([] if cut else [{"action": "terminate"}])
+    s.write_action_trace([json.dumps(a) for a in actions])
+    urls = [landing] + [u for _, u in steps]
+    for i, url in enumerate(urls):
+        s.append_observation({"tabs": [{"url": url, "is_active": True}], "error": None})
+        if not cut or i < len(steps):
+            s.write_observation_step_text(i, f"Strona {i}")
+    return s
+
+
+def _click(target="x"):
+    return {"action": "click", "target": target, "description": f"Clicking {target}"}
+
+
+# A results list and the same products, opened again and again: the shape of the
+# 2026-07-09 pepco.pl session whose H6/H7 findings called it the site's inefficient comparison.
+ALTERNATING = [
+    ({"action": "type", "target": "q", "text": "poduszki", "enter": True}, "https://x.pl/search?q=poduszki"),
+    (_click("a"), "https://x.pl/p/a"), ({"action": "back"}, "https://x.pl/search?q=poduszki"),
+    (_click("a"), "https://x.pl/p/a?ref=list"), ({"action": "back"}, "https://x.pl/search?q=poduszki"),
+    (_click("b"), "https://x.pl/p/b"), ({"action": "back"}, "https://x.pl/search?q=poduszki"),
+    (_click("a"), "https://x.pl/p/a"),
+]
+
+
+def test_efficiency_counts_page_views_distinct_pages_and_revisits(tmp_path):
+    eff = compute_iso_metrics(_browsed(tmp_path, ALTERNATING))["efficiency"]
+    # the landing page and three openings of /p/a and one of /p/b; the query string is not a page
+    assert eff["page_views"] == 5 and eff["distinct_pages"] == 3 and eff["revisits"] == 2
+    assert eff["reopened_pages"] == [{"page": "x.pl/p/a", "times": 3}]
+
+
+def test_a_route_without_repeats_has_none(tmp_path):
+    steps = [(_click("a"), "https://x.pl/a"), (_click("b"), "https://x.pl/b"),
+             ({"action": "goto_url", "url": "https://x.pl/c"}, "https://x.pl/c")]
+    eff = compute_iso_metrics(_browsed(tmp_path, steps))["efficiency"]
+    assert (eff["page_views"], eff["distinct_pages"], eff["revisits"]) == (4, 4, 0)
+    assert eff["reopened_pages"] == []
+
+
+def test_a_click_that_leaves_the_page_where_it_was_is_not_a_view(tmp_path):
+    steps = [(_click("menu"), "https://x.pl/"), (_click("failed"), "https://x.pl/")]
+    assert compute_iso_metrics(_browsed(tmp_path, steps))["efficiency"]["page_views"] == 1
+
+
+def test_injected_steps_are_not_views(tmp_path):
+    from simulated_web_agent.main.loop_phrases import KIND_LOOP_BREAKER, injected_action
+    forced = injected_action(KIND_LOOP_BREAKER, _click("a"))
+    steps = [(_click("a"), "https://x.pl/a"), (forced, "https://x.pl/"),
+             # a click written by the harness: whatever it opened was not the participant's choice
+             ({**_click("a"), "harness": KIND_LOOP_BREAKER}, "https://x.pl/a")]
+    eff = compute_iso_metrics(_browsed(tmp_path, steps))["efficiency"]
+    assert (eff["page_views"], eff["distinct_pages"], eff["revisits"]) == (2, 2, 0)
+
+
+def test_a_page_captured_when_the_session_was_cut_is_not_a_view(tmp_path):
+    steps = [(_click("a"), "https://x.pl/a"), (_click("b"), "https://x.pl/b")]
+    # the page after the last click was recorded and never read
+    assert compute_iso_metrics(_browsed(tmp_path, steps, cut=True))["efficiency"]["page_views"] == 2

@@ -19,10 +19,15 @@ from typing import Any
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .a11y_checks import extract_a11y_candidates, extract_generic_name_findings
-from .attribution import flag_harness_suspects, session_blocked_by_bot_wall
+from .attribution import (
+    flag_harness_suspects, session_blocked_by_bot_wall, session_end_note, tool_failed_actions,
+    unperceived_steps,
+)
 from .claim_verifier import persona_disposition, run_claim_verification
 from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
+from .iso_metrics import page_view_stats
+from .loop_phrases import injected_kind, intended_action, is_tool_trouble_injection
 from .premise_check import ensure_premise_check
 from .site_scope import flag_off_site, site_context_for, target_url_for
 from .trace_store import TraceStore, parse_action
@@ -178,6 +183,53 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
     return findings
 
 
+# What the auditor is told about an action the tool did not do the way the participant
+# chose. Kept clear of the words the deterministic gates read as a claim about the
+# site (attribution._ABSENCE_MARKERS, claim_verifier._BROKEN_MARKERS): a model that
+# copies the marker into a finding must not be handing them a defect to match.
+_TOOL_FAILED_MARKER = ("[AUTOMATION ERROR: the tool could not carry out this action - "
+                       "it says nothing about the site]")
+
+
+def _action_line(action: dict, tool_failed: bool) -> str:
+    """One action as the heuristic pass reads it.
+
+    A back the harness put in place of the participant's choice is not an attempt,
+    not the participant's words and not evidence about the site: its own sentence
+    ("this method did not work, I go back") was read as all three, and one finding
+    listed three of them as the participant's typing attempts. The refusal is told
+    apart from the tool's trouble: it is the study's own rule, not a failure."""
+    kind = injected_kind(action)
+    if kind:
+        chosen = str((intended_action(action) or {}).get("description") or "").strip()
+        chosen = f' ("{chosen[:160]}")' if chosen else ""
+        if is_tool_trouble_injection(action):
+            return (f"[HARNESS-INJECTED BACK: the tool went back here after repeated tool failures "
+                    f"on the action the participant chose{chosen}. The participant did not choose "
+                    "this back: it is not an attempt, not their words and not evidence about the site]")
+        return (f"[HARNESS-INJECTED BACK: the study's own rules closed the path the participant "
+                f"chose{chosen}. The participant did not choose this back: it is a policy of the "
+                "study, not a tool failure and not evidence about the site]")
+    line = str(action.get("description", json.dumps(action)))
+    return f"{line} {_TOOL_FAILED_MARKER}" if tool_failed else line
+
+
+def _session_facts(store: TraceStore) -> str:
+    """What the trace measures about the participant's route, for the heuristic prompt."""
+    if not store.read_action_trace():
+        return "(no pages were opened)"
+    stats = page_view_stats(store)
+    lines =[f"- The participant opened {stats['page_views']} pages by clicking or following a "
+             f"link, {stats['distinct_pages']} of them distinct."]
+    reopened = stats["reopened_pages"]
+    if reopened:
+        lines.append("- Pages the participant chose to open more than once: "
+                     + "; ".join(f"{r['page']} ({r['times']} times)" for r in reopened) + ".")
+    else:
+        lines.append("- No page was opened more than once.")
+    return "\n".join(lines)
+
+
 async def _heuristic_pass(store: TraceStore) -> tuple[list, str | None]:
     """The heuristic findings, and why the pass failed if it did.
 
@@ -193,17 +245,26 @@ async def _heuristic_pass(store: TraceStore) -> tuple[list, str | None]:
     # Step-indexed session context so the LLM can cite verifiable steps/URLs.
     # Without the [step N] markers, claimed step/url values were guesses.
     n_steps = len(store.read_observations())
+    # A page captured when the session was cut is not a line to cite: nobody read
+    # it, and an empty line invites "the page was empty".
+    unread = set(unperceived_steps(store))
     observations = []
     for i in range(n_steps):
+        if i in unread:
+            continue
         text = store.read_observation_step_text(i).strip().replace("\n", " ")[:400]
         url = store.url_at_step(i)
         observations.append(f"[step {i}] {url} :: {text}")
 
+    tool_failed = tool_failed_actions(store)
     actions = []
     for i, raw in enumerate(action_trace):
         a = parse_action(raw)
         if a:
-            actions.append(f"[step {i}] {a.get('description', json.dumps(a))}")
+            actions.append(f"[step {i}] {_action_line(a, i in tool_failed)}")
+    end_note = session_end_note(store)
+    if end_note:
+        actions.append(end_note)
 
     if not observations and not reflections and not actions:
         log.warning("[auditor] No memory data found in %s", store.trace_dir)
@@ -212,6 +273,7 @@ async def _heuristic_pass(store: TraceStore) -> tuple[list, str | None]:
     prompt = _prompts.get("heuristic_evaluate").format(
         site_context=site_context_for(store),
         persona_disposition=persona_disposition(store),
+        session_facts=_session_facts(store),
         observations="\n".join(f"- {o}" for o in observations) or "(none)",
         reflections="\n".join(f"- {r}" for r in reflections) or "(none)",
         actions="\n".join(f"- {a}" for a in actions) or "(none)",

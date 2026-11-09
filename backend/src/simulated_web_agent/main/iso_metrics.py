@@ -27,11 +27,15 @@ checked; only the abstain path still rests on the LLM, and it says so.
 """
 from __future__ import annotations
 
-from .attribution import _FALLBACK_MARKERS, harness_suspect_steps
+from collections import Counter
+
+from .attribution import _FALLBACK_MARKERS, harness_suspect_steps, unperceived_steps
+from .loop_phrases import is_injected
 from .trace_store import parse_action as _parse_action
 from .session_goal_state import observed_outcome
 from .site_scope import target_url_for
 from .sus import polarity
+from .textutil import view_key
 from .trace_store import TraceStore
 
 # Declared outcomes the LLM may emit — used only to detect observed/declared
@@ -105,6 +109,42 @@ def _has_stuck_run(actions: list, length: int = 3) -> bool:
         if run >= length:
             return True
     return False
+
+
+def page_view_stats(store: TraceStore, actions: list | None = None) -> dict:
+    """The pages the participant opened by their own clicks and typed addresses.
+
+    page_views counts the landing page and each arrival on a different page after a
+    click or a goto_url; distinct_pages those pages by view_key (host, path, route:
+    not the query); revisits the arrivals on a page already seen. A back is not an
+    opening, a harness back is not the participant's, and a page captured after the
+    session was cut was never read. `reopened_pages` lists the pages opened more
+    than once, most often first.
+
+    Why it is measured: Filip alternated between a results list and the same few
+    products, and the audit filed that as the site's inefficient comparison. That
+    is the participant's route, and the count says so.
+    """
+    if actions is None:
+        actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
+    keys = [view_key(u) for u in store.step_urls()]
+    unread = set(unperceived_steps(store))
+    views = [keys[0]] if keys and keys[0] else []
+    for k, a in enumerate(actions):
+        if k + 1 >= len(keys) or k + 1 in unread:
+            break
+        if a.get("action") not in ("click", "goto_url") or is_injected(a):
+            continue
+        before, after = keys[k], keys[k + 1]
+        if before and after and before != after:
+            views.append(after)
+    counts = Counter(views)
+    return {
+        "page_views": len(views),
+        "distinct_pages": len(counts),
+        "revisits": len(views) - len(counts),
+        "reopened_pages": [{"page": page, "times": n} for page, n in counts.most_common(3) if n > 1],
+    }
 
 
 def compute_iso_metrics(store: TraceStore, q_meta: list | None = None) -> dict:
@@ -198,6 +238,8 @@ def compute_iso_metrics(store: TraceStore, q_meta: list | None = None) -> dict:
             "loop_detected": loop_detected,
             "reached_step_limit": bool(reached_step_limit),
             "optimal_path_delta": None,  # requires a declared optimal path per task
+            # Pages the participant opened, distinct ones, and arrivals on a page seen before.
+            **page_view_stats(store, actions),
         },
         "satisfaction": {
             "source": "synthetic_self_report",

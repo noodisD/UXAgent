@@ -90,7 +90,16 @@ usability problems is a false positive (real site teams reject them):
   out", a repeated attempt that "had no effect". These are this tool's own
   interaction failures. A real user with a mouse would not have hit them, so
   they say nothing about the site and must never become a finding — whatever the
-  session reflections say about them.
+  session reflections say about them. An ACTIONS line marked "AUTOMATION ERROR" is
+  exactly that class. A line marked "HARNESS-INJECTED BACK" is the study's own
+  intervention, not something the participant did: it is not an attempt, not their
+  words and not evidence about the site, so count attempts only from unmarked lines.
+  A last ACTIONS line saying the session was cut ("Sesja urwała się") means nobody
+  saw what the final action produced: make no claim about its result.
+- A claim that browsing or comparing is inefficient whose only evidence is the
+  participant reopening pages they had already seen (see the session facts below). It
+  describes the participant's own route, not the site; report it only with a cause on
+  the site's side that is visible in the observation text.
 - A complaint that follows from the persona's own preference ("I prefer physical
   shops", "I rarely buy online", "I like to see things in person"). It describes
   the person, not the site.
@@ -113,6 +122,9 @@ The reflections below are written in this persona's voice. What the persona pref
 or avoids says something about the person, never about the site.
 
 ## Session data
+
+SESSION FACTS (measured from the trace, not opinion):
+{session_facts}
 
 OBSERVATIONS:
 {observations}
