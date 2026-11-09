@@ -306,6 +306,14 @@ _OFF_LADDER_MARKERS = ("skonfigur", "konfigur")
 _SUMMARY_NEEDS_CONTEXT = ("koszyk", "cart", "dodaj do", "zamówieni", "zamowieni",
                           "do kasy", "checkout")
 
+# "Znajdź i kup lampkę" asks for a purchase, not for a product page: the verb
+# "znajd" alone set the target at product_viewed, so a persona who only opened the
+# product page was measured a success. Whole word and imperative only. As a stem
+# "kup" also matches kupon and kupno, and the infinitive is as often the persona's
+# motive ("Chcesz kupić prezent. Porównaj ceny…") as the task. "zamów" is left out:
+# "zamów rozmowę" is no cart, and an abstaining target keeps the declared outcome.
+_BUY_IMPERATIVE_RE = re.compile(r"(?<!\w)kup(?!\w)")
+
 
 def infer_target_rung(intent: str) -> str | None:
     """Deterministic: the highest ladder rung the intent asks for, or None
@@ -320,6 +328,8 @@ def infer_target_rung(intent: str) -> str | None:
         if (rung == "order_summary_reached"
                 and has_marker(text, ("podsumowani",))
                 and has_marker(text, _SUMMARY_NEEDS_CONTEXT)):
+            return rung
+        if rung == "cart_has_items" and _BUY_IMPERATIVE_RE.search(text):
             return rung
     return None
 

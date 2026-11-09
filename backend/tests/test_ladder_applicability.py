@@ -214,6 +214,38 @@ def test_a_siblings_add_to_cart_toast_makes_the_ladder_apply_to_the_rest(tmp_pat
     assert effective_outcome(searcher) == ("failed", "observed")
 
 
+# --- "kup" is a purchase, not a product page ----------------------------------
+
+PEPCO_BUY_GOAL = "Znajdź i kup lampkę stołową do sypialni."
+
+
+@pytest.mark.parametrize("intent, target", [
+    (PEPCO_BUY_GOAL, "cart_has_items"),
+    ("Kup lampkę.", "cart_has_items"),
+    ("Znajdź kupon rabatowy.", "product_viewed"),
+    ("Chcesz kupić prezent. Znajdź i porównaj ceny dwóch produktów.", "product_viewed"),
+    ("Zamów rozmowę z doradcą.", None),
+])
+def test_only_the_imperative_kup_asks_for_a_purchase(intent, target):
+    assert infer_target_rung(intent) == target
+
+
+def test_opening_a_product_page_is_not_buying_it(tmp_path):
+    """pepco.pl: 'Znajdź i kup…' inferred product_viewed through 'znajd', so a persona
+    who only opened the product page was measured a success over a task it failed."""
+    run_dir = _run(tmp_path, PEPCO_URL)
+    page = [PEPCO_URL + "/", PEPCO_URL + "/products/lampka-123?Colour=Cream"]
+    viewer = _persona(run_dir, "viewer", page, PEPCO_BUY_GOAL, "failed")
+    buyer = _persona(run_dir, "buyer", page, PEPCO_BUY_GOAL,
+                     texts=["strona", "Dodano do koszyka!"])
+
+    oo = observed_outcome(viewer, PEPCO_URL)
+    assert oo["target_rung"] == "cart_has_items" and oo["reached_rung"] == "product_viewed"
+    assert oo["outcome"] == "failed"
+    assert effective_outcome(viewer) == ("failed", "observed")
+    assert effective_outcome(buyer) == ("success", "observed")
+
+
 # --- and the report says why, when nothing was measured -----------------------
 
 def test_the_report_does_not_call_a_stopped_shop_an_unassessable_task():
