@@ -61,6 +61,8 @@
               <div class="score-label mono">{{ s.label }}</div>
               <div class="score-val mono" :style="{ color: s.color }">{{ s.value }}<span class="unit">{{ s.unit }}</span></div>
               <div class="score-sub">{{ s.sub }}</div>
+              <div v-if="s.devices" class="score-sub fi-devices">{{ s.devices }}</div>
+              <div v-if="s.flag" class="score-sub fi-flag">{{ s.flag }}</div>
             </div>
           </div>
 
@@ -489,6 +491,21 @@ function exclusionOf(h: any): 'offSite' | 'unsupported' | 'harness' | 'progress'
   return null
 }
 const avgFI = computed(() => mean(personas.value.map(fiAvg).filter((v): v is number => v !== null)))
+// The report's own split (results_api firstImpressionByDevice): the mean above blends
+// two different first screens, so the card also says which device each number is about
+// ("komputer 3,07 (n=3) · telefon 1,47 (n=3)"), and flags a gap of a point or more.
+const fiDevices = computed(() => {
+  const fi = data.value?.firstImpressionByDevice
+  if (!fi) return null
+  const parts = Object.entries(fi.devices ?? {})
+    .filter(([, v]) => typeof v.avg === 'number')
+    .map(([name, v]) => {
+      const key = 'ov.card.fi.device.' + name
+      const label = t(key)
+      return `${label === key ? name : label} ${(v.avg as number).toFixed(2).replace('.', ',')}${typeof v.n === 'number' ? ` (n=${v.n})` : ''}`
+    })
+  return parts.length >= 2 ? { line: parts.join(' · '), flag: fi.deviceDependent ? t('ov.card.fi.deviceDependent') : '' } : null
+})
 const avgA11y = computed(() => mean(personas.value.map(p => p.accessibility.score).filter((v): v is number => typeof v === 'number')))
 
 // The report's own counts when there is a report (results_api._report_issue_counts):
@@ -516,7 +533,8 @@ const psColor = computed(() => psPerf.value !== null ? pageSpeedColor(psPerf.val
 const scoreCards = computed(() => [
   { label: t('ov.card.success'), value: `${succ.value}/${n.value}`, unit: '', sub: t('ov.card.success.sub', { part: part.value, fail: fail.value }),
     color: succ.value === n.value ? '#1f9d57' : fail.value > 0 ? '#d83a34' : '#cf8420' },
-  { label: t('ov.card.firstImpression'), value: avgFI.value === null ? '—' : avgFI.value.toFixed(2).replace('.', ','), unit: avgFI.value === null ? '' : '/5', sub: t('ov.card.fi.sub'), color: avgFI.value === null ? '#aeb4bd' : scoreColor(avgFI.value) },
+  { label: t('ov.card.firstImpression'), value: avgFI.value === null ? '—' : avgFI.value.toFixed(2).replace('.', ','), unit: avgFI.value === null ? '' : '/5', sub: t('ov.card.fi.sub'), color: avgFI.value === null ? '#aeb4bd' : scoreColor(avgFI.value),
+    devices: fiDevices.value?.line ?? '', flag: fiDevices.value?.flag ?? '' },
   { label: t('ov.card.accessibility'), value: avgA11y.value === null ? '—' : avgA11y.value.toFixed(2).replace('.', ','), unit: avgA11y.value === null ? '' : '/5', sub: t('ov.card.a11y.sub'), color: avgA11y.value === null ? '#aeb4bd' : scoreColor(avgA11y.value) },
   { label: t('ov.card.findings'), value: String(counts.value.total), unit: '',
     sub: counts.value.held ? t('ov.card.findings.held', { crit: counts.value.critical, held: counts.value.held }) : t('ov.card.findings.sub', { crit: counts.value.critical }),
@@ -807,6 +825,7 @@ function openPersona(i: number) { selPersona.value = i; tab.value = 'personas' }
 .score-val { font: 700 30px var(--mono); letter-spacing: -.02em; }
 .unit { font-size: 15px; color: var(--faint); font-weight: 500; }
 .score-sub { font-size: 12px; color: var(--muted-2); margin-top: 6px; }
+.fi-flag { color: var(--warn-text); font-weight: 600; }
 
 .grid-13 { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; }
 .r13 .sev-head { display: flex; justify-content: space-between; margin-bottom: 6px; }

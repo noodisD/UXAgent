@@ -379,6 +379,19 @@ export type RunSurvey = {
   sus?: SusSummary | null
 }
 
+/** The first-impression average of each device, as the report prints it
+ *  (results_api._first_impression_by_device). null/absent unless the run used two
+ *  devices, and for a backend that predates the split. */
+export type FirstImpressionByDevice = {
+  /** The report's own Polish line, flag included. */
+  text: string
+  devices: Record<string, { avg: number | null; n: number | null }>
+  gap: number | null
+  /** The two averages are a point or more apart: the blended mean is no device's. */
+  deviceDependent: boolean
+  flag: string | null
+}
+
 export type RunDetail = {
   meta: RunMeta
   personas: PersonaResult[]
@@ -392,6 +405,7 @@ export type RunDetail = {
   /** The issue counts the report itself prints, and how many it holds for a
    *  human (results_api._report_issue_counts). null when there is no report. */
   issueCounts?: { critical: number; serious: number; minor: number; total: number; needs_verification: number } | null
+  firstImpressionByDevice?: FirstImpressionByDevice | null
 }
 
 export type RunHistoryRow = {
