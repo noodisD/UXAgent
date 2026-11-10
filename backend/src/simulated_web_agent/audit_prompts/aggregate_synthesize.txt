@@ -16,6 +16,9 @@ zakładało taką funkcję, napisz w executive_summary wprost, że to granica za
 między oczekiwaniem a ofertą (rekomendacja biznesowa, najwyżej „drobny"), a nie porażka
 uczestników; mów o tym, czego sesje nie znalazły, nie jako o pewniku o serwisie, chyba że serwis
 sam to deklaruje. Wynik ukończenia dotyczy wtedy części zadania, którą dało się wykonać.
+Wyjątek: jeśli taka linia mówi, że serwis sam tego nie potwierdza, to nie jest to ustalona granica
+serwisu, tylko to, czego sesje nie znalazły — napisz to tak, a konkretną usterkę, którą widać (np.
+lokalizator, który się nie ładuje), zgłoś jak każdą inną.
 
 ANALYTICS CONTEXT (real user behavioral data — GA4 / Clarity / Hotjar etc.):
 {analytics_context}

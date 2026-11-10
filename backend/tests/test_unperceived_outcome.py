@@ -67,6 +67,23 @@ def test_the_filip_shape_has_one_unperceived_step(tmp_path):
     assert attribution.unperceived_steps(_filip(tmp_path)) == [27]
 
 
+def test_the_action_whose_result_nobody_saw_is_the_participants_never_the_harnesss(tmp_path):
+    from simulated_web_agent.main.loop_phrases import (
+        FORCED_BACK_METHOD, KIND_LOOP_BREAKER, injected_action)
+    store = _filip(tmp_path)
+    assert attribution.unseen_last_action(store) == WYSZUKAJ
+    actions = store.read_action_trace()
+    # The session was cut right after a back the loop-breaker ran: its sentence is ours, not
+    # the participant's method, and the reflection must not be handed it as one.
+    actions[-1] = injected_action(KIND_LOOP_BREAKER, json.loads(actions[-1]))
+    store.write_action_trace(actions)
+    assert attribution.unseen_last_action(store) == WYSZUKAJ
+    # a trace from before the harness kept the choice has only the sentence: nothing to name
+    actions[-1] = json.dumps({"action": "back", "description": FORCED_BACK_METHOD})
+    store.write_action_trace(actions)
+    assert attribution.unseen_last_action(store) is None
+
+
 def test_a_clean_session_has_no_unperceived_steps(tmp_path):
     store = TraceStore(tmp_path / "clean")
     store.write_action_trace([json.dumps({"action": "click", "target": "a"})] * 2)
@@ -128,12 +145,34 @@ def test_the_filip_finding_about_wyszukaj_sklep_is_held_as_outcome_unseen(tmp_pa
     "Po wpisaniu miasta nie pojawia się lista sklepów (krok 27).",
     # no verb and no absence phrase: only the citation of the page nobody read
     "W obserwacji kroku 27 lokalizator sklepów nie zawiera listy placówek.",
+    "Po naciśnięciu przycisku lista sklepów nie zaktualizowała się.",
+    "Po wybraniu rozmiaru cena nie zmieniła się.",
+    "Przycisk Wyszukaj sklep nie zareagował na dotknięcie.",
+    "Przycisk Wyszukaj sklep nie reaguje.",
 ])
 def test_a_claim_about_what_the_last_action_did_is_held(tmp_path, claim):
     store = _filip(tmp_path)
     findings = [_finding(26, claim)]
     attribution.flag_harness_suspects(store, findings)
     assert findings[0]["harness_cause"]["code"] == "outcome_unseen"
+
+
+@pytest.mark.parametrize("remark", [
+    # verbs of the broad pattern, in remarks about how the page the participant did read looks
+    "Przycisk Wyszukaj sklep ma bardzo mały obszar kliknięcia i niski kontrast na stronie produktu.",
+    "Filtr rozmiaru jest nieaktywny wizualnie - nie wygląda na klikalny.",
+    "Przycisk Dodaj do koszyka jest częściowo zablokowany przez baner cookies.",
+    "Brak widocznego przycisku cofania do listy produktów.",
+    "Zbyt szybkie tempo kliknięcia w karuzeli utrudnia czytanie, a strzałki są małe.",
+])
+def test_a_remark_about_how_the_last_read_page_looks_is_not_held(tmp_path, remark):
+    """Words like 'klikn' or 'nieaktywn' describe a control; they say nothing about what
+    the click nobody saw the result of produced."""
+    store = _filip(tmp_path)
+    findings = [_finding(26, remark)]
+    attribution.flag_harness_suspects(store, findings)
+    f = findings[0]
+    assert not f["harness_suspect"] and not excluded_from_report(f) and f["harness_cause"] is None
 
 
 def test_the_same_remark_without_the_citation_is_about_the_page_that_was_read(tmp_path):

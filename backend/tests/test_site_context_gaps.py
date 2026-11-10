@@ -27,6 +27,8 @@ from tests.test_site_context_threading import (
 
 GAP = ("W 3 sesjach na 6 stronach produktów nie zaobserwowano: odbiór zamówienia w sklepie. "
        "Serwis sam zastrzega: „Oferta w sklepie może się różnić ceną”.")
+# What premise_check keeps when the site's own copy backs the gap (two pages or two people).
+SITE_SAYS = [{"persona_dir": "p0", "step": 0, "quote": "Oferta w sklepie może się różnić ceną"}]
 # The line site_context_for adds (the prompts only quote its first words, in quotation marks).
 GAP_LINE = "Zadanie zakłada funkcję „"
 PICKUP_INTENT = "Sprawdź, czy poduszka jest dostępna do odbioru w sklepie"
@@ -36,7 +38,7 @@ def _with_gap(store):
     """The run directory above `store` says the task's pickup was not found."""
     store.write_basic_info({**(store.read_basic_info() or {}), "intent": PICKUP_INTENT})
     write_premise_check(store.trace_dir.parent, {"version": 1, "premises": {
-        "pickup": {"status": "absent", "text": GAP}}})
+        "pickup": {"status": "absent", "text": GAP, "evidence": SITE_SAYS}}})
 
 
 def _heuristic_store(tmp_path, site_context=""):
@@ -176,7 +178,7 @@ async def test_the_aggregate_prompt_gets_the_default_a_declared_text_and_the_gap
 
     stores = _aggregate_run(tmp_path / "gap", "Katalog.")
     write_premise_check(tmp_path / "gap", {"version": 1, "premises": {
-        "pickup": {"status": "absent", "text": GAP}}})
+        "pickup": {"status": "absent", "text": GAP, "evidence": SITE_SAYS}}})
     agg, prompt = await _aggregate(stores)
     assert "Katalog." in prompt and GAP_LINE in prompt
     assert "Oferta w sklepie może się różnić" in prompt
@@ -186,7 +188,7 @@ async def test_the_aggregate_prompt_gets_the_default_a_declared_text_and_the_gap
     # ... and the report says it whatever the model wrote.
     assert agg["statistics"]["premise_gaps"][0]["premise"] == "pickup"
     note = resolve_narrative(agg)["methodology_note"]
-    assert "granica zakresu serwisu" in note and GAP in note
+    assert "to granica zakresu serwisu, nie wada interfejsu" in note and GAP in note
     assert resolve_narrative(agg)["methodology_note"] == note, "not appended twice"
     # The HTML and the Word file print that note, so both carry it.
     html = (tmp_path / "gap" / "aggregated_report.html").read_text(encoding="utf-8")
@@ -194,6 +196,35 @@ async def test_the_aggregate_prompt_gets_the_default_a_declared_text_and_the_gap
     docx = Document(build_docx(agg, tmp_path / "gap", tmp_path / "r.docx"))
     text = " ".join(para.text for para in docx.paragraphs)
     assert "granica zakresu serwisu" in text and "nie zaobserwowano: odbiór zamówienia w sklepie" in text
+
+
+@pytest.mark.asyncio
+async def test_a_gap_only_the_locator_backs_is_not_told_as_a_fact_about_the_site(tmp_path):
+    # No sentence of the site's own, only two sessions that found nothing at the locator: the
+    # methodology note of every renderer and the line the passes get say so, and neither
+    # forbids reporting a locator that is broken.
+    stores = _aggregate_run(tmp_path / "gap", "Katalog.")
+    write_premise_check(tmp_path / "gap", {"version": 1, "premises": {
+        "pickup": {"status": "absent", "text": GAP, "evidence": []}}})
+    agg, prompt = await _aggregate(stores)
+    note = resolve_narrative(agg)["methodology_note"]
+    assert "sesje nie znalazły w serwisie" in note and "serwis sam tego nie potwierdza" in note
+    assert "nie wada interfejsu" not in note and "nie zaobserwowały" not in note and GAP in note
+    assert resolve_narrative(agg)["methodology_note"] == note, "not appended twice"
+    assert "serwis sam tego nie potwierdza" in prompt and "Nie traktuj jej braku" not in prompt
+    html = (tmp_path / "gap" / "aggregated_report.html").read_text(encoding="utf-8")
+    assert "serwis sam tego nie potwierdza" in html and "nie wada interfejsu" not in html
+    docx = Document(build_docx(agg, tmp_path / "gap", tmp_path / "r.docx"))
+    assert "serwis sam tego nie potwierdza" in " ".join(para.text for para in docx.paragraphs)
+    # an aggregate stored before the basis was kept is told as the weaker of the two
+    agg["statistics"]["premise_gaps"] = [{"premise": "pickup", "label": "x", "text": GAP}]
+    assert "serwis sam tego nie potwierdza" in resolve_narrative(agg)["methodology_note"]
+    # both kinds at once: each says what it rests on
+    agg["statistics"]["premise_gaps"] = [
+        {"premise": "pickup", "label": "x", "text": "A.", "basis": "locator"},
+        {"premise": "store_stock", "label": "y", "text": "B.", "basis": "site"}]
+    note = resolve_narrative(agg)["methodology_note"]
+    assert "nie wada interfejsu. B." in note and "stwierdzenie o serwisie. A." in note
 
 
 @pytest.mark.asyncio

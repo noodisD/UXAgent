@@ -65,5 +65,8 @@ def test_the_prompt_says_how_to_use_the_site_context():
     assert "nie są wadami interfejsu" in PROMPT
     assert "Nie\nrekomenduj ich" in PROMPT
     assert "granica zakresu serwisu" in PROMPT
+    # ... unless the line says the site does not confirm it: then it is what the sessions
+    # did not find, and a defect that can be seen is still reported
+    assert "serwis sam tego nie potwierdza" in PROMPT
     assert "Zadanie zakłada funkcję" in PROMPT
     assert "do not assume the site is a shop" in PROMPT

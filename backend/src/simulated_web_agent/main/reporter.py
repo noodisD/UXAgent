@@ -2062,27 +2062,35 @@ def _survey_for_prompt(survey_stats: dict | None) -> dict:
     return out
 
 
-def _premise_gap_line(premise_gaps: dict | None, n: int) -> str:
+def _premise_gap_line(premise_gaps: dict | None, n: int,
+                      premise_basis: dict | None = None) -> str:
     """How many tasks asked for something the sessions did not find on the site.
 
     Said as what the sessions did not find, not as what the site lacks. The outcome
     above it speaks for the part of the task that could be done (an unreachable
     cart caps the target; pickup and store stock have no rung of their own), and
     the narrator was reading "3/3 success" as a task done in full.
+
+    "Not an interface defect" only when the site's own copy backs every gap listed
+    (`premise_basis`: premise -> "site" | "locator", from premise_check.run_gaps).
     """
     gaps = {k: v for k, v in (premise_gaps or {}).items() if v}
     if not gaps or not n:
         return ""
-    labels = [_PREMISE_LABELS[p] for p in _PREMISE_LABELS
-              if any(p in v for v in gaps.values())]
+    premises = [p for p in _PREMISE_LABELS if any(p in v for v in gaps.values())]
+    basis = premise_basis or {}
+    closing = ("nie jest to wada interfejsu." if all(basis.get(p, "site") == "site" for p in premises)
+               else "serwis sam nie potwierdza braku części tych funkcji, więc nie przesądzaj, "
+                    "czy to wada interfejsu.")
     return (f"\n- {len(gaps)}/{n} zadań zakładało funkcję, której sesje nie zaobserwowały w "
-            f"serwisie ({'; '.join(labels)}). Wynik dotyczy części zadania, którą dało się "
-            "wykonać; nie jest to wada interfejsu.")
+            f"serwisie ({'; '.join(_PREMISE_LABELS[p] for p in premises)}). Wynik dotyczy części "
+            f"zadania, którą dało się wykonać; {closing}")
 
 
 def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
                                  sources: dict | None = None, no_shop: bool = False,
-                                 premise_gaps: dict | None = None) -> str:
+                                 premise_gaps: dict | None = None,
+                                 premise_basis: dict | None = None) -> str:
     """Task-completion summary for the aggregate narrator, labelled by source.
 
     It used to open with "zmierzone z zapisu sesji … nie samoocena agenta"
@@ -2099,7 +2107,7 @@ def _format_outcome_distribution(outcomes: dict, reached_rungs: list, n: int,
     """
     if not n:
         return "Brak danych o ukończeniu zadania."
-    gap_line = _premise_gap_line(premise_gaps, n)
+    gap_line = _premise_gap_line(premise_gaps, n, premise_basis)
     src = Counter((sources or {}).values())
     observed_n, declared_n = src.get("observed", 0), src.get("declared", 0)
     c = Counter((v or "").lower() for v in outcomes.values())
@@ -2258,12 +2266,14 @@ async def generate_aggregated_report(
 
     # Measured task-completion — anchors the score to observed reality (§4.2),
     # not only synthetic self-report. Also recorded in stats for the payload.
+    run_gap_list = run_gaps(runs_dir)
     outcome_distribution = _format_outcome_distribution(
         outcomes, reached_rungs, n, outcome_sources, no_shop=no_shop,
-        premise_gaps=persona_gaps)
+        premise_gaps=persona_gaps,
+        premise_basis={g["premise"]: g["basis"] for g in run_gap_list})
     # For the methodology note of every renderer (resolve_narrative).
     stats["site_context"] = declared_context
-    stats["premise_gaps"] = run_gaps(runs_dir)
+    stats["premise_gaps"] = run_gap_list
     stats["outcomes"] = {
         "counts": dict(Counter(outcomes.values())),
         "participant_count": n,
@@ -2785,13 +2795,27 @@ def _site_context_note(narr: dict, declared) -> None:
 def _premise_note(narr: dict, gaps) -> None:
     """Say in the methodology note, whatever the model wrote, what the task
     presupposed and the sessions did not find. The HTML, the PDF, the Word file and
-    the dashboard all print that field; the model is only asked to mention it."""
-    texts = [str(g.get("text") or "") for g in gaps or [] if isinstance(g, dict)]
-    texts = [t for t in texts if t]
-    if not texts:
+    the dashboard all print that field; the model is only asked to mention it.
+
+    Said as firmly as the evidence is: only what the site's own copy states is a limit
+    of its scope. What the sessions merely did not find (a locator that showed nothing)
+    is told as that, so a broken locator is not explained away as a feature the shop
+    never had. A gap with no basis recorded is told as the weaker."""
+    firm, soft = [], []
+    for g in gaps or []:
+        if isinstance(g, dict) and g.get("text"):
+            (firm if g.get("basis") == "site" else soft).append(str(g["text"]))
+    parts = []
+    if firm:
+        parts.append("Zadanie zakładało funkcje, których sesje nie zaobserwowały w serwisie — to "
+                     "granica zakresu serwisu, nie wada interfejsu. " + " ".join(firm))
+    if soft:
+        parts.append("Zadanie zakładało funkcje, których sesje nie znalazły w serwisie — może to "
+                     "być granica zakresu serwisu, ale serwis sam tego nie potwierdza, więc to wynik "
+                     "sesji, a nie stwierdzenie o serwisie. " + " ".join(soft))
+    if not parts:
         return
-    added = ("Zadanie zakładało funkcje, których sesje nie zaobserwowały w serwisie — to "
-             "granica zakresu serwisu, nie wada interfejsu. " + " ".join(texts))
+    added = " ".join(parts)
     note = str(narr.get("methodology_note") or "")
     if added not in note:
         narr["methodology_note"] = (note + " " + added).strip()

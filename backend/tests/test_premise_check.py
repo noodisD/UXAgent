@@ -12,7 +12,10 @@ silence. These tests pin the false-positive cases as hard as the real one.
 """
 import json
 
+import pytest
+
 from simulated_web_agent.main import premise_check as pc
+from simulated_web_agent.main.attribution import unperceived_steps
 from simulated_web_agent.main.evidence import _visible_text
 from simulated_web_agent.main.iso_metrics import compute_iso_metrics, effective_outcome
 from simulated_web_agent.main.reporter import _format_outcome_distribution
@@ -64,6 +67,14 @@ def _locator(extra=""):
 def _home():
     text = "Pepco. Gazetka, Kolekcje, Dom, Dziecko. " + LOOKALIKES + " " * 200
     return (f"{PEPCO}/", text, _raw(text))
+
+
+def _checkout(extra=""):
+    # A delivery step of the order: rendered, and (without `extra`) no pickup on it.
+    text = ("Dostawa i płatność. Wybierz sposób dostawy: kurier 12 zł, paczkomat 9 zł. Podaj adres, "
+            "pod który mamy wysłać zamówienie, i numer telefonu dla kuriera. Wybierz metodę płatności: "
+            "szybki przelew, karta albo BLIK. Sprawdź podsumowanie zamówienia i zatwierdź je. " + extra)
+    return (f"{PEPCO}/checkout/delivery", text, _raw(text))
 
 
 def _run(tmp_path, sessions, intent=INTENT, manifest=True):
@@ -158,6 +169,24 @@ def test_the_result_says_what_the_sessions_did_not_find_never_what_the_site_is(t
     pc.write_premise_check(tmp_path, pc.check_stores(_pepco_like(tmp_path)))
     for line in pc.gap_context_lines(TraceStore(tmp_path / "a")):
         assert "granic" in line and "wady interfejsu" in line
+
+
+def test_a_gap_the_site_does_not_state_is_worded_as_not_found_and_may_still_be_reported(tmp_path):
+    # pickup is absent on the locator alone; the stock check is what the site's own copy
+    # says varies by store. The first must not be told to the passes as a fact about the
+    # site, nor forbid reporting a locator that is broken.
+    stores = _pepco_like(tmp_path)
+    pc.write_premise_check(tmp_path, pc.check_stores(stores))
+    assert [(g["premise"], g["basis"]) for g in pc.run_gaps(tmp_path)] == [
+        ("pickup", "locator"), ("store_stock", "site")]
+    lines = pc.gap_context_lines(TraceStore(tmp_path / "a"))
+    pickup, stock = (next(line for line in lines if f"„{pc.LABELS[p]}”" in line)
+                     for p in ("pickup", "store_stock"))
+    assert "Nie traktuj jej braku jako wady interfejsu" in stock
+    assert "opisz to jako granicę zakresu serwisu" in stock
+    assert "Nie traktuj" not in pickup and "nie zalecaj" not in pickup
+    assert "serwis sam tego nie potwierdza" in pickup and "zgłoś jak każdą inną" in pickup
+    assert "może to być granica zakresu serwisu" in pickup
 
 
 def test_lookalikes_are_not_a_cart_a_pickup_or_a_stock_check(tmp_path):
@@ -318,6 +347,220 @@ def test_a_locator_that_did_not_render_corroborates_nothing(tmp_path):
             "unknown", "no_corroboration", 0), name
 
 
+def _pickup_run(tmp_path, locator=None, a_extra=(), **product_kw):
+    """Two sessions that read five product pages (the first with `product_kw`) and went
+    to the locator: the shape in which pickup is read as absent."""
+    locator = locator or _locator()
+    return _run(tmp_path, {
+        "a": [_home(), _product(1, footer="", **product_kw), _product(2, footer=""),
+              _product(3, footer=""), *a_extra, locator],
+        "b": [_home(), _product(4, footer=""), _product(5, footer=""), locator],
+    })
+
+
+@pytest.mark.parametrize("wording", [
+    "Ładowanie mapy…",
+    "Włącz JavaScript, aby zobaczyć wyniki wyszukiwania.",
+    "This page requires JavaScript to show the stores.",
+    "JavaScript jest wyłączony w Twojej przeglądarce.",
+])
+def test_a_locator_that_only_shows_its_loading_shell_corroborates_nothing(tmp_path, wording):
+    # Long enough to pass for a page, but what it says is that the map has not loaded: a
+    # broken locator is a defect to report, not a reason to say the shop has no pickup.
+    entry = _status(_pickup_run(tmp_path, _locator(wording)), "pickup")
+    assert (entry["status"], entry["reason"], entry["locator_personas"]) == (
+        "unknown", "no_corroboration", 0)
+
+
+def test_a_locator_that_was_captured_but_never_read_corroborates_nothing(tmp_path):
+    # The session was cut right after the click that opened the locator: the page is in the
+    # trace, nobody read it, so nobody can say what it did not show.
+    stores = _pickup_run(tmp_path)
+    for store in stores:
+        last = len(store.read_observations()) - 1
+        store.write_action_trace(store.read_action_trace()[:-1])
+        store.write_observation_step_text(last, "")
+        assert unperceived_steps(store) == [last]
+    entry = _status(stores, "pickup")
+    assert (entry["status"], entry["reason"], entry["locator_personas"]) == (
+        "unknown", "no_corroboration", 0)
+
+
+# --- a shop with a cart offers pickup at its checkout --------------------------
+
+def test_pickup_is_not_absent_on_the_locator_alone_when_the_shop_has_a_cart_nobody_got_through(tmp_path):
+    # Pickup is normally chosen at the checkout, which nobody reached: the locator proves nothing.
+    stores = _pickup_run(tmp_path / "text", extra_text="Dodaj do koszyka")
+    entry = _status(stores, "pickup")
+    assert (entry["status"], entry["reason"], entry["locator_personas"]) == (
+        "unknown", "checkout_not_seen", 2)
+    # the cart link the perceiver dropped counts too
+    cart = '<a aria-label="Koszyk, liczba produktów: 0" href="/cart"></a>'
+    entry = _status(_pickup_run(tmp_path / "html", extra_html=cart), "pickup")
+    assert (entry["status"], entry["reason"]) == ("unknown", "checkout_not_seen")
+    # ... while a stock check is on the product page, which they did read
+    assert _status(stores, "store_stock")["status"] == "absent"
+
+
+def test_a_checkout_that_was_seen_without_pickup_lets_the_locator_corroborate(tmp_path):
+    stores = _pickup_run(tmp_path / "seen", extra_text="Dodaj do koszyka", a_extra=(_checkout(),))
+    assert _status(stores, "pickup")["status"] == "absent"
+    # a login wall on the way to the checkout is not a checkout
+    wall = (f"{PEPCO}/checkout/login", _checkout()[1], _checkout()[2])
+    stores = _pickup_run(tmp_path / "wall", extra_text="Dodaj do koszyka", a_extra=(wall,))
+    assert _status(stores, "pickup")["reason"] == "checkout_not_seen"
+    # and what pickup the checkout offers makes it present
+    stores = _pickup_run(tmp_path / "offers", extra_text="Dodaj do koszyka",
+                         a_extra=(_checkout("Odbiór osobisty w sklepie: 0 zł."),))
+    assert _status(stores, "pickup")["status"] == "present"
+
+
+def test_a_site_without_a_cart_is_still_corroborated_by_the_locator(tmp_path):
+    assert _status(_pickup_run(tmp_path), "pickup")["status"] == "absent"
+
+
+# --- the ordinary Polish wording of the feature is the feature ------------------
+
+PICKUP_WORDING = (
+    "Odbiór zamówienia w sklepie: bezpłatny.",
+    "Możliwość odbioru osobistego w salonie.",
+    "Zamów z odbiorem w sklepie Pepco.",
+    "Wybierz punkt odbioru.",
+    "Darmowa dostawa do sklepu.",
+    "Zaloguj się, aby odebrać zamówienie w sklepie.",
+    "Opcje odbioru i dostawy",
+    "Możliwy odbiór osobisty",
+    "Zamów i odbierz w ciągu 2 godzin.",
+    "Dostępne do odbioru jutro.",
+    "Odbierz w sklepie",
+    "Click & Collect",
+)
+
+
+@pytest.mark.parametrize("sentence", PICKUP_WORDING)
+def test_inflected_pickup_wording_is_present_in_the_text_and_in_the_markup(tmp_path, sentence):
+    assert _status(_pickup_run(tmp_path / "base"), "pickup")["status"] == "absent"
+    for where, kw in (("text", {"extra_text": sentence}),
+                      ("html", {"extra_html": f"<p>{sentence}</p>"})):
+        stores = _pickup_run(tmp_path / where, **kw)
+        entry = _status(stores, "pickup")
+        assert entry["status"] == "present", (sentence, where)
+        assert entry["evidence"][0]["quote"] in _source_text(stores, entry["evidence"][0])
+
+
+@pytest.mark.parametrize("sentence", [
+    "Odbiornik DVB-T z odbiorem sygnału cyfrowego.",
+    "Sklepienie katedry ma dwadzieścia metrów.",
+    "Odbiornik radiowy stoi pod sklepieniem.",
+    "Odbierz swój kod rabatowy w aplikacji.",
+    "Płatność przy odbiorze.",
+    "Dostawca do sklepów hurtowych.",
+    "Dostawa do domu: 12 zł.",
+])
+def test_words_that_only_look_like_pickup_are_not_pickup(tmp_path, sentence):
+    for where, kw in (("text", {"extra_text": sentence}),
+                      ("html", {"extra_html": f"<p>{sentence}</p>"})):
+        entry = _status(_pickup_run(tmp_path / where, **kw), "pickup")
+        assert entry["status"] == "absent", (sentence, where)
+
+
+STOCK_WORDING = (
+    "Sprawdź dostępność w sklepie.",
+    "Dostępność produktu w sklepie: 3 szt.",
+    "Sprawdzenie dostępności w sklepie",
+    "Dostępny w moim sklepie",
+    "Dostępne w Twoim sklepie od ręki.",
+    "Wybierz sklep",
+    "Mój sklep: Warszawa",
+    "Stan magazynowy: 12",
+    "Dostępność w sklepach: sprawdź online.",
+)
+
+
+@pytest.mark.parametrize("sentence", STOCK_WORDING)
+def test_the_wording_of_a_per_store_stock_check_is_present(tmp_path, sentence):
+    def stock(path, **kw):
+        stores = _run(path, {"a": [_home(), _product(1, **kw), _product(2), _product(3)],
+                             "b": [_home(), _product(4), _product(5)]})
+        return _status(stores, "store_stock")["status"]
+    assert stock(tmp_path / "base") == "absent"
+    assert stock(tmp_path / "text", extra_text=sentence) == "present"
+    assert stock(tmp_path / "html", extra_html=f"<p>{sentence}</p>") == "present"
+
+
+def test_a_shops_own_availability_disclaimer_is_not_a_stock_check(tmp_path):
+    # "Dostępność w sklepach może się różnić" names the thing it says is not guaranteed.
+    said = "Dostępność w sklepach może się różnić."
+    stores = _run(tmp_path, {"a": [_home(), _product(1, footer=said), _product(2, footer=said),
+                                   _product(3, footer=said)],
+                             "b": [_home(), _product(4, footer=said), _product(5, footer=said)]})
+    entry = _status(stores, "store_stock")
+    assert entry["status"] == "absent"
+    assert entry["evidence"][0]["quote"] == "Dostępność w sklepach może się różnić"
+
+
+# --- what the site says about itself must be said by more than one page ----------
+
+PER_PRODUCT = "Ten model: dostępne wyłącznie w sklepach stacjonarnych."
+
+
+def _one_remark(tmp_path, remark, pages=1, intent=INTENT, locators=False, footer=""):
+    """`remark` on `pages` product pages of the first participant (one page by default)."""
+    mine = [_product(n, footer=footer, extra_text=remark) for n in range(1, pages + 1)]
+    extra = [_locator()] if locators else []
+    return _run(tmp_path, {
+        "a": [_home(), *mine, *[_product(n, footer=footer) for n in range(10, 13)], *extra],
+        "b": [_home(), _product(4, footer=footer), _product(5, footer=footer), *extra],
+    }, intent=intent)
+
+
+def test_one_products_line_about_stores_says_nothing_about_pickup_or_a_stock_check(tmp_path):
+    # It is about one product, and suggests the stores have it: not "the site has no pickup".
+    for pages in (1, 3):
+        result = pc.check_stores(_one_remark(tmp_path / f"p{pages}", PER_PRODUCT, pages))["premises"]
+        for premise in ("pickup", "store_stock"):
+            assert (result[premise]["status"], result[premise]["reason"]) == (
+                "unknown", "no_corroboration"), (premise, pages)
+
+
+def test_a_per_product_line_counts_for_the_cart_only_when_it_repeats(tmp_path):
+    cart = "Dodaj poduszkę do koszyka"
+    one = _status(_one_remark(tmp_path / "one", PER_PRODUCT, intent=cart), "cart")
+    assert one["status"] == "unknown"
+    two = _status(_one_remark(tmp_path / "two", PER_PRODUCT, pages=2, intent=cart), "cart")
+    assert (two["status"], two["evidence"][0]["quote"]) == (
+        "absent", "Ten model: dostępne wyłącznie w sklepach stacjonarnych")
+
+
+def test_a_sitewide_statement_on_one_page_is_not_enough_but_two_pages_or_two_people_are(tmp_path):
+    said = "Nie prowadzimy sprzedaży online."
+    cart = "Dodaj poduszkę do koszyka"
+    assert _status(_one_remark(tmp_path / "1", said, intent=cart), "cart")["status"] == "unknown"
+    assert _status(_one_remark(tmp_path / "2", said, pages=2, intent=cart), "cart")["status"] == "absent"
+    # one page each, two participants
+    stores = _run(tmp_path / "people", {
+        "a": [_home(), _product(1, extra_text=said), _product(2), _product(3)],
+        "b": [_home(), _product(4, extra_text=said), _product(5)]}, intent=cart)
+    assert _status(stores, "cart")["status"] == "absent"
+    # the same product in two variants is one page
+    def variant(colour):
+        url, text, raw = _product(1, extra_text=said)
+        return url.replace("Colour=Cream", f"Colour={colour}"), text, raw
+    stores = _run(tmp_path / "variants", {
+        "a": [_home(), variant("Cream"), variant("Beige"), _product(2), _product(3)],
+        "b": [_home(), _product(4), _product(5)]}, intent=cart)
+    assert _status(stores, "cart")["status"] == "unknown"
+
+
+def test_a_single_quote_is_not_presented_as_what_the_site_says_when_the_locator_decides(tmp_path):
+    # Pickup is absent here on the locator (two sessions), with a sitewide sentence on a single page:
+    # the sentence is not quoted as the site's statement, the locator's evidence is what is given.
+    stores = _one_remark(tmp_path, "Nie prowadzimy sprzedaży online.", locators=True)
+    entry = _status(stores, "pickup")
+    assert entry["status"] == "absent" and entry["evidence"] == []
+    assert "Serwis sam zastrzega" not in entry["text"] and "wyszukiwarki sklepów" in entry["text"]
+
+
 def test_a_cart_is_absent_only_when_the_site_says_so_itself(tmp_path):
     shop = {"a": [_home(), _product(1), _product(2), _product(3)],
             "b": [_home(), _product(4), _product(5)]}
@@ -326,7 +569,7 @@ def test_a_cart_is_absent_only_when_the_site_says_so_itself(tmp_path):
 
     said = "Nie prowadzimy sprzedaży online."
     stores = _run(tmp_path / "said", {
-        "a": [_home(), _product(1, extra_text=said), _product(2), _product(3)],
+        "a": [_home(), _product(1, extra_text=said), _product(2, extra_text=said), _product(3)],
         "b": [_home(), _product(4), _product(5)]}, intent="Dodaj poduszkę do koszyka")
     entry = _status(stores, "cart")
     assert entry["status"] == "absent"
@@ -537,6 +780,18 @@ def test_the_outcome_distribution_says_which_part_of_the_task_it_speaks_for():
                 "(odbiór zamówienia w sklepie; sprawdzenie dostępności produktu w konkretnym "
                 "sklepie)") in text
         assert "nie jest to wada interfejsu" in text
+    # what only the locator backs is not called "not an interface defect": a locator that
+    # shows nothing may be the defect
+    for basis in ({"pickup": "locator", "store_stock": "site"},
+                  {"pickup": "locator", "store_stock": "locator"}):
+        text = _format_outcome_distribution(outcomes, [], 3, {k: "observed" for k in outcomes},
+                                            premise_gaps=gaps, premise_basis=basis)
+        assert "nie przesądzaj, czy to wada interfejsu" in text
+        assert "nie jest to wada interfejsu" not in text
+    text = _format_outcome_distribution(outcomes, [], 3, {k: "observed" for k in outcomes},
+                                        premise_gaps=gaps,
+                                        premise_basis={"pickup": "site", "store_stock": "site"})
+    assert "nie jest to wada interfejsu" in text
     for text in (_format_outcome_distribution(outcomes, [], 3, {k: "observed" for k in outcomes}),
                  _format_outcome_distribution(outcomes, [], 3, {k: "observed" for k in outcomes},
                                               premise_gaps={"a": [], "b": []})):
@@ -554,4 +809,5 @@ def test_the_dashboard_payload_lists_what_the_sessions_did_not_find(tmp_path):
         "store_stock": {"status": "absent", "text": "Tekst luki."},
         "pickup": {"status": "unknown", "reason": "few_pages"}}})
     assert build_run(run_dir.name, runs)["meta"]["premiseGaps"] == [
-        {"premise": "store_stock", "label": pc.LABELS["store_stock"], "text": "Tekst luki."}]
+        {"premise": "store_stock", "label": pc.LABELS["store_stock"], "text": "Tekst luki.",
+         "basis": "locator"}]

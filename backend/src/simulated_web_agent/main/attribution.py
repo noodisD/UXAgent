@@ -18,7 +18,7 @@ import logging
 import re
 
 from .evidence import _QUOTED, _visible_text
-from .loop_phrases import FORCED_BACK_MARKERS, injected_kind
+from .loop_phrases import FORCED_BACK_MARKERS, injected_kind, intended_action
 from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger(__name__)
@@ -235,12 +235,17 @@ def unperceived_steps(store: TraceStore) -> list[int]:
 
 
 def unseen_last_action(store: TraceStore) -> str | None:
-    """What the last action was, when its result is a page nobody read."""
+    """What the last action was, when its result is a page nobody read.
+
+    A back the harness ran is not the participant's action and its sentence ("Ta metoda
+    nie działała…") is ours: the one named is what the participant had chosen, or None
+    for a trace from before the harness kept it."""
     unseen = unperceived_steps(store)
     actions = store.read_action_trace() or []
     if not unseen or not 1 <= unseen[0] <= len(actions):
         return None
-    last = _parse_action(actions[unseen[0] - 1])
+    raw = actions[unseen[0] - 1]
+    last = (intended_action(raw) if injected_kind(raw) else _parse_action(raw)) or {}
     return str(last.get("description") or last.get("action") or "") or None
 
 
@@ -459,14 +464,23 @@ _ACTION_CLAIM = re.compile(
 _NO_FEEDBACK_CLAIM = re.compile(r"brak\s+(?:informacji\s+zwrotnej|komunikatu|reakcji)|nie\s+pojawi", re.I)
 
 
+# What follows a click, said of the click: "after clicking", "did not respond". Narrower
+# than _ACTION_CLAIM, whose stems (klikn, nieaktywn, zablokowa, cofa) are as often the
+# description of a control on the page that was read ("mały obszar kliknięcia").
+_RESULT_CLAIM = re.compile(
+    r"(?<!\w)po\s+(?:klikni|naciśni|wciśni|wybraniu)\w*"
+    r"|nie\s+(?:zareagowa|reaguj|zmieni|zmienia|zaktualizowa|aktualizu)\w*", re.I)
+
+
 def _claims_result_of_last_action(finding: dict, unseen_step: int) -> bool:
     """Is this finding about what the action before `unseen_step` produced?
 
-    By its verbs (clicked, did not respond), by the absence of feedback it reports, or
-    by citing the unseen step itself ("w obserwacji kroku 27"). A claim about what the
-    page showed one step earlier is none of these and stays."""
+    By what it says follows the action (after clicking, did not respond), by the absence
+    of feedback it reports, or by citing the unseen step itself ("w obserwacji kroku
+    27"). A claim about what the page showed one step earlier is none of these and
+    stays: how the page the participant read looks is not the click's result."""
     text = " ".join(str(finding.get(k) or "") for k in ("evidence", "description", "issue"))
-    return bool(_ACTION_CLAIM.search(text) or _NO_FEEDBACK_CLAIM.search(text)
+    return bool(_RESULT_CLAIM.search(text) or _NO_FEEDBACK_CLAIM.search(text)
                 or re.search(rf"\bkro\w*\s+{unseen_step}\b", text, re.I))
 
 
