@@ -33,14 +33,15 @@ from .evidence import page_quote, pages_contain, rendering_artifact
 from .obstacles import repeated_obstacles
 from .conflicts import annotate_recommendations, clicked_names, find_conflicts, prompt_text as _conflicts_text
 from .recurring import annotate_routes, failed_click_names, group_recurring_reports, route_summary
-from .textutil import clip_words, decimal_text, pl_plural, view_key
+from .textutil import clip_words, decimal_text, display_url, pl_plural, view_key
 from .scoring import (
     RULES as SCORING_RULES, alt_text_measured_text, alt_text_share, breakdown_text,
     compute_ux_score, pass_failures as _pass_failures, rationale_text,
 )
 from .attribution import (
-    harness_suspect_causes, names_last_executed_control, restates_a_gated_finding,
-    session_end_note, tool_failed_controls, unseen_last_action,
+    guessed_address_note, guessed_only_dead_ends, harness_suspect_causes, names_last_executed_control,
+    restates_a_gated_finding, session_end_note, text_blames_dead_address, tool_failed_controls,
+    unseen_last_action, without_dead_address_blame,
 )
 from .iso_metrics import current_effectiveness, effective_outcome
 from .premise_check import LABELS as _PREMISE_LABELS, ensure_premise_check, run_gaps
@@ -119,6 +120,10 @@ def _harness_reason(cause: dict | None) -> str:
         after = f" po akcji w kroku {step - 1}" if isinstance(step, int) and step > 0 else ""
         return (f"sesja urwała się, zanim uczestnik zobaczył stronę{after} — "
                 "brak reakcji strony nie został zaobserwowany")
+    if code == "guessed_address":
+        return (f"{at} uczestnik trafił na stronę błędu, bo sam wpisał adres "
+                f"{display_url(detail)}; strona, na której był, nie zawierała do niego odnośnika — "
+                "to nie dowodzi uszkodzonego linku w serwisie")
     if code == "claim_contradicted":
         return "wniosek przeczy przebiegowi sesji albo dotyczy elementu, który się zaciął"
     return ("możliwa usterka narzędzia w tym kroku lub tuż przed nim — zapis nie rozstrzyga, "
@@ -251,6 +256,11 @@ def _human_check_base(finding: dict) -> str:
             else:
                 what = f"Powtórz tę akcję („{control}”)" if control else "Powtórz tę akcję"
             return f"{what} w zwykłej przeglądarce i sprawdź, co pokazuje strona — uczestnik tego nie zobaczył."
+        if code == "guessed_address":
+            address = display_url(str((finding.get("harness_cause") or {}).get("detail") or ""))
+            return (f"Otwórz w zwykłej przeglądarce stronę, z której uczestnik wpisał adres, i sprawdź, czy "
+                    f"jest na niej odnośnik do {address}. Jeśli nie ma — to nie jest uszkodzony link "
+                    "serwisu; oceniać można samą stronę błędu (komunikat, wyszukiwarka, nawigacja).")
         return "Powtórz tę interakcję ręcznie i sprawdź, czy strona reaguje."
     if finding.get("claim_verdict") in ("unsupported", "partial"):
         return ("Sprawdź na stronie, czy opisany problem występuje — zapis sesji "
@@ -359,6 +369,9 @@ Zasady:
 - Jeśli session.ended_reason to "error", sesję przerwała awaria narzędzia, a "unseen_last_action"
   to ostatnia akcja, której wyniku persona nigdy nie zobaczyła. Nie twierdź, co ta akcja dała
   ani że nic nie dała, i nigdy nie wpisuj samej awarii sesji do blockers.
+- Pole "typed_address_note", jeśli jest, mówi, że persona sama wpisała adres, którego strona nie
+  podawała, i trafiła na stronę błędu. To nie jest uszkodzony link ani wada nawigacji serwisu:
+  nie wpisuj tego do blockers ani do priorityFix i nie opisuj w summary jako usterki strony.
 - blockers i wins: maksymalnie po 4 pozycje, krótkie i konkretne. Mogą być puste ([]).
 - Pisz rzeczowo. Nie opisuj metodologii. Zwróć tylko poprawny JSON.\
 """
@@ -388,6 +401,22 @@ def _coerce_reflection(data: Any, persona_name: str) -> dict:
         "wins": _str_list(d.get("wins")),
         "priorityFix": str(d.get("priorityFix", "")).strip(),
     }
+
+
+def _without_dead_address_blame(store: TraceStore, account: dict, fix_key: str) -> None:
+    """Take out of a participant's own account what blames the site for an error page they made
+    by typing an address the site never linked (attribution.guessed_address_steps): their
+    blockers, the sentences of the summary, the fix. The rest of the account stands."""
+    try:
+        typed = guessed_only_dead_ends(store)
+    except Exception:
+        return
+    if not typed:
+        return
+    account["blockers"] = [b for b in account.get("blockers") or [] if not text_blames_dead_address(b)]
+    account["summary"] = without_dead_address_blame(account.get("summary"))
+    if text_blames_dead_address(account.get(fix_key)):
+        account[fix_key] = ""
 
 
 async def generate_objective_reflection(store: TraceStore) -> dict:
@@ -428,6 +457,7 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
         "tool_failures": tool_failed_controls(store),
         "unseen_last_action": unseen_last_action(store),
         "session_note": session_end_note(store),
+        "typed_address_note": guessed_address_note(store),
         "accessibility_score": accessibility.get("overall_score"),
         "accessibility_summary": accessibility.get("summary", ""),
         "scroll_summary": scroll,
@@ -463,6 +493,7 @@ async def generate_objective_reflection(store: TraceStore) -> dict:
             "priorityFix": "",
         }
 
+    _without_dead_address_blame(store, reflection, "priorityFix")
     store.write_objective_reflection(reflection)
     log.info("[reflection] Saved objective_reflection.json for %s", store.trace_dir)
     return reflection
@@ -952,6 +983,10 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
                 entry["blockers"] = [b for b in entry["blockers"] if not describes_session_crash(b)
                                      and not describes_interaction_trouble(b)
                                      and not names_last_executed_control(store, b)]
+            # An error page the participant made by typing an address the site never linked:
+            # its account of it as a broken link is not the site's. Also for a reflection
+            # written before the generator took it out.
+            _without_dead_address_blame(store, entry, "priority_fix")
         objective_reflections.append(entry)
 
     # Heuristic findings aggregation — annotate each finding with its persona

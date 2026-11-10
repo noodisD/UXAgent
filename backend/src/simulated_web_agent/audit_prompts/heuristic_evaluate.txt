@@ -96,6 +96,12 @@ usability problems is a false positive (real site teams reject them):
   words and not evidence about the site, so count attempts only from unmarked lines.
   A last ACTIONS line saying the session was cut ("Sesja urwała się") means nobody
   saw what the final action produced: make no claim about its result.
+- An error page the participant reached by an address it typed itself. An ACTIONS line
+  marked "ADDRESS TYPED BY THE PARTICIPANT" is a goto to an address the page it was on
+  never linked to: the 404 that follows is the participant's own guess, not a broken link,
+  a dead menu item or a missing page of the site, and must never be reported as one. What
+  the error page itself shows (its message, a missing search or navigation on it) is
+  still reportable.
 - A claim that browsing or comparing is inefficient whose only evidence is the
   participant reopening pages they had already seen (see the session facts below). It
   describes the participant's own route, not the site; report it only with a cause on

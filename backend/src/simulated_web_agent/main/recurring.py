@@ -19,7 +19,7 @@ import json
 import logging
 import re
 
-from .attribution import injected_back_steps, tool_failed_actions, unperceived_steps
+from .attribution import guessed_address_steps, injected_back_steps, tool_failed_actions, unperceived_steps
 from .loop_phrases import KIND_REFUSED
 from .redaction import clean_narrative
 from .textutil import clip_words
@@ -78,12 +78,14 @@ def _actions_with_failures(store) -> list[tuple[dict, bool]]:
 
 def route_summary(store, last: int = 14) -> list[str]:
     """The participant's last steps, each marked when the tool failed it, when the harness
-    went back in their place, and when its result was never seen (for the aggregate prompt)."""
+    went back in their place, when its result was never seen, and when it typed an address the
+    page did not link to and reached an error page (for the aggregate prompt)."""
     try:
         raw_actions = store.read_action_trace() or []
         failed = tool_failed_actions(store)
         injected = injected_back_steps(store)
         unseen = set(unperceived_steps(store))
+        typed = {info["action_step"] for info in guessed_address_steps(store).values()}
     except Exception:
         return []
     out = []
@@ -95,7 +97,9 @@ def route_summary(store, last: int = 14) -> list[str]:
                     else "[cofnięcie wymuszone przez narzędzie]")
         else:
             what = str(a.get("description") or f"{a.get('action', '')} {a.get('target', '')}").strip()[:90]
-        marks = [m for m, on in ((" (nieudane)", k in failed), (" (wynik nieznany)", k + 1 in unseen)) if on]
+        marks = [m for m, on in ((" (nieudane)", k in failed), (" (wynik nieznany)", k + 1 in unseen),
+                                 (" (adres wpisany przez uczestnika, strona go nie podawała)", k in typed))
+                 if on]
         out.append(f"{k}: {what}{''.join(marks)}")
     return out[-last:]
 

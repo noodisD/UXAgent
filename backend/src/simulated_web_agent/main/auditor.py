@@ -20,8 +20,8 @@ from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .a11y_checks import extract_a11y_candidates, extract_generic_name_findings
 from .attribution import (
-    flag_harness_suspects, session_blocked_by_bot_wall, session_end_note, tool_failed_actions,
-    unperceived_steps,
+    flag_harness_suspects, guessed_address_steps, session_blocked_by_bot_wall, session_end_note,
+    tool_failed_actions, unperceived_steps,
 )
 from .claim_verifier import persona_disposition, run_claim_verification
 from .confidence import cap_confidence
@@ -190,8 +190,15 @@ async def _run_heuristic_evaluation(store: TraceStore) -> list:
 _TOOL_FAILED_MARKER = ("[AUTOMATION ERROR: the tool could not carry out this action - "
                        "it says nothing about the site]")
 
+# An address the participant typed, and the page it was on never linked: the error page that
+# followed is the participant's own doing. The first finding on it said the site's link led to
+# a 404 and carried the report's whole score deduction.
+_TYPED_ADDRESS_MARKER = ("[ADDRESS TYPED BY THE PARTICIPANT: the page they were on had no link to it, "
+                         "so the error page that follows comes from the participant's own address - "
+                         "it says nothing about the site's links or navigation]")
 
-def _action_line(action: dict, tool_failed: bool) -> str:
+
+def _action_line(action: dict, tool_failed: bool, typed_address: bool = False) -> str:
     """One action as the heuristic pass reads it.
 
     A back the harness put in place of the participant's choice is not an attempt,
@@ -211,6 +218,8 @@ def _action_line(action: dict, tool_failed: bool) -> str:
                 f"chose{chosen}. The participant did not choose this back: it is a policy of the "
                 "study, not a tool failure and not evidence about the site]")
     line = str(action.get("description", json.dumps(action)))
+    if typed_address:
+        line = f"{line} {_TYPED_ADDRESS_MARKER}"
     return f"{line} {_TOOL_FAILED_MARKER}" if tool_failed else line
 
 
@@ -257,11 +266,12 @@ async def _heuristic_pass(store: TraceStore) -> tuple[list, str | None]:
         observations.append(f"[step {i}] {url} :: {text}")
 
     tool_failed = tool_failed_actions(store)
+    typed = {info["action_step"] for info in guessed_address_steps(store).values()}
     actions = []
     for i, raw in enumerate(action_trace):
         a = parse_action(raw)
         if a:
-            actions.append(f"[step {i}] {_action_line(a, i in tool_failed)}")
+            actions.append(f"[step {i}] {_action_line(a, i in tool_failed, i in typed)}")
     end_note = session_end_note(store)
     if end_note:
         actions.append(end_note)

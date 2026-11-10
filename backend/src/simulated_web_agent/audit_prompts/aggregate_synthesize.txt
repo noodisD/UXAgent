@@ -193,7 +193,9 @@ Note — engaged_form = agent typed into at least one field; submitted_form = al
 MOST FREQUENT ISSUES (appearing in ≥50% of sessions):
 {top_issues}
 
-DROGI UCZESTNIKÓW (ostatnie kroki każdego; „(nieudane)" oznacza kliknięcie, które się nie powiodło):
+DROGI UCZESTNIKÓW (ostatnie kroki każdego; „(nieudane)" oznacza kliknięcie, które się nie powiodło;
+„(adres wpisany przez uczestnika…)" — uczestnik sam wpisał adres, którego strona nie podawała, więc
+strona błędu po nim nie jest wadą linków serwisu):
 {participant_routes}
 
 ROZBIEŻNE RELACJE (to samo u jednych uczestników zadziałało, u innych nie; w nawiasie kontrolka,

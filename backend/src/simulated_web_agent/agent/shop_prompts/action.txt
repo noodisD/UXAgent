@@ -80,6 +80,7 @@ Each action object must include an `action` key specifying one of the following 
 { "action": "back",     "description": "Going back ..." }
 { "action": "forward",  "description": "Going forward ..." }
 { "action": "refresh",  "description": "Refreshing ..." }
+- Use `goto_url` only for an address I have seen on the site: a link on the page, the address bar of a page I was on, or the start address. Never invent or guess an address from a page title or a menu label; to reach a section, click its menu or footer link.
 
 ## Tabs
 { "action": "new_tab",    "url": "https://example.com", "description": "Opening in new tab ..." }

@@ -12,13 +12,17 @@ defects ("store locator non-functional", "search doesn't process queries").
 This module flags findings whose cited step coincides with a harness
 interaction failure, so they can be excluded from the headline severity counts
 and rendered as "needs verification" rather than shipped as confirmed defects.
+The same goes for a dead end the participant made itself: an error page reached
+by an address it typed that the page it was on never linked to.
 """
 import html as _html
 import logging
 import re
+from urllib.parse import unquote, urljoin
 
 from .evidence import _QUOTED, _visible_text
 from .loop_phrases import FORCED_BACK_MARKERS, injected_kind, intended_action
+from .textutil import display_url, view_key
 from .trace_store import TraceStore, parse_action as _parse_action
 
 log = logging.getLogger(__name__)
@@ -262,6 +266,279 @@ def session_end_note(store: TraceStore) -> str | None:
         return None
     return (f"Sesja urwała się awarią narzędzia tuż po akcji [step {unseen[0] - 1}]; jej wyniku "
             "uczestnik nigdy nie zobaczył — nie wnioskuj, czy zadziałała.")
+
+
+# An error page the participant reached by an address it typed itself.
+#
+# 2026-11-10 bnpparibas.pl, Marta: on /hipoteka-online/ she typed
+# https://www.bnpparibas.pl/placowki-i-bankomaty, an address made up from a menu label.
+# Nothing on the page linked to it and the site answers 404; one step later she clicked the
+# real menu item and went on. Yet her blocker read "404 after clicking a link to the
+# branches", a verified serious finding said the link led to a 404 (the quote IS on the
+# page, which is all the claim verifier checks) and carried the report's whole score
+# deduction, and the executive summary named a broken link to the branch locator. The
+# site had linked nowhere.
+
+# Page text that says the address has no page. Phrases about a page, not a bare "nie
+# znaleziono": a search without results says that too.
+_NOT_FOUND_PAGE = re.compile(
+    r"stron\w*\s+(?:\w+\s+){0,3}nie\s+(?:zosta\w+\s+)?(?:odnalezion|znalezion)"
+    r"|stron\w*\s+(?:\w+\s+){0,3}nie\s+istnieje"
+    r"|nie\s+(?:odnaleziono|znaleziono|można\s+znaleźć)\s+(?:\w+\s+){0,2}stron"
+    r"|\bnot\s+found\b|\b(?:page|url)\s+(?:\w+\s+){0,2}does\s*n[o’']?t\s+exist", re.I)
+# 404 and 410, not the number in a price or a list of figures.
+_ERROR_CODE = re.compile(
+    r"(?<![\d.,])(?:404|410)(?!\d)(?!\s*[\d%])(?!\s*(?:zł|pln|eur|€|usd|\$))", re.I)
+_STATUS_WORD = re.compile(r"\b(?:error|błąd|blad|status|http|kod|code|page|stron\w*)\b", re.I)
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+# When the title says nothing, the code must sit this near a phrase ("404Nie można znaleźć…").
+_CODE_NEAR_PHRASE = 80
+
+# Where a page's links are written. Beside href, the attributes a menu script reads.
+_LINK_ATTR = re.compile(
+    r"""\b(?:href|data-href|data-url|formaction|action)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""",
+    re.I)
+_NOT_A_PAGE = ("#", "javascript:", "mailto:", "tel:", "data:")
+
+
+def _address_key(url) -> str:
+    """An address as two of them are compared: scheme, www, query, fragment, case and a
+    trailing slash do not tell them apart. Looser than the site's own routing on purpose:
+    a link the page really had must never be taken for the participant's guess."""
+    key = unquote(view_key(url)).split("#")[0].lower()
+    return key[4:] if key.startswith("www.") else key
+
+
+def _tab(observation) -> dict:
+    """The active tab of an observation, as TraceStore.url_at_step picks it."""
+    if not isinstance(observation, dict):
+        return {}
+    tabs = [t for t in (observation.get("tabs") or []) if isinstance(t, dict)]
+    http = [t for t in tabs if str(t.get("url") or "").startswith("http")]
+    return next((t for t in http if t.get("is_active")), http[0] if http else {})
+
+
+def _linked_addresses(markup: str, base: str) -> set[str] | None:
+    """Every address the page links to, as _address_key; None when the capture cannot tell
+    (it is missing, or has not one link in it), which is not the same as "links nowhere"."""
+    keys: set[str] = set()
+    for m in _LINK_ATTR.finditer(markup or ""):
+        ref = _html.unescape(next(g for g in m.groups() if g is not None)).strip()
+        if not ref or ref.lower().startswith(_NOT_A_PAGE):
+            continue
+        try:
+            keys.add(_address_key(urljoin(base, ref)))
+        except ValueError:
+            continue
+    return keys or None
+
+
+def _title_says_error(title: str) -> bool:
+    """A title that names a missing page, or carries 404/410 with a word that makes it a status
+    ("Błąd 404", "Page 404") or alone: "Model 404" is a product."""
+    if _NOT_FOUND_PAGE.search(title):
+        return True
+    m = _ERROR_CODE.search(title)
+    if not m:
+        return False
+    rest = (title[:m.start()] + title[m.end():]).strip(" -–—|:·•")
+    return not rest or bool(_STATUS_WORD.search(rest))
+
+
+def _is_error_page(title: str, text: str) -> bool:
+    """Does a page call itself a missing one: in its title, or by a 404/410 beside the words."""
+    if _title_says_error(title):
+        return True
+    return any(_NOT_FOUND_PAGE.search(text, max(0, m.start() - _CODE_NEAR_PHRASE),
+                                      m.end() + _CODE_NEAR_PHRASE)
+               for m in _ERROR_CODE.finditer(text))
+
+
+def _error_page_at(store: TraceStore, step: int, tab: dict, deep: bool = True) -> bool:
+    """Was this observation an error page: by the tab's title and what the participant read,
+    and with `deep` by the browser's own capture too (its <title> and visible text)."""
+    if _is_error_page(str(tab.get("title") or ""), store.read_observation_step_text(step)):
+        return True
+    raw = store.read_raw_html(step) if deep else ""
+    if not raw:
+        return False
+    m = _TITLE_RE.search(raw)
+    return _is_error_page(_html.unescape(m.group(1)) if m else "", _visible_text(raw))
+
+
+def guessed_address_steps(store: TraceStore) -> dict[int, dict]:
+    """Observation index -> {"url", "action_step"} for each error page the participant reached
+    by typing an address (goto_url) that the page it was on did not link to.
+
+    observations[k] is the page the participant was on when it chose action k, raw_html_k its
+    capture and observations[k + 1] what the typed address loaded. The address is the site's
+    own, not a guess, when that page links to it or when the participant had already been
+    there (the start address, any page it saw: all are in its address bar). Unknown counts as
+    not guessed: a capture that is missing or holds no link at all says nothing about what
+    the page linked to, and an address that loaded an ordinary page changes nothing."""
+    try:
+        typed_at = [(k, _parse_action(raw)) for k, raw in enumerate(store.read_action_trace() or [])]
+        typed_at = [(k, a) for k, a in typed_at
+                    if a.get("action") == "goto_url" and str(a.get("url") or "").strip()]
+        # Most sessions never type an address: do not read the observations for them.
+        observations = (store.read_observations() or []) if typed_at else []
+    except Exception:
+        return {}
+    if not typed_at:
+        return {}
+    from ..executor.env import resolve_url  # what the harness itself resolved the address with
+    out: dict[int, dict] = {}
+    for k, a in typed_at:
+        if k + 1 >= len(observations):
+            continue
+        before = str(_tab(observations[k]).get("url") or "")
+        if not before:
+            continue
+        typed = resolve_url(str(a["url"]), before)
+        key = _address_key(typed)
+        seen = {_address_key(t.get("url")) for obs in observations[:k + 1] if isinstance(obs, dict)
+                for t in (obs.get("tabs") or []) if isinstance(t, dict)
+                and str(t.get("url") or "").startswith("http")}
+        linked = _linked_addresses(store.read_raw_html(k), before)
+        if linked is None or key in linked or key in seen:
+            continue
+        after = _tab(observations[k + 1])
+        if _address_key(after.get("url")) == _address_key(before) or not _error_page_at(store, k + 1, after):
+            continue
+        out[k + 1] = {"url": typed, "action_step": k}
+    return out
+
+
+def guessed_only_dead_ends(store: TraceStore) -> dict[int, dict]:
+    """guessed_address_steps, or {} when the session met another error page too: a complaint
+    about a dead end could then be about that one, which the participant did not make."""
+    guessed = guessed_address_steps(store)
+    if not guessed:
+        return {}
+    try:
+        observations = store.read_observations() or []
+    except Exception:
+        return {}
+    for i, obs in enumerate(observations):
+        if i not in guessed and _error_page_at(store, i, _tab(obs), deep=False):
+            return {}
+    return guessed
+
+
+def guessed_address_note(store: TraceStore) -> str | None:
+    """What the passes written after the session are told about an address the participant
+    typed, or None. Without it the page that follows reads as the site's link failing."""
+    notes = [
+        f"W kroku {info['action_step']} uczestnik sam wpisał adres {display_url(info['url'])}; strona, na "
+        f"której był, nie zawierała do niego odnośnika, a strona błędu w kroku {step} jest skutkiem "
+        "tego adresu — nie opisuj jej jako uszkodzonego linku ani braku strony w serwisie."
+        for step, info in sorted(guessed_address_steps(store).items())]
+    return " ".join(notes) or None
+
+
+# What a claim says about such a page. Blamed on the site: the link, the click or the address
+# called broken or said to lead to the error, or the page said not to exist. About the error
+# page itself, and not held: its message, looks, or what it lacks or should offer. Naming the
+# link or the click as the cause outweighs that; an adverb does not make a link broken
+# ("błędnie zinterpretował adres" is a geocoder, not a dead link).
+_DEAD_END = re.compile(
+    r"(?<![\d.,])(?:404|410)(?!\d)|nie\s+(?:zosta\w+\s+)?(?:odnalez|znalez)|nie\s+istnieje|nieistniej|"
+    r"stron\w*\s+(?:z\s+)?bł[ąę]d|bł[ąę]d\w*\s+stron|donikąd|(?:broken|dead)\s+link|not\s+found", re.I)
+_BROKEN = (r"(?:uszkodzon|zepsut|martw(?!o)|niedziałając|nieaktualn(?!ie)|błędn(?!ie)|nieprawidłow(?!o)|"
+           r"niepoprawn(?!ie)|wadliw(?!ie))")
+_LINKISH = r"(?:link|odnośnik|url|adres\s+(?:url|strony))"
+_AFTER_CLICK = r"(?<!\w)(?:po|przy)\s+(?:klikni|przejści|wybran|nawigac)\w*"
+# The link is called broken, or is to be repaired.
+_LINK_BROKEN = re.compile(
+    rf"{_BROKEN}\w*\s+(?:\w+\s+)?{_LINKISH}"
+    rf"|{_LINKISH}\w*\s+(?:\w+\s+){{0,3}}?(?:jest|są|był\w*)\s+{_BROKEN}"
+    rf"|(?:napraw|popraw)\w*\s+(?:\w+\s+){{0,2}}{_LINKISH}"
+    r"|(?:broken|dead)\s+link", re.I)
+# The link or the click is said to have led to the error. Read with the page's quoted words
+# in: "after choosing it the page 'Strona nie odnaleziona' appears" says it in the quote.
+_LINK_TO_ERROR = re.compile(
+    rf"{_LINKISH}\w*\s+(?:\w+\s+){{0,3}}?(?:prowadz|kieruj|przekierow|wiedzie)\w*\s+(?:\w+\s+){{0,3}}?"
+    r"(?:404|410|bł[ąę]d|nieistniej|donikąd)"
+    rf"|{_AFTER_CLICK}[^.;!?]{{0,120}}?(?:404|410|bł[ąę]d|nie\s+(?:odnalez|znalez)|nie\s+istnieje|niedostępn)"
+    rf"|(?:404|410|bł[ąę]d\w*)\s+(?:\w+\s+){{0,3}}?{_AFTER_CLICK}"
+    r"|(?:klikni|nawigac|przejści|przejśc|wybran|zakładk)\w*\s+(?:\w+\s+){0,6}?"
+    r"(?:kończ\w+\s+się|skutkuj|prowadz|powodu|zwraca|kieruj|przekierow)\w*[^.;!?]{0,60}?"
+    r"(?:404|410|bł[ąę]d|nie\s+(?:odnalez|znalez)|nie\s+istnieje)"
+    r"|przekierowa\w*\s+(?:\w+\s+){0,3}?(?:na|do)\s+(?:\w+\s+){0,3}?(?:bł[ąę]d|404|410|nie\s+odnalez)"
+    r"|(?:link|click)\w*[^.;!?]{0,60}?(?:404|not\s+found)", re.I)
+# "The link does not work": said of a link, which needs the dead end beside it to be this one.
+_LINK_FAILS = re.compile(rf"{_LINKISH}\w*\s+(?:\w+\s+){{0,3}}?nie\s+(?:działa|prowadzi)", re.I)
+_ERROR_PAGE_DESIGN = re.compile(
+    r"komunikat|treś[ćc]|tekst|sformułowan|napis|nagłówk|brzmi|wording|układ|layout|wygląd|grafik|"
+    r"ilustrac|kontrast|czcionk|kolor|"
+    r"(?:brak\w*|bez|nie\s+(?:zawiera|oferuje|podpowiada|sugeruje|proponuje|zapewnia|ma|wskazuje|informuje|"
+    r"wyjaśnia|pomaga|pozwala)|pozbawion\w*|dodać|dodanie|umieścić|wyświetlać|zaproponować)\s+"
+    r"(?:\w+\s+){0,4}?(?:wyszukiwar|nawigac|menu|link|odnośnik|podpowiedz|sugesti|alternatyw|pomoc|"
+    r"kontakt|przycisk|powrot|wskazówk|informacj)", re.I)
+
+
+def _sentences(text) -> list[tuple[str, str]]:
+    """(sentence, the same without the page's quoted words) for each sentence of a free text.
+    The error page's "Strona nie odnaleziona" is what the page says, not what the claim says
+    of the site; the quotes are blanked before the split, so one holding a full stop stays whole."""
+    text = str(text or "")
+    masked = _QUOTED.sub(lambda m: " " * len(m.group()), text)
+    out, start = [], 0
+    for m in re.finditer(r"(?<=[.!?;])\s+|\n+", masked):
+        out.append((text[start:m.start()], masked[start:m.start()]))
+        start = m.end()
+    out.append((text[start:], masked[start:]))
+    return [(s, plain) for s, plain in out if s.strip()]
+
+
+def _sentence_blames(sentence: str, plain: str, anchored: bool = False) -> bool:
+    """`anchored`: the claim is tied to the error page already, by the step a finding cites;
+    free text is not, and "the link does not work" then needs a dead end in the sentence."""
+    if _LINK_BROKEN.search(plain) or _LINK_TO_ERROR.search(sentence):
+        return True
+    dead = bool(_DEAD_END.search(plain))
+    if _LINK_FAILS.search(plain) and (dead or anchored):
+        return True
+    return dead and not _ERROR_PAGE_DESIGN.search(plain)
+
+
+def text_blames_dead_address(text, anchored: bool = False) -> bool:
+    """Does this free text blame the site for a dead address: a link or click that led to an
+    error page, a page said not to exist? A remark about the error page itself does not."""
+    return any(_sentence_blames(s, plain, anchored) for s, plain in _sentences(text))
+
+
+def without_dead_address_blame(text) -> str:
+    """The text with the sentences that blame the site for a dead address left out."""
+    if not text_blames_dead_address(text):
+        return str(text or "")
+    return " ".join(s.strip() for s, plain in _sentences(text) if not _sentence_blames(s, plain))
+
+
+def finding_blames_dead_address(finding: dict) -> bool:
+    """The finding's own claim blames the site for a dead address. Its recommendation counts
+    only when it tells the site to repair the link: advice on the error page ("add a search
+    box") is about the page that was shown."""
+    claim = " ".join(str(finding.get(k) or "") for k in ("evidence", "description", "issue"))
+    return text_blames_dead_address(claim, anchored=True) or any(
+        _LINK_BROKEN.search(plain) or _LINK_TO_ERROR.search(s) or _LINK_FAILS.search(plain)
+        for s, plain in _sentences(finding.get("recommendation")))
+
+
+def _guessed_address_cause(finding: dict, guessed: dict) -> dict | None:
+    """Why this finding blames the site for an error page the participant made, or None.
+
+    Held when it cites that page, or the step where the address was typed, and says the
+    link, the click or the page is at fault. Per claim, not per page: what the error page
+    shows or lacks is still the site's to answer for."""
+    try:
+        step = int(finding.get("step"))
+    except (TypeError, ValueError):
+        return None
+    for obs_step, info in guessed.items():
+        if step in (obs_step, info["action_step"]) and finding_blames_dead_address(finding):
+            return {"code": "guessed_address", "detail": info["url"], "step": obs_step}
+    return None
 
 
 # The name the participant gave the control it used, as its description quotes it:
@@ -958,7 +1235,8 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     is attributable to a harness interaction failure — either its cited step
     lands on one, or its evidence text names an element that was stuck in one —
     or when its claim is about the result of an action whose page the participant
-    never read (outcome_unseen).
+    never read (outcome_unseen), or when it blames the site for an error page the participant
+    reached by an address it typed itself (guessed_address).
     Returns the same list (findings mutated in place); non-dicts pass through."""
     causes = harness_suspect_causes(store)
     suspect = set(causes)
@@ -987,6 +1265,8 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
     # perceive/plan call. What its last action did is not something anyone observed.
     unseen = unperceived_steps(store)
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])] if unseen else []
+    # Error pages the participant made by typing an address the site never linked.
+    guessed = guessed_address_steps(store)
 
     def _is_suspect(f: dict, suspect=suspect, targets=targets) -> bool:
         step = f.get("step")
@@ -1015,7 +1295,9 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
         control = _unresponsive_control(f, retried)
         misquoted = quoted_only_in_observation(f, page_text, observation_text)
         unseen_cause = _outcome_unseen_cause(f, unseen, actions) if unseen else None
-        suspected = _is_suspect(f) or control is not None or bool(misquoted) or unseen_cause is not None
+        guessed_cause = _guessed_address_cause(f, guessed) if guessed else None
+        suspected = (_is_suspect(f) or control is not None or bool(misquoted)
+                     or unseen_cause is not None or guessed_cause is not None)
         # Named so the report can say exactly what a person should click.
         f["unresponsive_control"] = control
         # And which quoted words to look for on the page.
@@ -1028,13 +1310,15 @@ def flag_harness_suspects(store: TraceStore, findings: list) -> list:
             if re.search(rf"(?<!\w){re.escape(n)}(?!\w)", text_low)] or None
         # Why, as far as the trace says: the signature that marked the cited
         # step, or what matched the finding's text. None when it is not suspect.
-        # The unseen page comes first: it is about this claim, the step-wide signals are not.
-        f["harness_cause"] = (unseen_cause or _cause_of(f, causes, suspected, control, misquoted)
+        # The unseen page and the typed address come first: they are about this claim, the
+        # step-wide signals are not.
+        f["harness_cause"] = (unseen_cause or guessed_cause
+                              or _cause_of(f, causes, suspected, control, misquoted)
                               if suspected else None)
         # The control whose repeated clicks worked, when that is the only reason.
         f["repeated_with_progress"] = None
         if suspected and progress and control is None and not misquoted and unseen_cause is None \
-                and not _is_suspect(f, strict, strict_targets):
+                and guessed_cause is None and not _is_suspect(f, strict, strict_targets):
             try:
                 f["repeated_with_progress"] = progress.get(int(f.get("step")))
             except (TypeError, ValueError):
