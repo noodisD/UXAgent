@@ -1,9 +1,15 @@
 import asyncio
+import contextvars
+import functools
+import importlib
 import json
+import math
 import os
+import random
 import re
+import threading
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
 
@@ -246,28 +252,303 @@ load_dotenv()  # load anthropic api key from .env
 anthropic_model = "claude-sonnet-4-20250514"
 
 
-def async_retry(times=10):
-    def func_wrapper(f):
-        async def wrapper(*args, **kwargs):
-            wait = 1
-            max_wait = 5
-            last_exc = None
-            for _ in range(times):
-                # noinspection PyBroadException
+# ------------------------------------------------------------------
+# Retry, backoff and the shared rate-limit cooldown
+# ------------------------------------------------------------------
+# A Vertex quota answer (429 RESOURCE_EXHAUSTED) or a 503 "overloaded" lasts tens
+# of seconds. The schedule this replaced (3 tries, 1 s then 2 s) gave up inside
+# ~5 s, the exception reached experiment.py and ended the persona's whole
+# session. Transient errors now back off for about a minute; everything else
+# (auth, bad request, content policy, JSON that will not parse) keeps the short
+# schedule, because waiting does not fix those.
+#
+# Defaults, overridable with UXAGENT_LLM_RETRY_ATTEMPTS / UXAGENT_LLM_RETRY_MAX_WAIT:
+# 6 tries wait at most 4+8+16+32+45 s between them, which outlasts a per-minute
+# quota window; the 150 s cap on all waiting in one call keeps a dead endpoint
+# from stalling a persona (a server hint can be long) for hours.
+_DEFAULT_TRANSIENT_ATTEMPTS = 6
+_DEFAULT_MAX_TOTAL_WAIT = 150.0
+_BACKOFF_START = 4.0  # ceiling of the first transient wait; doubles per attempt
+_BACKOFF_CAP = 45.0  # no single wait ceiling above this
+_HINT_CAP = 90.0  # longest server-suggested wait honoured
+_RELEASE_JITTER = 1.5  # max extra seconds after waiting out the shared cooldown
+
+# Injection points for tests/test_llm_retry.py (no real sleeping or waiting there).
+_sleep = asyncio.sleep
+_monotonic = time.monotonic
+_uniform = random.uniform
+
+_PERMANENT, _TRANSIENT, _RATE_LIMITED = "permanent", "transient", "rate-limited"
+_TRANSIENT_STATUS = (429, 500, 502, 503, 504)
+
+
+def _types(module: str, *names: str) -> tuple:
+    """Exception classes by name; any this litellm/openai version lacks is skipped."""
+    try:
+        mod = importlib.import_module(module)
+    except Exception:
+        return ()
+    return tuple(c for c in (getattr(mod, n, None) for n in names) if isinstance(c, type))
+
+
+# The router's own "no deployments available, try again in N seconds" is what a
+# 429 turns into for the next calls while litellm holds the deployment in cooldown.
+_RATE_LIMIT_TYPES = (
+    _types("litellm.exceptions", "RateLimitError")
+    + _types("openai", "RateLimitError")
+    + _types("litellm.types.router", "RouterRateLimitError", "RouterRateLimitErrorBasic")
+)
+_TRANSIENT_TYPES = (
+    _RATE_LIMIT_TYPES
+    + _types("litellm.exceptions", "ServiceUnavailableError", "InternalServerError",
+             "BadGatewayError", "Timeout", "APIConnectionError")
+    + _types("openai", "InternalServerError", "APITimeoutError", "APIConnectionError")
+    + (asyncio.TimeoutError,)
+)
+# Checked first, so a message that happens to say "quota" (Google's "requires a
+# quota project" is a permission error) can never turn one of these into a wait.
+_PERMANENT_TYPES = (
+    _types("litellm.exceptions", "AuthenticationError", "PermissionDeniedError", "NotFoundError",
+           "BadRequestError", "UnprocessableEntityError", "ContentPolicyViolationError",
+           "ContextWindowExceededError")
+    + _types("openai", "AuthenticationError", "PermissionDeniedError", "NotFoundError",
+             "BadRequestError", "UnprocessableEntityError")
+)
+# litellm turns every exception it cannot map into an APIConnectionError (status
+# 500) with the original text inside, so a missing or invalid Vertex credentials
+# file would otherwise be retried for minutes as if the network were flaky.
+_PERMANENT_TEXT = re.compile(
+    r"DefaultCredentialsError|Could not automatically determine credentials"
+    r"|invalid_grant|UNAUTHENTICATED|PERMISSION_DENIED|API_KEY_INVALID|API key not valid"
+)
+_RATE_LIMIT_TEXT = re.compile(r"resource_exhausted|too many requests|rate[ _-]?limit", re.IGNORECASE)
+_TRANSIENT_TEXT = re.compile(r"quota|overloaded", re.IGNORECASE)
+_UNAVAILABLE_TEXT = re.compile(r"\bUNAVAILABLE\b")  # gRPC status name, so case-sensitive
+
+_HINT_PATTERNS = (
+    re.compile(r"retry(?:ing)?\s+in\s+(\d+(?:\.\d+)?)\s*(ms|s)?", re.IGNORECASE),  # "Please retry in 12.3s"
+    re.compile(r"try\s+again\s+in\s+(\d+(?:\.\d+)?)\s*(ms|s)", re.IGNORECASE),  # router cooldown
+    re.compile(r"retryDelay\W{1,8}(\d+(?:\.\d+)?)\s*(ms|s)?", re.IGNORECASE),  # "retryDelay": "12s"
+)
+
+
+def _status_code(exc: BaseException) -> Optional[int]:
+    for holder in (exc, getattr(exc, "response", None)):
+        try:
+            return int(getattr(holder, "status_code"))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _classify(exc: Exception) -> str:
+    if isinstance(exc, _PERMANENT_TYPES):
+        return _PERMANENT
+    text = str(exc)
+    if _PERMANENT_TEXT.search(text):
+        return _PERMANENT
+    status = _status_code(exc)
+    if isinstance(exc, _RATE_LIMIT_TYPES) or status == 429 or _RATE_LIMIT_TEXT.search(text):
+        return _RATE_LIMITED
+    if (
+        isinstance(exc, _TRANSIENT_TYPES)
+        or status in _TRANSIENT_STATUS
+        or _TRANSIENT_TEXT.search(text)
+        or _UNAVAILABLE_TEXT.search(text)
+    ):
+        return _TRANSIENT
+    return _PERMANENT
+
+
+def is_transient_error(exc: BaseException) -> bool:
+    """True for rate limits, overload and transient upstream/connection errors:
+    waiting can fix those. False for everything else, including cancellation."""
+    return isinstance(exc, Exception) and _classify(exc) != _PERMANENT
+
+
+def _server_hint(exc: Exception) -> Optional[float]:
+    """Seconds the server asked us to wait: a Retry-After header, or "retry in
+    12.3s" / retryDelay / "try again in 5 seconds" in the message."""
+    found = []
+    for holder in (getattr(exc, "response", None), exc):
+        try:
+            items = list(holder.headers.items())
+        except Exception:
+            continue
+        for key, value in items:
+            if str(key).lower() == "retry-after":
                 try:
-                    return await f(*args, **kwargs)
-                except Exception as exc:
-                    last_exc = exc
-                    print("got exc", exc)
-                    await asyncio.sleep(wait)
-                    wait = min(wait * 2, max_wait)
-                    pass
-            if last_exc:
-                raise last_exc
+                    found.append(float(value))
+                except (TypeError, ValueError):
+                    pass  # an HTTP-date, or junk: no hint
+    text = str(exc)
+    for pattern in _HINT_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            seconds = float(m.group(1))
+            found.append(seconds / 1000 if (m.group(2) or "").lower() == "ms" else seconds)
+    found = [s for s in found if math.isfinite(s) and s >= 0]
+    return max(found) if found else None
+
+
+_warned_env: set = set()  # a bad value is said once, not on every call
+
+
+def _env_number(name: str, default, cast, lo, hi):
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = cast(raw.strip())
+        if not lo <= value <= hi:  # also False for NaN
+            raise ValueError(raw)
+        return value
+    except ValueError:
+        if (name, raw) not in _warned_env:
+            _warned_env.add((name, raw))
+            print(f"{name}={raw!r} is not usable; using {default}")
+        return default
+
+
+def _transient_attempts() -> int:
+    return _env_number("UXAGENT_LLM_RETRY_ATTEMPTS", _DEFAULT_TRANSIENT_ATTEMPTS, int, 1, 20)
+
+
+def _max_total_wait() -> float:
+    return _env_number("UXAGENT_LLM_RETRY_MAX_WAIT", _DEFAULT_MAX_TOTAL_WAIT, float, 0.0, 1800.0)
+
+
+# Process-wide "do not call before" time, a plain float of time.monotonic(). The
+# personas of a run share one event loop, but a run has its own thread and loop
+# and the wizard's endpoints call from request threads, so nothing here may be
+# an asyncio primitive: callers just read the float and sleep in their own loop.
+# The lock only guards the write (never held across an await).
+_cooldown_until = 0.0
+_cooldown_lock = threading.Lock()
+
+
+def set_cooldown(until: float) -> float:
+    """Ask every caller to hold off until `until` (time.monotonic()). Only ever
+    moves the time later; returns the time now in force."""
+    global _cooldown_until
+    with _cooldown_lock:
+        if until > _cooldown_until:
+            _cooldown_until = until
+        return _cooldown_until
+
+
+class _WaitBudget:
+    """Seconds one call has spent waiting. Shared by the nested async_chat of the
+    finish_reason == 'length' retry, so recursing cannot multiply the allowance."""
+
+    __slots__ = ("limit", "spent")
+
+    def __init__(self, limit: float):
+        self.limit = limit
+        self.spent = 0.0
+
+    @property
+    def left(self) -> float:
+        return self.limit - self.spent
+
+
+_wait_budget: contextvars.ContextVar = contextvars.ContextVar("uxagent_llm_wait_budget", default=None)
+
+
+async def _wait_out_cooldown(budget: _WaitBudget) -> None:
+    """Hold until the shared cooldown has passed (re-checked after waking, since
+    another call may have pushed it later), then a little random release jitter
+    so the callers that waited do not all fire at the same instant. Bounded by
+    what is left of this call's wait budget."""
+    while True:
+        remaining = _cooldown_until - _monotonic()
+        if remaining <= 0 or budget.left <= 0:
+            return
+        pause = min(remaining + _uniform(0, _RELEASE_JITTER), budget.left)
+        await _sleep(pause)
+        budget.spent += pause
+
+
+def _brief(exc: Exception) -> str:
+    return " ".join(str(exc).split())[:160]
+
+
+async def _call_with_retry(call, times: int, budget: _WaitBudget):
+    transient_attempts = _transient_attempts()
+    attempt = 0
+    permanent_seen = False
+    while True:
+        attempt += 1
+        await _wait_out_cooldown(budget)
+        try:
+            return await call()
+        except Exception as exc:  # CancelledError is not an Exception: it propagates
+            kind = _classify(exc)
+            permanent_seen = permanent_seen or kind == _PERMANENT
+            # One permanent error caps the call at `times` tries even if the next
+            # answer looks transient: after an auth failure the router answers
+            # "no deployments available" for a while, which is not a reason to
+            # wait for minutes.
+            limit = times if permanent_seen else transient_attempts
+            if kind == _PERMANENT:
+                wait = min(2 ** (attempt - 1), 5)  # 1 s, 2 s, ...
+            else:
+                ceiling = min(_BACKOFF_START * 2 ** (attempt - 1), _BACKOFF_CAP)
+                wait = ceiling / 2 + _uniform(0, ceiling / 2)
+                hint = _server_hint(exc)
+                if hint is not None:
+                    wait = max(wait, min(hint, _HINT_CAP))
+            # A 429 is news for every caller, whether or not this one retries.
+            cooled = kind == _RATE_LIMITED
+            if cooled:
+                set_cooldown(_monotonic() + wait)
+            where = f"{type(exc).__name__} ({kind}) on attempt {attempt}/{limit}"
+            note = ", shared cooldown set" if cooled else ""
+            if attempt >= limit:
+                print(f"[llm] {where}: giving up{note}: {_brief(exc)}")
+                raise
+            if kind != _PERMANENT and wait > budget.left:
+                print(f"[llm] {where}: giving up, wait budget of {budget.limit:.0f}s spent{note}: {_brief(exc)}")
+                raise
+            print(f"[llm] {where}: retrying in {wait:.1f}s{note}: {_brief(exc)}")
+            await _sleep(wait)
+            if kind != _PERMANENT:
+                budget.spent += wait
+
+
+def async_retry(times=3):
+    """Retry the wrapped coroutine function. `times` is the number of tries for an
+    error that waiting cannot fix (1 s, 2 s apart); transient errors get more
+    tries and longer waits (see _call_with_retry) and every try first waits out
+    the shared rate-limit cooldown."""
+
+    def func_wrapper(f):
+        @functools.wraps(f)
+        async def wrapper(*args, **kwargs):
+            outer = _wait_budget.get()
+            budget = outer if outer is not None else _WaitBudget(_max_total_wait())
+            token = _wait_budget.set(budget) if outer is None else None
+            try:
+                return await _call_with_retry(lambda: f(*args, **kwargs), times, budget)
+            finally:
+                if token is not None:
+                    _wait_budget.reset(token)
 
         return wrapper
 
     return func_wrapper
+
+
+_STEP_RETRY_PAUSE = 10.0
+
+
+def step_retry_pause(exc: BaseException) -> float:
+    """Seconds experiment.py waits before it re-runs a failed step once. async_chat
+    has just spent its own backoff on an overloaded endpoint, so an immediate
+    re-run only meets the same answer. 0 for anything that is not transient."""
+    if not is_transient_error(exc):
+        return 0.0
+    return _STEP_RETRY_PAUSE / 2 + _uniform(0, _STEP_RETRY_PAUSE / 2)
 
 
 def _extract_json_string(text: str) -> str:
@@ -430,6 +711,12 @@ async def async_chat(
     return content
 
 
+@async_retry(times=3)
+async def _embed(texts: list[str]) -> list[list[float]]:
+    response = await embed_router.aembedding(model=provider, input=texts)
+    return [e["embedding"] for e in response.data]
+
+
 async def embed_text(texts: list[str]) -> list[list[float]]:
     """
     Embed a list of texts using the provider configured in /src/simulated_web_agent/agent/gpt.py
@@ -438,8 +725,7 @@ async def embed_text(texts: list[str]) -> list[list[float]]:
         List of list[float] representing each of the embedded texts
     """
     try:
-        response = await embed_router.aembedding(model=provider, input=texts)
-        return [e["embedding"] for e in response.data]
+        return await _embed(texts)
     except Exception as e:
         print(texts)
         print(e)

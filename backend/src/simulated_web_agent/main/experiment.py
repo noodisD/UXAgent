@@ -822,6 +822,9 @@ async def _run_for_persona_and_intent(
             except Exception as step_exc:
                 log.warning("[%s] step %d forward failed (%r) — re-observing and "
                             "retrying once", run_uid, steps_taken, step_exc)
+                # After a rate limit or overload gpt.py has already spent its
+                # backoff; an immediate re-run would only meet the same answer.
+                await asyncio.sleep(gpt.step_retry_pause(step_exc))
                 obs = await env.observation()
                 action = await policy.forward(env, obs)
 
