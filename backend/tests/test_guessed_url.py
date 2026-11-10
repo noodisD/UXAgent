@@ -102,7 +102,8 @@ def _finding(step, evidence, recommendation="Napisać stronę lepiej.", **extra)
 # --- detection ---------------------------------------------------------------------------
 
 def test_an_address_the_page_did_not_link_to_that_loads_an_error_page_is_a_guess(tmp_path):
-    assert attribution.guessed_address_steps(_marta(tmp_path)) == {3: {"url": TYPED, "action_step": 2}}
+    assert attribution.guessed_address_steps(_marta(tmp_path)) == {
+        3: {"url": TYPED, "action_step": 2, "from_error_page": False}}
 
 
 @pytest.mark.parametrize("href", [
@@ -125,7 +126,8 @@ def test_a_link_in_an_attribute_a_menu_script_reads_counts_as_linked(tmp_path):
 def test_a_relative_typed_address_is_resolved_against_the_page_it_was_typed_on(tmp_path):
     """The harness resolves it the same way (env.resolve_url), so '/x' is the site's /x."""
     store = _marta(tmp_path, typed="/placowki-i-bankomaty", after_url=TYPED)
-    assert attribution.guessed_address_steps(store) == {3: {"url": TYPED, "action_step": 2}}
+    assert attribution.guessed_address_steps(store) == {
+        3: {"url": TYPED, "action_step": 2, "from_error_page": False}}
     linked = PAGE_WITHOUT_THE_LINK.replace("</ul>", '<li><a href="/placowki-i-bankomaty">x</a></li></ul>')
     assert attribution.guessed_address_steps(
         _marta(tmp_path, name="linked", typed="/placowki-i-bankomaty", after_url=TYPED, page=linked)) == {}
@@ -571,3 +573,205 @@ def test_the_feedback_prompt_does_not_let_the_participant_call_its_own_address_a
     prompt = " ".join(registry.get("feedback").split())
     assert "the address was one I typed myself" in prompt
     assert "do not write that a link is broken or that a page is missing from the site" in prompt
+
+
+# --- where the detection and the blame test stop ---------------------------------------------
+
+NOT_FOUND_PAGE = (f"<html><head><title>{NOT_FOUND_TITLE}</title></head><body>{NOT_FOUND_TEXT}"
+                  '<a href="/kontakt">Kontakt</a></body></html>')
+
+
+def _page(*links):
+    return ("<html><head><title>Strona</title></head><body>"
+            + "".join(f'<a href="{href}">x</a>' for href in links) + "</body></html>")
+
+
+def _session(tmp_path, name, actions, pages, raws):
+    """pages: (url, title, text) for each observation; raws: {step: markup}."""
+    store = TraceStore(tmp_path / name)
+    store.write_action_trace([json.dumps(a) for a in actions])
+    for i, (url, title, text) in enumerate(pages):
+        store.append_observation(_obs(url, title))
+        store.write_observation_step_text(i, text)
+    for step, markup in raws.items():
+        store.write_raw_html(step, markup)
+    return store
+
+
+def _goto(url):
+    return {"action": "goto_url", "url": url, "description": "Navigating"}
+
+
+def _click(label):
+    return {"action": "click", "target": label, "description": f"Clicking '{label}'"}
+
+
+@pytest.mark.parametrize("typed", ["https://[domena]/x", "http://[::1", "https://[a/b"])
+@pytest.mark.asyncio
+async def test_a_placeholder_the_model_wrote_is_no_address_and_breaks_no_pass(tmp_path, typed):
+    """textutil.view_key says such placeholders occur; urlparse raises on them, and the
+    exception left the audit pass, the flagging and the reflection of that persona."""
+    store = _marta(tmp_path, typed=typed, after_url=TYPED)
+    assert attribution.guessed_address_steps(store) == {}
+    assert attribution.guessed_only_dead_ends(store) == {} and attribution.guessed_address_note(store) is None
+    findings = [_finding(3, REAL_EVIDENCE, REAL_FIX)]
+    attribution.flag_harness_suspects(store, findings)
+    assert not findings[0]["harness_suspect"]
+    assert "ADDRESS TYPED" not in _actions_section(await _heuristic_prompt(store))
+    assert (await _reflection_payload(store))["typed_address_note"] is None
+    assert route_summary(store)
+
+
+def _dead_link_then_guess(tmp_path):
+    """The site's own link leads to a 404 (obs 1); from that page the participant types an
+    address of its own, which is a 404 too (obs 2)."""
+    return _session(
+        tmp_path, "real_then_guess", [_click("stary_link"), _goto(TYPED)],
+        [(f"{SITE}/", "BNP PARIBAS", "Strona główna."),
+         (f"{SITE}/stary-link", NOT_FOUND_TITLE, NOT_FOUND_TEXT),
+         (TYPED, NOT_FOUND_TITLE, NOT_FOUND_TEXT)],
+        {0: _page("/stary-link", "/kontakt"), 1: NOT_FOUND_PAGE, 2: NOT_FOUND_PAGE})
+
+
+def test_a_guess_typed_on_an_error_page_says_so(tmp_path):
+    guessed = attribution.guessed_address_steps(_dead_link_then_guess(tmp_path))
+    assert guessed == {2: {"url": TYPED, "action_step": 1, "from_error_page": True}}
+
+
+def test_a_dead_link_of_the_site_is_not_held_because_a_guess_was_typed_on_its_error_page(tmp_path):
+    """Step 1 is the site's own 404; the participant typing something there afterwards does
+    not make the link that led to it the participant's doing."""
+    store = _dead_link_then_guess(tmp_path)
+    real = "Po kliknięciu odnośnika 'Stary link' użytkownik trafia na stronę błędu 404."
+    findings = [_finding(1, real, "Naprawić niedziałający link."), _finding(2, real, "Naprawić niedziałający link.")]
+    attribution.flag_harness_suspects(store, findings)
+    assert not findings[0]["harness_suspect"] and findings[0]["harness_cause"] is None
+    assert findings[1]["harness_cause"]["code"] == "guessed_address"  # the page the guess itself made
+    assert attribution.guessed_only_dead_ends(store) == {}  # the same session keeps the blockers
+
+
+def _earlier_page_links(tmp_path, a_links, name):
+    """A links to /dead (or not), the participant clicks on to B, which does not, and types /dead."""
+    return _session(
+        tmp_path, name, [_click("b"), _goto(f"{SITE}/dead")],
+        [(f"{SITE}/a", "Strona A", "Strona A."), (f"{SITE}/b", "Strona B", "Strona B."),
+         (f"{SITE}/dead", NOT_FOUND_TITLE, NOT_FOUND_TEXT)],
+        {0: _page(*a_links), 1: _page("/a", "/kontakt"), 2: NOT_FOUND_PAGE})
+
+
+def test_an_address_an_earlier_page_linked_to_is_the_sites_own(tmp_path):
+    """The site did link to it, from a page the participant had left: a dead link of the site."""
+    linked = _earlier_page_links(tmp_path, ("/b", "/dead"), "linked")
+    assert attribution.guessed_address_steps(linked) == {}
+    findings = [_finding(2, "Link 'Dead' na stronie A prowadzi do błędu 404.", "Naprawić link.")]
+    attribution.flag_harness_suspects(linked, findings)
+    assert not findings[0]["harness_suspect"]
+    # the same session when no page linked to it is the guess it looks like
+    assert set(attribution.guessed_address_steps(_earlier_page_links(tmp_path, ("/b",), "unlinked"))) == {2}
+
+
+def test_typing_the_same_made_up_address_again_is_a_second_guess(tmp_path):
+    """The 404 page the first guess showed has that address in its bar; that is not having been there."""
+    store = _session(
+        tmp_path, "twice", [_goto(TYPED), {"action": "back", "description": "Going back"}, _goto(TYPED)],
+        [(FROM_PAGE, "Hipoteczny", "Hipoteczny."), (TYPED, NOT_FOUND_TITLE, NOT_FOUND_TEXT),
+         (FROM_PAGE, "Hipoteczny", "Hipoteczny."), (TYPED, NOT_FOUND_TITLE, NOT_FOUND_TEXT)],
+        {0: PAGE_WITHOUT_THE_LINK, 1: NOT_FOUND_PAGE, 2: PAGE_WITHOUT_THE_LINK, 3: NOT_FOUND_PAGE})
+    assert set(attribution.guessed_address_steps(store)) == {1, 3}
+    assert set(attribution.guessed_only_dead_ends(store)) == {1, 3}
+
+
+def test_an_address_that_showed_an_error_page_after_a_real_click_is_still_one_the_participant_had_seen(tmp_path):
+    store = _session(
+        tmp_path, "seen", [_click("x"), {"action": "back", "description": "Going back"}, _goto(f"{SITE}/x")],
+        [(f"{SITE}/", "BNP PARIBAS", "Strona główna."), (f"{SITE}/x", NOT_FOUND_TITLE, NOT_FOUND_TEXT),
+         (f"{SITE}/", "BNP PARIBAS", "Strona główna."), (f"{SITE}/x", NOT_FOUND_TITLE, NOT_FOUND_TEXT)],
+        {0: _page("/kontakt"), 1: NOT_FOUND_PAGE, 2: _page("/kontakt"), 3: NOT_FOUND_PAGE})
+    assert attribution.guessed_address_steps(store) == {}
+
+
+# What is said about a step of the typed address, and is not about its dead end: a price that
+# happens to be 404 or 410, a thing missing on a page, a link that is out of date.
+OTHER_CLAIMS = [
+    "Rata kredytu 410 zł miesięcznie jest wyświetlona bez objaśnienia, z czego się składa.",
+    "Suwak kwoty pozwala wybrać maksymalnie 404 000 zł, ale nie podaje limitu dochodowego.",
+    "Rata wynosi 404,50 zł, ale strona nie tłumaczy jej składników.",
+    "Na stronie nie istnieje widoczna informacja o prowizji.",
+    "Opcja darmowego konta nie istnieje w ofercie, a strona o tym nie informuje.",
+    "Link do regulaminu jest nieaktualny i wprowadza użytkownika w błąd.",
+]
+# On the page the address was typed from, not on the error page that followed it.
+OTHER_CLAIMS_BEFORE = [
+    "Po kliknięciu 'Wyślij' pojawia się błąd walidacji formularza.",
+    "Po kliknięciu 'Szukaj' nie znaleziono wyników.",
+    "Link do polityki prywatności jest uszkodzony.",
+]
+
+
+@pytest.mark.parametrize("step, claim", [(3, c) for c in OTHER_CLAIMS] + [(2, c) for c in OTHER_CLAIMS + OTHER_CLAIMS_BEFORE])
+def test_a_finding_about_something_else_on_the_typed_address_steps_is_not_held(tmp_path, step, claim):
+    findings = [_finding(step, claim, "Poprawić to.")]
+    attribution.flag_harness_suspects(_marta(tmp_path), findings)
+    f = findings[0]
+    assert not f["harness_suspect"] and f["harness_cause"] is None and not excluded_from_report(f), claim
+
+
+@pytest.mark.parametrize("claim", [
+    "Po kliknięciu 'Oblicz' rata wynosi 410 zł miesięcznie.",
+    "Link do oferty prowadzi do raty 404,50 zł.",
+    "Odnośnik kieruje do kwoty 410 000 zł.",
+    "Po przejściu do symulatora widać kwotę 404 000 zł.",
+])
+def test_a_price_after_a_click_is_not_an_error_code_even_on_the_error_page_step(claim):
+    """The finding cites the error page itself, so only the wording decides; a figure is not a 404."""
+    assert not attribution.finding_blames_dead_address({"step": 3, "evidence": claim, "recommendation": claim})
+
+
+def test_on_the_page_the_address_was_typed_from_the_claim_must_name_the_dead_end(tmp_path):
+    """The model often cites the step before the error page; a broken link is then the
+    participant's own only if the claim names the error, the address or the click that led to it."""
+    named = ("Link do lokalizatora jest uszkodzony, a adres /placowki-i-bankomaty nie działa.",
+             "Odnośnik do lokalizatora prowadzi do strony 404.", "Link do lokalizatora kieruje donikąd.")
+    for i, claim in enumerate(named):
+        findings = [_finding(2, claim, "Naprawić to.")]
+        attribution.flag_harness_suspects(_marta(tmp_path, name=f"named{i}"), findings)
+        assert findings[0]["harness_cause"]["code"] == "guessed_address", claim
+
+
+@pytest.mark.parametrize("text", [
+    "Marta obliczyła ratę 410 zł miesięcznie i przeszła dalej.",
+    "Rata wynosi 404,50 zł.",
+    "Wkład własny 410 000 zł.",
+    "Opcja darmowego konta nie istnieje w ofercie.",
+    "Na stronie nie istnieje informacja o prowizji.",
+    "Po kliknięciu 'Wyślij' pojawia się błąd walidacji formularza.",
+    "Po kliknięciu 'Szukaj' nie znaleziono wyników.",
+    "Link do regulaminu jest nieaktualny.",
+])
+def test_free_text_about_something_else_is_not_cleaned(text):
+    assert not attribution.text_blames_dead_address(text)
+    assert attribution.without_dead_address_blame(text) == text
+
+
+@pytest.mark.parametrize("text", [
+    "Błąd 404 po kliknięciu odnośnika kierującego do placówek i bankomatów.",
+    "Strona z placówkami nie istnieje.",
+    "Podstrona z placówkami nie została odnaleziona.",
+    "Po kliknięciu odnośnika użytkownik trafia na stronę z błędem.",
+    "Po kliknięciu odnośnika do placówek pojawia się strona nie odnaleziona.",
+    "Naprawić uszkodzony link do lokalizatora placówek.",
+    "Link do lokalizatora kieruje donikąd.",
+])
+def test_free_text_that_blames_the_dead_address_is_still_cleaned(text):
+    assert attribution.text_blames_dead_address(text), text
+    assert attribution.without_dead_address_blame(text) == ""
+
+
+def test_the_account_of_a_session_with_a_typed_address_keeps_what_is_not_about_it(tmp_path):
+    kept = ["Opcja darmowego konta nie istnieje w ofercie.", "Rata 404,50 zł jest podana bez objaśnienia.",
+            "Po kliknięciu 'Wyślij' pojawia się błąd walidacji."]
+    store = _with_reflection(_marta(tmp_path), blockers=[*kept, REAL_BLOCKERS[1]],
+                             summary="Marta obliczyła ratę 410 zł miesięcznie i przeszła dalej. Znalazła symulator.")
+    (row,) = aggregate_statistics([_report_for(store, [])], stores=[store])["objective_reflections"]
+    assert row["blockers"] == kept
+    assert row["summary"] == "Marta obliczyła ratę 410 zł miesięcznie i przeszła dalej. Znalazła symulator."

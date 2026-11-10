@@ -286,9 +286,9 @@ _NOT_FOUND_PAGE = re.compile(
     r"|stron\w*\s+(?:\w+\s+){0,3}nie\s+istnieje"
     r"|nie\s+(?:odnaleziono|znaleziono|można\s+znaleźć)\s+(?:\w+\s+){0,2}stron"
     r"|\bnot\s+found\b|\b(?:page|url)\s+(?:\w+\s+){0,2}does\s*n[o’']?t\s+exist", re.I)
-# 404 and 410, not the number in a price or a list of figures.
-_ERROR_CODE = re.compile(
-    r"(?<![\d.,])(?:404|410)(?!\d)(?!\s*[\d%])(?!\s*(?:zł|pln|eur|€|usd|\$))", re.I)
+# 404 and 410, not the number in a price or a list of figures ("410 zł", "404 000", "404,50").
+_CODE = r"(?<![\d.,])(?:404|410)(?!\d)(?![,.]\d)(?!\s*[\d%])(?!\s*(?:zł|pln|eur|€|usd|\$))"
+_ERROR_CODE = re.compile(_CODE, re.I)
 _STATUS_WORD = re.compile(r"\b(?:error|błąd|blad|status|http|kod|code|page|stron\w*)\b", re.I)
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 # When the title says nothing, the code must sit this near a phrase ("404Nie można znaleźć…").
@@ -366,16 +366,28 @@ def _error_page_at(store: TraceStore, step: int, tab: dict, deep: bool = True) -
     return _is_error_page(_html.unescape(m.group(1)) if m else "", _visible_text(raw))
 
 
+def _linked_earlier(store: TraceStore, observations: list, upto: int, key: str) -> bool:
+    """Did a page the participant saw before step `upto` link to this address (as _address_key)?"""
+    for i in range(upto - 1, -1, -1):
+        base = str(_tab(observations[i]).get("url") or "")
+        linked = _linked_addresses(store.read_raw_html(i), base) if base else None
+        if linked and key in linked:
+            return True
+    return False
+
+
 def guessed_address_steps(store: TraceStore) -> dict[int, dict]:
-    """Observation index -> {"url", "action_step"} for each error page the participant reached
-    by typing an address (goto_url) that the page it was on did not link to.
+    """Observation index -> {"url", "action_step", "from_error_page"} for each error page the
+    participant reached by typing an address (goto_url) that the page it was on did not link to.
 
     observations[k] is the page the participant was on when it chose action k, raw_html_k its
     capture and observations[k + 1] what the typed address loaded. The address is the site's
-    own, not a guess, when that page links to it or when the participant had already been
-    there (the start address, any page it saw: all are in its address bar). Unknown counts as
-    not guessed: a capture that is missing or holds no link at all says nothing about what
-    the page linked to, and an address that loaded an ordinary page changes nothing."""
+    own, not a guess, when that page, or one it saw earlier, links to it, or when the participant
+    had already been there (the start address, a page it saw: all are in its address bar), the
+    error page of an earlier guess excepted: typing that address again is the same guess.
+    Unknown counts as not guessed: a capture that is missing or holds no link at all says
+    nothing about what the page linked to, and an address that loaded an ordinary page changes
+    nothing. `from_error_page`: the page it typed the address on was an error page itself."""
     try:
         typed_at = [(k, _parse_action(raw)) for k, raw in enumerate(store.read_action_trace() or [])]
         typed_at = [(k, a) for k, a in typed_at
@@ -394,18 +406,25 @@ def guessed_address_steps(store: TraceStore) -> dict[int, dict]:
         before = str(_tab(observations[k]).get("url") or "")
         if not before:
             continue
-        typed = resolve_url(str(a["url"]), before)
+        try:
+            typed = resolve_url(str(a["url"]), before)
+        except ValueError:  # "https://[domena]/x": a placeholder the model wrote, not an address
+            continue
         key = _address_key(typed)
-        seen = {_address_key(t.get("url")) for obs in observations[:k + 1] if isinstance(obs, dict)
+        seen = {_address_key(t.get("url")) for i, obs in enumerate(observations[:k + 1])
+                if i not in out and isinstance(obs, dict)
                 for t in (obs.get("tabs") or []) if isinstance(t, dict)
                 and str(t.get("url") or "").startswith("http")}
-        linked = _linked_addresses(store.read_raw_html(k), before)
-        if linked is None or key in linked or key in seen:
+        if key in seen:
             continue
         after = _tab(observations[k + 1])
         if _address_key(after.get("url")) == _address_key(before) or not _error_page_at(store, k + 1, after):
             continue
-        out[k + 1] = {"url": typed, "action_step": k}
+        linked = _linked_addresses(store.read_raw_html(k), before)
+        if linked is None or key in linked or _linked_earlier(store, observations, k, key):
+            continue
+        out[k + 1] = {"url": typed, "action_step": k,
+                      "from_error_page": _error_page_at(store, k, _tab(observations[k]))}
     return out
 
 
@@ -441,10 +460,16 @@ def guessed_address_note(store: TraceStore) -> str | None:
 # page itself, and not held: its message, looks, or what it lacks or should offer. Naming the
 # link or the click as the cause outweighs that; an adverb does not make a link broken
 # ("błędnie zinterpretował adres" is a geocoder, not a dead link).
+# The page or the address is what does not exist ("na stronie nie istnieje informacja" and
+# "opcja nie istnieje w ofercie" say that something is missing, not that the address is dead).
+_MISSING = (r"(?:\b(?:pod)?stron(?!ie\b)\w*|\badres\w*|\burl)\s+(?:\w+\s+){0,3}"
+            r"nie\s+(?:zosta\w+\s+)?(?:odnalezion|znalezion|istnieje)"
+            r"|nie\s+(?:odnaleziono|znaleziono|można\s+znaleźć)\s+(?:\w+\s+){0,2}(?:pod)?stron")
 _DEAD_END = re.compile(
-    r"(?<![\d.,])(?:404|410)(?!\d)|nie\s+(?:zosta\w+\s+)?(?:odnalez|znalez)|nie\s+istnieje|nieistniej|"
+    rf"{_CODE}|{_MISSING}|nieistniej|"
     r"stron\w*\s+(?:z\s+)?bł[ąę]d|bł[ąę]d\w*\s+stron|donikąd|(?:broken|dead)\s+link|not\s+found", re.I)
-_BROKEN = (r"(?:uszkodzon|zepsut|martw(?!o)|niedziałając|nieaktualn(?!ie)|błędn(?!ie)|nieprawidłow(?!o)|"
+# "nieaktualny" is a stale link (an old regulamin), not a dead one.
+_BROKEN = (r"(?:uszkodzon|zepsut|martw(?!o)|niedziałając|błędn(?!ie)|nieprawidłow(?!o)|"
            r"niepoprawn(?!ie)|wadliw(?!ie))")
 _LINKISH = r"(?:link|odnośnik|url|adres\s+(?:url|strony))"
 _AFTER_CLICK = r"(?<!\w)(?:po|przy)\s+(?:klikni|przejści|wybran|nawigac)\w*"
@@ -458,14 +483,14 @@ _LINK_BROKEN = re.compile(
 # in: "after choosing it the page 'Strona nie odnaleziona' appears" says it in the quote.
 _LINK_TO_ERROR = re.compile(
     rf"{_LINKISH}\w*\s+(?:\w+\s+){{0,3}}?(?:prowadz|kieruj|przekierow|wiedzie)\w*\s+(?:\w+\s+){{0,3}}?"
-    r"(?:404|410|bł[ąę]d|nieistniej|donikąd)"
-    rf"|{_AFTER_CLICK}[^.;!?]{{0,120}}?(?:404|410|bł[ąę]d|nie\s+(?:odnalez|znalez)|nie\s+istnieje|niedostępn)"
-    rf"|(?:404|410|bł[ąę]d\w*)\s+(?:\w+\s+){{0,3}}?{_AFTER_CLICK}"
+    rf"(?:{_CODE}|bł[ąę]d|nieistniej|donikąd)"
+    rf"|{_AFTER_CLICK}[^.;!?]{{0,120}}?(?:{_CODE}|bł[ąę]d|nie\s+(?:odnalez|znalez)|nie\s+istnieje|niedostępn)"
+    rf"|(?:{_CODE}|bł[ąę]d\w*)\s+(?:\w+\s+){{0,3}}?{_AFTER_CLICK}"
     r"|(?:klikni|nawigac|przejści|przejśc|wybran|zakładk)\w*\s+(?:\w+\s+){0,6}?"
     r"(?:kończ\w+\s+się|skutkuj|prowadz|powodu|zwraca|kieruj|przekierow)\w*[^.;!?]{0,60}?"
-    r"(?:404|410|bł[ąę]d|nie\s+(?:odnalez|znalez)|nie\s+istnieje)"
-    r"|przekierowa\w*\s+(?:\w+\s+){0,3}?(?:na|do)\s+(?:\w+\s+){0,3}?(?:bł[ąę]d|404|410|nie\s+odnalez)"
-    r"|(?:link|click)\w*[^.;!?]{0,60}?(?:404|not\s+found)", re.I)
+    rf"(?:{_CODE}|bł[ąę]d|nie\s+(?:odnalez|znalez)|nie\s+istnieje)"
+    rf"|przekierowa\w*\s+(?:\w+\s+){{0,3}}?(?:na|do)\s+(?:\w+\s+){{0,3}}?(?:bł[ąę]d|{_CODE}|nie\s+odnalez)"
+    rf"|(?:link|click)\w*[^.;!?]{{0,60}}?(?:{_CODE}|not\s+found)", re.I)
 # "The link does not work": said of a link, which needs the dead end beside it to be this one.
 _LINK_FAILS = re.compile(rf"{_LINKISH}\w*\s+(?:\w+\s+){{0,3}}?nie\s+(?:działa|prowadzi)", re.I)
 _ERROR_PAGE_DESIGN = re.compile(
@@ -493,8 +518,11 @@ def _sentences(text) -> list[tuple[str, str]]:
 
 def _sentence_blames(sentence: str, plain: str, anchored: bool = False) -> bool:
     """`anchored`: the claim is tied to the error page already, by the step a finding cites;
-    free text is not, and "the link does not work" then needs a dead end in the sentence."""
-    if _LINK_BROKEN.search(plain) or _LINK_TO_ERROR.search(sentence):
+    free text is not, and "the link does not work", or a click that ended in "an error", then
+    needs a dead end named in the sentence ("po kliknięciu 'Wyślij' pojawia się błąd walidacji")."""
+    if _LINK_BROKEN.search(plain):
+        return True
+    if _LINK_TO_ERROR.search(sentence) and (anchored or _DEAD_END.search(sentence)):
         return True
     dead = bool(_DEAD_END.search(plain))
     if _LINK_FAILS.search(plain) and (dead or anchored):
@@ -515,13 +543,27 @@ def without_dead_address_blame(text) -> str:
     return " ".join(s.strip() for s, plain in _sentences(text) if not _sentence_blames(s, plain))
 
 
-def finding_blames_dead_address(finding: dict) -> bool:
+def _names_dead_end(sentence: str, typed: str) -> bool:
+    """Does the sentence name the dead end itself: the error page or the address typed?"""
+    key = _address_key(typed)
+    path = key[key.index("/"):] if "/" in key else ""
+    return bool(_DEAD_END.search(sentence) or (len(path) > 1 and path in sentence.lower()))
+
+
+def finding_blames_dead_address(finding: dict, typed: str | None = None) -> bool:
     """The finding's own claim blames the site for a dead address. Its recommendation counts
     only when it tells the site to repair the link: advice on the error page ("add a search
-    box") is about the page that was shown."""
+    box") is about the page that was shown.
+
+    `typed`: the finding cites the page the address was typed on, an ordinary page, where a
+    broken link or a missing thing is not yet about this dead end; a sentence then counts only
+    when it names the error page or the address too."""
+    def counts(sentence: str) -> bool:
+        return typed is None or _names_dead_end(sentence, typed)
+
     claim = " ".join(str(finding.get(k) or "") for k in ("evidence", "description", "issue"))
-    return text_blames_dead_address(claim, anchored=True) or any(
-        _LINK_BROKEN.search(plain) or _LINK_TO_ERROR.search(s) or _LINK_FAILS.search(plain)
+    return any(_sentence_blames(s, plain, anchored=True) and counts(s) for s, plain in _sentences(claim)) or any(
+        (_LINK_BROKEN.search(plain) or _LINK_TO_ERROR.search(s) or _LINK_FAILS.search(plain)) and counts(s)
         for s, plain in _sentences(finding.get("recommendation")))
 
 
@@ -530,14 +572,20 @@ def _guessed_address_cause(finding: dict, guessed: dict) -> dict | None:
 
     Held when it cites that page, or the step where the address was typed, and says the
     link, the click or the page is at fault. Per claim, not per page: what the error page
-    shows or lacks is still the site's to answer for."""
+    shows or lacks is still the site's to answer for. The step where it was typed is an
+    ordinary page, so the claim must name the dead end; and when it is an error page, the
+    site's own dead link that led there is not the participant's doing."""
     try:
         step = int(finding.get("step"))
     except (TypeError, ValueError):
         return None
     for obs_step, info in guessed.items():
-        if step in (obs_step, info["action_step"]) and finding_blames_dead_address(finding):
-            return {"code": "guessed_address", "detail": info["url"], "step": obs_step}
+        cause = {"code": "guessed_address", "detail": info["url"], "step": obs_step}
+        if step == obs_step and finding_blames_dead_address(finding):
+            return cause
+        if (step == info["action_step"] and not info["from_error_page"]
+                and finding_blames_dead_address(finding, typed=info["url"])):
+            return cause
     return None
 
 
