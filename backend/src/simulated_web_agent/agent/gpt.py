@@ -63,6 +63,12 @@ def vertex_labels() -> Dict[str, str]:
     return out
 
 
+# Retrying is _call_with_retry's job (backoff, shared cooldown, wait budget). litellm's
+# default of 2 router retries would turn every try into up to 3 requests that the
+# cooldown cannot gate and the budget does not count, prolonging the quota window
+# the backoff is waiting out.
+_ROUTER_RETRIES = 0
+
 chat_router = Router(
     model_list=[
         {
@@ -148,7 +154,8 @@ chat_router = Router(
                 },
             },
         },
-    ]
+    ],
+    num_retries=_ROUTER_RETRIES,
 )
 
 slow_chat_router = Router(
@@ -223,7 +230,8 @@ slow_chat_router = Router(
                 },
             },
         },
-    ]
+    ],
+    num_retries=_ROUTER_RETRIES,
 )
 
 embed_router = Router(
@@ -244,7 +252,8 @@ embed_router = Router(
                 "truncate": "END",
             },
         },
-    ]
+    ],
+    num_retries=_ROUTER_RETRIES,
 )
 
 
@@ -272,6 +281,14 @@ _BACKOFF_START = 4.0  # ceiling of the first transient wait; doubles per attempt
 _BACKOFF_CAP = 45.0  # no single wait ceiling above this
 _HINT_CAP = 90.0  # longest server-suggested wait honoured
 _RELEASE_JITTER = 1.5  # max extra seconds after waiting out the shared cooldown
+
+# One try is cut at 180 s (litellm's own 120 s timeout, then a wait_for in case the
+# HTTP layer wedges). A hung endpoint fails by timeout, which is transient, and the
+# wait budget counts sleeping only, so 6 tries could take 6 x 180 s. One call, tries
+# included, therefore gets at most this much wall-clock time before it re-raises.
+_REQUEST_TIMEOUT = 120
+_HARD_TIMEOUT = 180
+_MAX_CALL_SECONDS = 360.0
 
 # Injection points for tests/test_llm_retry.py (no real sleeping or waiting there).
 _sleep = asyncio.sleep
@@ -320,6 +337,7 @@ _PERMANENT_TYPES = (
 _PERMANENT_TEXT = re.compile(
     r"DefaultCredentialsError|Could not automatically determine credentials"
     r"|invalid_grant|UNAUTHENTICATED|PERMISSION_DENIED|API_KEY_INVALID|API key not valid"
+    r"|Reauthentication is needed|ReauthFailError|FileNotFoundError"
 )
 _RATE_LIMIT_TEXT = re.compile(r"resource_exhausted|too many requests|rate[ _-]?limit", re.IGNORECASE)
 _TRANSIENT_TEXT = re.compile(r"quota|overloaded", re.IGNORECASE)
@@ -370,9 +388,15 @@ def _server_hint(exc: Exception) -> Optional[float]:
     """Seconds the server asked us to wait: a Retry-After header, or "retry in
     12.3s" / retryDelay / "try again in 5 seconds" in the message."""
     found = []
-    for holder in (getattr(exc, "response", None), exc):
+    # litellm keeps the provider's real headers on litellm_response_headers; its own
+    # synthetic httpx.Response for a mapped 429 carries none.
+    for headers in (
+        getattr(getattr(exc, "response", None), "headers", None),
+        getattr(exc, "headers", None),
+        getattr(exc, "litellm_response_headers", None),
+    ):
         try:
-            items = list(holder.headers.items())
+            items = list(headers.items())
         except Exception:
             continue
         for key, value in items:
@@ -438,18 +462,24 @@ def set_cooldown(until: float) -> float:
 
 
 class _WaitBudget:
-    """Seconds one call has spent waiting. Shared by the nested async_chat of the
-    finish_reason == 'length' retry, so recursing cannot multiply the allowance."""
+    """Seconds one call has spent waiting, and when it started. Shared by the nested
+    async_chat of the finish_reason == 'length' retry, so recursing cannot multiply
+    the allowance."""
 
-    __slots__ = ("limit", "spent")
+    __slots__ = ("limit", "spent", "started")
 
     def __init__(self, limit: float):
         self.limit = limit
         self.spent = 0.0
+        self.started = _monotonic()
 
     @property
     def left(self) -> float:
         return self.limit - self.spent
+
+    @property
+    def elapsed(self) -> float:
+        return _monotonic() - self.started
 
 
 _wait_budget: contextvars.ContextVar = contextvars.ContextVar("uxagent_llm_wait_budget", default=None)
@@ -507,8 +537,14 @@ async def _call_with_retry(call, times: int, budget: _WaitBudget):
             if attempt >= limit:
                 print(f"[llm] {where}: giving up{note}: {_brief(exc)}")
                 raise
-            if kind != _PERMANENT and wait > budget.left:
-                print(f"[llm] {where}: giving up, wait budget of {budget.limit:.0f}s spent{note}: {_brief(exc)}")
+            spent_up = None
+            if kind != _PERMANENT:
+                if wait > budget.left:
+                    spent_up = f"wait budget of {budget.limit:.0f}s spent"
+                elif budget.elapsed + wait > _MAX_CALL_SECONDS:
+                    spent_up = f"{_MAX_CALL_SECONDS:.0f}s limit on one call reached"
+            if spent_up:
+                print(f"[llm] {where}: giving up, {spent_up}{note}: {_brief(exc)}")
                 raise
             print(f"[llm] {where}: retrying in {wait:.1f}s{note}: {_brief(exc)}")
             await _sleep(wait)
@@ -670,12 +706,12 @@ async def async_chat(
             model=router_model,
             messages=messages,
             max_tokens=max_tokens,
-            timeout=120,
+            timeout=_REQUEST_TIMEOUT,
             drop_params=True,  # do not forward unused params, such as thinking for openai
             **call_kwargs,
             tools=None,
         ),
-        timeout=180,
+        timeout=_HARD_TIMEOUT,
     )
     content = response.choices[0].message.get("content", "") or ""
 
@@ -713,7 +749,12 @@ async def async_chat(
 
 @async_retry(times=3)
 async def _embed(texts: list[str]) -> list[list[float]]:
-    response = await embed_router.aembedding(model=provider, input=texts)
+    # Same bound as async_chat: the router's own default timeout is 6000 s, and a
+    # stalled call raises nothing, so the retry would never see it.
+    response = await asyncio.wait_for(
+        embed_router.aembedding(model=provider, input=texts, timeout=_REQUEST_TIMEOUT),
+        timeout=_HARD_TIMEOUT,
+    )
     return [e["embedding"] for e in response.data]
 
 
