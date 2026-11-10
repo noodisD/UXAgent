@@ -16,7 +16,7 @@ when all of these hold, across participants and never from a single page:
   - no marker for the feature appears on any same-site page, in the perceived
     text, the visible text of the raw HTML or the raw markup;
   - and the site's own copy says so, or (pickup, store stock) the participants
-    also went to the store locator and found it there.
+    also went to the store locator, a page that rendered, and found it there.
 A missing raw_html is never absence: the page is not counted.
 
 The result is worded as what the sessions did not find, not as a fact about the
@@ -58,8 +58,9 @@ LABELS = {
 MIN_PRODUCT_PAGES = 3
 MIN_PERSONAS = 2
 MIN_LOCATOR_PERSONAS = 2
-# A product page whose perceived text is a few words, or whose raw HTML is a stub,
-# is a page that did not render, not a page without the feature.
+# A product page or store locator whose perceived text is a few words, or whose raw
+# HTML is a stub, is a page that did not render, not a page without the feature (a
+# map that never loaded corroborates nothing).
 _MIN_PAGE_TEXT = 200
 _MIN_RAW_HTML = 2000
 _MAX_RAW_CHARS = 6_000_000
@@ -214,9 +215,8 @@ def _scan(stores, premises) -> _Scan:
                    ("html", raw, _fold(raw))]
             for p in premises:
                 _record(scan, p, persona, step, url, hay)
-            if url:
-                if (is_product_url(url) and len(text.strip()) >= _MIN_PAGE_TEXT
-                        and len(raw) >= _MIN_RAW_HTML):
+            if url and len(text.strip()) >= _MIN_PAGE_TEXT and len(raw) >= _MIN_RAW_HTML:
+                if is_product_url(url):
                     scan.pages.add(_page_key(url))
                     scan.page_personas.add(persona)
                 if any(m in url.lower() for m in _LOCATOR_URL_MARKERS):

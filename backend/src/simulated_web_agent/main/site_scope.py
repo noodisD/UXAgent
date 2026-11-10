@@ -58,6 +58,15 @@ UNDECLARED_SITE_CONTEXT = ("(nie podano — nie zakładaj, że to sklep internet
                            "wyłącznie na podstawie tego, co widać)")
 
 
+def declared_site_context(store, declared: str | None = None) -> str:
+    """The site description the study was given (the store's own unless `declared`
+    is), "" when none was. The reports print this; the passes get it through
+    site_context_for, which fills the blank."""
+    if declared is None:
+        declared = (store.read_basic_info() or {}).get("site_context")
+    return str(declared or "").strip()
+
+
 def site_context_for(store, declared: str | None = None,
                      default: str = UNDECLARED_SITE_CONTEXT, run_level: bool = False) -> str:
     """What every judgement pass is told the site is: the declared description (the
@@ -71,9 +80,7 @@ def site_context_for(store, declared: str | None = None,
     """
     from .premise_check import gap_context_lines
 
-    if declared is None:
-        declared = (store.read_basic_info() or {}).get("site_context")
-    text = str(declared or "").strip() or default
+    text = declared_site_context(store, declared) or default
     try:
         gaps = gap_context_lines(store, run_level=run_level)
     except Exception as e:

@@ -44,7 +44,7 @@ from .attribution import (
 )
 from .iso_metrics import current_effectiveness, effective_outcome
 from .premise_check import LABELS as _PREMISE_LABELS, ensure_premise_check, run_gaps
-from .site_scope import site_context_for
+from .site_scope import declared_site_context, site_context_for
 from .redaction import (
     clean as _redact, clean_narrative, describes_interaction_trouble, describes_session_crash,
     mentions_harness_fault,
@@ -2189,6 +2189,7 @@ async def generate_aggregated_report(
 
     # The caller's description, else the first store's, else the one default — plus
     # a line for each verified gap of the task.
+    declared_context = declared_site_context(stores[0], declared=site_context or None)
     site_context = site_context_for(stores[0], declared=site_context or None, run_level=True)
     if not analytics_context and stores:
         analytics_context = stores[0].read_basic_info().get("analytics_context", "") or ""
@@ -2261,6 +2262,7 @@ async def generate_aggregated_report(
         outcomes, reached_rungs, n, outcome_sources, no_shop=no_shop,
         premise_gaps=persona_gaps)
     # For the methodology note of every renderer (resolve_narrative).
+    stats["site_context"] = declared_context
     stats["premise_gaps"] = run_gaps(runs_dir)
     stats["outcomes"] = {
         "counts": dict(Counter(outcomes.values())),
@@ -2766,6 +2768,20 @@ _NARRATOR_FAILED_NOTE = (" Uwaga: analiza narracyjna modelu nie powiodła się (
                          "więc to podsumowanie złożono automatycznie z liczb, bez interpretacji.")
 
 
+def _site_context_note(narr: dict, declared) -> None:
+    """Say in the methodology note what the judgement passes were told the site is:
+    a catalog judged as a catalog, not as a shop, is something the reader must be
+    able to see. Nothing when the study declared no description (the passes' own
+    default is an instruction to them, not a statement about the site)."""
+    text = " ".join(str(declared or "").split())
+    if not text:
+        return
+    added = f"Serwis oceniano zgodnie z opisem jego charakteru podanym w badaniu: „{text}”."
+    note = str(narr.get("methodology_note") or "")
+    if added not in note:
+        narr["methodology_note"] = (note + " " + added).strip()
+
+
 def _premise_note(narr: dict, gaps) -> None:
     """Say in the methodology note, whatever the model wrote, what the task
     presupposed and the sessions did not find. The HTML, the PDF, the Word file and
@@ -2804,6 +2820,7 @@ def resolve_narrative(agg: dict) -> dict:
     # was cleaned (and a model that ignores the prompt) still render without the
     # tool's field names in the client's prose.
     narr = clean_narrative(narr)
+    _site_context_note(narr, stats.get("site_context"))
     _premise_note(narr, stats.get("premise_gaps"))
     # Every render path — HTML, PDF, Word, the LLM-failure fallback — shows the
     # computed score when there is one, so the headline can never disagree with

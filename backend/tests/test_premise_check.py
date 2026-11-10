@@ -53,7 +53,11 @@ def _product(n, footer=FOOTER, extra_text="", extra_html=""):
 
 
 def _locator(extra=""):
-    text = "Znajdź sklep Pepco. Wpisz miasto lub kod pocztowy. " + extra
+    # Long enough to be a page that rendered (the probe ignores a stub of a locator).
+    text = ("Znajdź sklep Pepco. Wpisz miasto lub kod pocztowy, aby zobaczyć sklepy w okolicy, "
+            "ich adresy i godziny otwarcia. Lista sklepów pojawi się poniżej mapy, a po wybraniu "
+            "sklepu zobaczysz jego szczegóły: adres, telefon, dojazd i godziny pracy w każdy "
+            "dzień tygodnia. " + extra)
     return (f"{PEPCO}/store-locator", text, _raw(text))
 
 
@@ -294,6 +298,24 @@ def test_one_locator_visitor_does_not_corroborate(tmp_path):
         "b": [_home(), _product(4, footer=""), _product(5, footer="")],
     })
     assert _status(stores, "pickup")["status"] == "unknown"
+
+
+def test_a_locator_that_did_not_render_corroborates_nothing(tmp_path):
+    # A map that never loaded: the participants "went to the locator" and saw a stub, so
+    # they cannot say the page holds no pickup. The page text is a few words / the markup
+    # a shell; both visits would otherwise read as two corroborating sessions.
+    def blank(url_text, raw):
+        return (f"{PEPCO}/store-locator", url_text, raw)
+    for name, locator in (("stub", blank("Ładowanie…", "<html></html>")),
+                          ("unperceived", blank("Ładowanie…", _raw("x" * 3000)))):
+        stores = _run(tmp_path / name, {
+            "a": [_home(), _product(1, footer=""), _product(2, footer=""), locator],
+            "b": [_home(), _product(4, footer=""), _product(5, footer=""),
+                  _product(6, footer=""), locator],
+        })
+        entry = _status(stores, "pickup")
+        assert (entry["status"], entry["reason"], entry["locator_personas"]) == (
+            "unknown", "no_corroboration", 0), name
 
 
 def test_a_cart_is_absent_only_when_the_site_says_so_itself(tmp_path):

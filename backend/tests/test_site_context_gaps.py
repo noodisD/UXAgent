@@ -155,10 +155,11 @@ _NARRATIVE = json.dumps({"executive_summary": "Badanie z udziałem 2 uczestnikó
                          "methodology_note": "Badanie przeprowadzono przy użyciu agentów LLM."})
 
 
-async def _aggregate(stores):
+async def _aggregate(stores, site_context=""):
     chat = AsyncMock(return_value=_NARRATIVE)
     with patch("simulated_web_agent.main.reporter.async_chat", new=chat):
-        agg = await generate_aggregated_report(stores, PICKUP_INTENT, "https://pepco.pl/")
+        agg = await generate_aggregated_report(stores, PICKUP_INTENT, "https://pepco.pl/",
+                                               site_context=site_context)
     prompt = next(c.args[0][0]["content"] for c in chat.call_args_list
                   if c.kwargs.get("model") == "report" and c.kwargs.get("log") is False)
     return agg, prompt
@@ -193,6 +194,31 @@ async def test_the_aggregate_prompt_gets_the_default_a_declared_text_and_the_gap
     docx = Document(build_docx(agg, tmp_path / "gap", tmp_path / "r.docx"))
     text = " ".join(para.text for para in docx.paragraphs)
     assert "granica zakresu serwisu" in text and "nie zaobserwowano: odbiór zamówienia w sklepie" in text
+
+
+@pytest.mark.asyncio
+async def test_the_reports_say_what_the_site_was_described_as(tmp_path):
+    # A catalog judged as a catalog: the HTML, the PDF's source and the Word file all print
+    # the methodology note, so the description the passes were given is in all of them.
+    agg, _ = await _aggregate(_aggregate_run(tmp_path / "declared", "Katalog\nbez koszyka."))
+    assert agg["statistics"]["site_context"] == "Katalog\nbez koszyka."
+    note = resolve_narrative(agg)["methodology_note"]
+    assert "opisem jego charakteru podanym w badaniu: „Katalog bez koszyka.”" in note
+    assert resolve_narrative(agg)["methodology_note"] == note, "not appended twice"
+    html = (tmp_path / "declared" / "aggregated_report.html").read_text(encoding="utf-8")
+    assert "Katalog bez koszyka." in html
+    docx = Document(build_docx(agg, tmp_path / "declared", tmp_path / "r.docx"))
+    assert "Katalog bez koszyka." in " ".join(para.text for para in docx.paragraphs)
+
+    # The description typed in the wizard reaches the aggregate as a parameter and wins.
+    agg, _ = await _aggregate(_aggregate_run(tmp_path / "typed", "Sklep."), "Opis z kreatora.")
+    assert agg["statistics"]["site_context"] == "Opis z kreatora."
+
+    # Nothing declared: the passes' default is an instruction to them, never printed.
+    agg, _ = await _aggregate(_aggregate_run(tmp_path / "undeclared"))
+    assert agg["statistics"]["site_context"] == ""
+    assert "opisem jego charakteru" not in resolve_narrative(agg)["methodology_note"]
+    assert "nie zakładaj" not in resolve_narrative(agg)["methodology_note"]
 
 
 @pytest.mark.asyncio
