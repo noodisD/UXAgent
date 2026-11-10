@@ -57,6 +57,8 @@ Nie przypisuj drugiemu urządzeniu przyczyny, którą opinie opisują tylko na p
 zajmujący cały ekran telefonu, który na komputerze jest wąskim paskiem). Gdy `device_dependent` jest
 false, ogólna średnia uczciwie opisuje stronę; średnie urządzeń możesz podać obok. Gdy `by_device` nie
 ma w danych (jedno urządzenie albo starszy zapis), nie pisz w ocenie pierwszego wrażenia nic o urządzeniach.
+Kod sprawdza to po Twojej odpowiedzi: gdy `device_dependent` jest true, a ocena nie wymienia urządzenia
+`weakest_device` ani jego średniej, zostanie do niej dopisana linia ze średnimi obu urządzeń.
 
 HEURISTIC VIOLATION SUMMARY (grouped by heuristic, sorted by frequency):
 {heuristic_summary}
@@ -128,7 +130,9 @@ rekomendacji — poza „powtórzyć pomiar”; nie wnioskuj o nim z innych dany
 z problemów użyteczności); nie obniżaj z jego powodu overall_ux_score. Gdy analiza nie powiodła
 się tylko dla części uczestników, napisz, że ocena obejmuje pozostałych. Niepowodzenia opisz
 wyłącznie w methodology_note. Ten sam warunek jest sprawdzany w kodzie: niezgodne zdania
-zostaną zastąpione informacją, że nie zmierzono.
+zostaną zastąpione informacją, że nie zmierzono — także w executive_summary, key_strengths
+i priority_recommendations (zdania o takim obszarze zostaną usunięte, rekomendacje zamienione
+na „powtórzyć pomiar”).
 
 PAGE SPEED (Google PageSpeed Insights — mobile + desktop):
 {pagespeed_summary}
@@ -136,7 +140,9 @@ Note — Speed Index thresholds: mobile good <3.4s / poor >5.8s; desktop good <1
 Performance score: 90–100 = good, 50–89 = needs improvement, 0–49 = poor.
 WAŻNE: jeśli pomiar PageSpeed jest niedostępny/błędny (np. „pomiar niedostępny"), to jest to
 usterka POMIARU, a nie wada strony — NIE obniżaj z tego powodu overall_ux_score ani nie opisuj
-tego jako problemu strony; możesz jedynie zalecić ponowny pomiar.
+tego jako problemu strony; możesz jedynie zalecić ponowny pomiar. Dotyczy to też pomiaru, który
+udał się tylko na jednym urządzeniu: o wydajności na drugim nie pisz nic. Ten sam warunek jest
+sprawdzany w kodzie.
 
 WAŻNE (zasada ogólna — dotyczy CAŁEGO raportu, nie tylko PageSpeed): odróżniaj wadę
 STRONY od usterki POMIARU. Usterką pomiaru jest wszystko, co opisuje niepowodzenie

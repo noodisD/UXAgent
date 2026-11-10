@@ -666,14 +666,35 @@ def _anything_observed(stats: dict) -> bool:
                 or ((stats.get("viewport") or {}).get("devices")))
 
 
+_SURVEY_FAILURE = "Odpowiedzi tych osób w ankiecie nie weszły do wyników."
+_SCAN_FAILURE = ("Skan responsywności lub test linków nie dał dla tych osób wyniku, więc część "
+                 "stron nie została sprawdzona.")
+_AUDIT_FAILURE = ("Ustalenia tych osób z nieudanych ocen (heurystycznej, pierwszego wrażenia, "
+                  "dostępności) nie mogły trafić do raportu.")
+
+
 def audit_failures_text(stats: dict) -> str:
-    """Whose analyses failed, in one sentence — "" when none did."""
+    """Whose analyses failed, and what each kind of failure cost — "" when none did.
+
+    A failed audit pass loses findings, a failed survey loses answers, a failed scan
+    leaves pages unchecked: one sentence for each kind that occurs. A row stored
+    before pass ids existed names a pass in words only and is read as an audit one.
+    """
     rows = [r for r in (stats.get("audit_failures") or []) if isinstance(r, dict)]
     if not rows:
         return ""
     who = "; ".join(f"{r.get('persona') or '—'}: {', '.join(r.get('passes') or [])}" for r in rows)
-    return (f"Nie wszystkie analizy się powiodły — {who}. W tych częściach ustalenia "
-            "tych osób nie mogły trafić do raportu; brak problemów nie jest tu wynikiem.")
+    ids = {i for r in rows for i in r.get("pass_ids") or []}
+    legacy = any(not r.get("pass_ids") for r in rows)
+    effects = []
+    if legacy or ids - {"survey", "viewport_scan", "link_check"}:
+        effects.append(_AUDIT_FAILURE)
+    if "survey" in ids:
+        effects.append(_SURVEY_FAILURE)
+    if ids & {"viewport_scan", "link_check"}:
+        effects.append(_SCAN_FAILURE)
+    return (f"Nie wszystkie analizy się powiodły — {who}. {' '.join(effects)} "
+            "Brak problemów nie jest tu wynikiem.")
 
 
 def _audit_failures_note(stats: dict) -> str:

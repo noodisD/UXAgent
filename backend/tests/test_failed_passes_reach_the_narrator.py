@@ -199,10 +199,22 @@ def test_a_desktop_score_alone_is_enough_to_keep_the_claims():
     assert narr["priority_recommendations"] == before["priority_recommendations"]
 
 
-def test_no_pagespeed_result_at_all_is_not_called_a_failure():
-    before = _narr()
-    narr = guard_unmeasured(copy.deepcopy(before), _stats(), None)
-    assert narr["priority_recommendations"] == before["priority_recommendations"]
+@pytest.mark.parametrize("ps", [None, {"url": "x", "skipped": True, "reason": "no_api_key"}])
+def test_no_pagespeed_result_is_unmeasured_but_not_called_a_failure(ps):
+    """No key, an unreadable pagespeed.json: the narrator was told "pomiar niedostępny",
+    compute_ux_score has no performance line, and an issue about speed is set aside —
+    the recommendation and the summary must not stand on nothing either. But nothing
+    "nie powiódł się": no measurement was made."""
+    narr = guard_unmeasured(_narr(), _stats(), ps)
+    second = narr["priority_recommendations"][1]
+    assert second["action"].startswith("Wykonać pomiar PageSpeed") and "nie wada strony" in second["action"]
+    assert "nie powiódł się" not in second["action"] and "nie ma wyniku pomiaru" in second["measurement_caveat"]
+    assert narr["executive_summary"] == "Badanie ujawniło problem ze sklepami."
+    assert narr["key_strengths"] == ["Czytelna nawigacja"]
+    assert "Pomiaru PageSpeed nie ma" in narr["methodology_note"]
+    assert "nie powiódł się" not in narr["methodology_note"]
+    again = guard_unmeasured(copy.deepcopy(narr), _stats(), ps)
+    assert again == narr
 
 
 def test_a_recommendation_about_something_else_is_never_rewritten():
@@ -240,7 +252,7 @@ def test_a_report_stored_without_a_ledger_or_device_list_is_not_rewritten():
     legacy = {"participant_count": 3, "accessibility": {"avg_score": None},
               "viewport": {"mobile_overflow_sessions": 0, "tablet_overflow_sessions": 3}}
     before = _narr()
-    narr = guard_unmeasured(copy.deepcopy(before), legacy, None)
+    narr = guard_unmeasured(copy.deepcopy(before), legacy, PS_OK)
     assert narr == before
 
 
@@ -542,3 +554,241 @@ def test_a_failed_narrator_call_says_so_instead_of_rendering_as_a_normal_report(
     assert "analiza narracyjna modelu nie powiodła się" in failed["executive_summary"]
     never = resolve_narrative({"statistics": stats, "narrative": {}})
     assert "nie powiodła się" not in never["executive_summary"], "no call was recorded"
+
+
+# --- PageSpeed claims: stems, metric names, a timeout only beside a speed word ------
+
+def _after(narr, ps=PS_FAILED, stats=None):
+    return guard_unmeasured(narr, stats or _stats(), ps)
+
+
+@pytest.mark.parametrize("claim", [
+    "Szybkie ładowanie strony.",
+    "Strona ładuje się wolno na każdym ekranie.",
+    "Wolno się ładuje główny obraz.",
+    "LCP przekracza 4 sekundy.",
+    "Wskaźnik CLS jest zły.",
+    "Ładowanie strony jest szybkie.",
+    "Czas ładowania strony jest długi.",
+    "Wynik w Lighthouse jest niski.",
+])
+def test_a_performance_claim_in_any_inflection_is_taken_back(claim):
+    narr = _after(_narr(key_strengths=["Czytelna nawigacja", claim],
+                        executive_summary=f"Badanie ujawniło problem ze sklepami. {claim}"))
+    assert narr["key_strengths"] == ["Czytelna nawigacja"]
+    assert narr["executive_summary"] == "Badanie ujawniło problem ze sklepami."
+
+
+@pytest.mark.parametrize("text", [
+    "Wydłuż timeout sesji po 15 minutach bezczynności.",
+    "Lokalizator sklepów nie ładuje się po wpisaniu miasta.",
+    "Formularz kończy się komunikatem o przekroczeniu limitu czasu sesji.",
+])
+def test_text_about_something_else_is_not_a_performance_claim(text):
+    """A timeout of a login session is a setting; a locator that does not load is a
+    defect the prompt asks to report like any other."""
+    rec = {"priority": 1, "area": "Logowanie", "action": text, "expected_impact": "Mniej wylogowań."}
+    narr = _after(_narr(key_strengths=[text], priority_recommendations=[dict(rec)]))
+    assert narr["priority_recommendations"] == [rec]
+    assert narr["key_strengths"] == [text]
+
+
+def test_two_performance_recommendations_are_one_row_and_the_rest_renumbered():
+    recs = [{"priority": 1, "area": "Wydajność", "action": "Poprawić PageSpeed.", "expected_impact": "x"},
+            {"priority": 2, "area": "Lokalizator", "action": "Naprawić wyszukiwarkę.", "expected_impact": "y"},
+            {"priority": 3, "area": "Czas ładowania", "action": "Skrócić czas ładowania strony.",
+             "expected_impact": "z"}]
+    narr = _after(_narr(priority_recommendations=copy.deepcopy(recs)))
+    rows = narr["priority_recommendations"]
+    assert [r["area"] for r in rows] == ["Pomiar PageSpeed", "Lokalizator"]
+    assert [r["priority"] for r in rows] == [1, 2]
+    assert _after(copy.deepcopy(narr))["priority_recommendations"] == rows, "stable on its own output"
+
+
+def test_a_summary_keeps_its_paragraphs_when_a_sentence_is_taken_out():
+    summary = "Nawigacja jest czytelna.\n\nStrona ma problemy z wydajnością. Koszyk działa."
+    narr = _after(_narr(executive_summary=summary))
+    assert narr["executive_summary"] == "Nawigacja jest czytelna.\n\nKoszyk działa."
+
+
+PS_MOBILE_FAILED = {"url": "x", "mobile": {"error": "timed out"}, "desktop": {"performance_score": 38}}
+PS_DESKTOP_FAILED = {"url": "x", "mobile": {"performance_score": 38}, "desktop": {"error": "timed out"}}
+
+
+def test_one_failed_strategy_takes_back_only_the_claims_about_that_device():
+    recs = [{"priority": 1, "area": "Wydajność mobilna", "action": "Poprawić wynik PageSpeed na telefonie.",
+             "expected_impact": "x"},
+            {"priority": 2, "area": "Wydajność serwisu", "action": "Skrócić czas ładowania strony.",
+             "expected_impact": "y"}]
+    narr = _after(_narr(priority_recommendations=copy.deepcopy(recs),
+                        executive_summary="Wydajność mobilna jest słaba. Wydajność ogółem budzi zastrzeżenia."),
+                  PS_MOBILE_FAILED)
+    first, second = narr["priority_recommendations"]
+    assert first["area"] == "Pomiar PageSpeed (telefon)"
+    assert first["action"].startswith("Powtórzyć pomiar PageSpeed na telefonie") and "nie wada strony" in first["action"]
+    assert "na telefonie" in first["measurement_caveat"]
+    assert second == recs[1], "the desktop score still stands behind it"
+    assert narr["executive_summary"] == "Wydajność ogółem budzi zastrzeżenia."
+    assert "PageSpeed na telefonie nie powiódł się" in narr["methodology_note"]
+    assert _after(copy.deepcopy(narr), PS_MOBILE_FAILED) == narr
+
+
+def test_a_failed_desktop_run_takes_back_the_claims_about_the_desktop():
+    recs = [{"priority": 1, "area": "Wydajność", "action": "Poprawić PageSpeed na komputerze.",
+             "expected_impact": "x"},
+            {"priority": 2, "area": "Wydajność", "action": "Poprawić PageSpeed na telefonie.",
+             "expected_impact": "y"}]
+    narr = _after(_narr(priority_recommendations=copy.deepcopy(recs)), PS_DESKTOP_FAILED)
+    first, second = narr["priority_recommendations"]
+    assert first["action"].startswith("Powtórzyć pomiar PageSpeed na komputerze")
+    assert second == recs[1]
+
+
+def test_a_mobile_performance_deduction_means_the_mobile_run_was_measured():
+    stats = _stats(score_breakdown={"deductions": [{"kind": "performance", "amount": 0.5}]})
+    before = _narr(priority_recommendations=[{"priority": 1, "area": "Wydajność mobilna",
+                                               "action": "Poprawić PageSpeed na telefonie.",
+                                               "expected_impact": "x"}])
+    narr = _after(copy.deepcopy(before), PS_FAILED, stats)
+    assert narr["priority_recommendations"][0]["action"] == "Poprawić PageSpeed na telefonie.", \
+        "the score was computed from a measurement, whatever the file says now"
+
+
+# --- the other failed passes: summary, strengths and recommendations ---------------
+
+def test_a_failed_accessibility_pass_loses_its_claims_beside_the_assessment():
+    narr = _after(_narr(
+        executive_summary="Nawigacja jest czytelna. Strona jest dostępna dla osób z niepełnosprawnościami. "
+                          "Produkt jest dostępny w sklepie, a dostępność rozmiarów jest dobra.",
+        key_strengths=["Wysoka dostępność cyfrowa serwisu", "Czytelna nawigacja", "Wysoka dostępność produktów"],
+        priority_recommendations=[
+            {"priority": 1, "area": "Dostępność", "action": "Dodać teksty alternatywne do obrazów (WCAG 1.1.1).",
+             "expected_impact": "Lepsza dostępność."},
+            {"priority": 2, "area": "Lokalizator", "action": "Naprawić wyszukiwarkę sklepów.",
+             "expected_impact": "Ukończenie zadania."}]), PS_OK)
+    assert narr["executive_summary"] == ("Nawigacja jest czytelna. "
+                                         "Produkt jest dostępny w sklepie, a dostępność rozmiarów jest dobra.")
+    assert narr["key_strengths"] == ["Czytelna nawigacja", "Wysoka dostępność produktów"], \
+        "availability of goods is not accessibility"
+    first, second = narr["priority_recommendations"]
+    assert first["area"] == "Analiza dostępności" and first["action"].startswith("Powtórzyć analizę dostępności")
+    assert "nie ma dowodu na problem z dostępnością" in first["measurement_caveat"]
+    assert second["action"] == "Naprawić wyszukiwarkę sklepów."
+    assert narr["methodology_note"].count("Analiza dostępności nie powiodła się") == 1
+    assert _after(copy.deepcopy(narr), PS_OK) == narr
+
+
+@pytest.mark.parametrize("area, action", [
+    ("Dostępność serwisu", "Zmienić konfigurację Cloudflare, która blokuje prawdziwych użytkowników."),
+    ("Użyteczność mobilna", "Naprawić błędy kontrastu na wersji mobilnej zgodnie z WCAG AA."),
+    ("Strona główna i Pierwsze wrażenie", "Zmienić hierarchię wizualną strony głównej."),
+])
+def test_a_recommendation_another_pass_stands_behind_is_not_taken_back(area, action):
+    """"Dostępność serwisu" is also the site being up, WCAG is cited by the contrast and
+    tap-target scans, and a section named "pierwsze wrażenie" can rest on a heuristic
+    finding: none of them is a claim of the failed accessibility or first-impression pass."""
+    stats = _stats(audit_failures=[{"persona": f"P{i}", "passes": ["x"],
+                                    "pass_ids": ["accessibility", "first_impression"]} for i in range(3)],
+                   first_impression={"avg_score": None, "scored": 0, "of": 3})
+    rec = {"priority": 1, "area": area, "action": action, "expected_impact": "Ukończenie zadania."}
+    narr = _after(_narr(priority_recommendations=[dict(rec)]), PS_OK, stats)
+    assert narr["priority_recommendations"] == [rec]
+
+
+def test_a_partly_failed_accessibility_pass_keeps_its_claims():
+    stats = _stats(audit_failures=[{"persona": "P0", "passes": ["x"], "pass_ids": ["accessibility"]}],
+                   accessibility={"avg_score": 3, "scored": 2, "of": 3})
+    before = _narr(key_strengths=["Wysoka dostępność cyfrowa serwisu"],
+                   executive_summary="Strona jest dostępna dla osób z niepełnosprawnościami.")
+    narr = _after(copy.deepcopy(before), PS_OK, stats)
+    assert narr["key_strengths"] == before["key_strengths"]
+    assert narr["executive_summary"] == before["executive_summary"]
+
+
+def test_a_failed_first_impression_pass_loses_its_claims_beside_the_assessment():
+    stats = _stats(audit_failures=[{"persona": f"P{i}", "passes": ["x"], "pass_ids": ["first_impression"]}
+                                   for i in range(3)],
+                   first_impression={"avg_score": None, "scored": 0, "of": 3})
+    narr = _after(_narr(key_strengths=["Mocne pierwsze wrażenie", "Czytelna nawigacja"],
+                        executive_summary="Pierwsze wrażenie jest dobre. Sklepy są trudne do znalezienia."),
+                  PS_OK, stats)
+    assert narr["key_strengths"] == ["Czytelna nawigacja"]
+    assert narr["executive_summary"] == "Sklepy są trudne do znalezienia."
+    assert narr["first_impression_assessment"].startswith("Test pierwszego wrażenia nie dał oceny")
+
+
+def test_a_scan_nobody_has_loses_its_responsiveness_claims_but_not_a_session_finding():
+    stats = _stats(viewport={"mobile_overflow_sessions": 0, "tablet_overflow_sessions": 0, "devices": []})
+    narr = _after(_narr(
+        key_strengths=["Strona działa poprawnie na telefonach", "Czytelna nawigacja"],
+        executive_summary="Strona jest w pełni responsywna. Na telefonie baner zasłania cały ekran.",
+        priority_recommendations=[{"priority": 1, "area": "Responsywność", "action": "Poprawić tablet.",
+                                   "expected_impact": "x"}]), PS_OK, stats)
+    assert narr["key_strengths"] == ["Czytelna nawigacja"]
+    assert narr["executive_summary"] == "Na telefonie baner zasłania cały ekran.", \
+        "what a persona saw on a phone is a finding, not a scan result"
+    assert narr["priority_recommendations"][0]["action"].startswith("Powtórzyć skan responsywności")
+    assert "Skan responsywności nie dał wyników" in narr["methodology_note"]
+    assert _after(copy.deepcopy(narr), PS_OK, stats) == narr
+
+
+def test_a_summary_with_nothing_left_says_what_was_not_measured():
+    narr = _after(_narr(executive_summary="Strona jest dostępna dla osób z niepełnosprawnościami."), PS_OK)
+    assert narr["executive_summary"] == "Nie oceniono dostępności strony."
+
+
+# --- the survey count reaches the narrator even when no artifact was written ---------
+
+def test_a_survey_that_raised_and_wrote_nothing_still_reaches_the_prompt_block():
+    stats = _stats(audit_failures=[{"persona": "P1", "persona_dir": "p1", "passes": ["ankieta"],
+                                    "pass_ids": ["survey"]}], survey={"failed_surveys": []})
+    status = measurement_status(stats, PS_OK)
+    assert status["survey"] == {"failed": 1, "of": 3}
+    assert "ankieta: błąd narzędzia dla 1 z 3 uczestników" in measurement_status_text(status)
+
+
+def test_the_larger_of_the_artifact_and_ledger_survey_counts_is_used():
+    stats = _stats(survey={"failed_surveys": [{"persona_dir": "p1"}, {"persona_dir": "p2"}]},
+                   audit_failures=[{"persona": "P1", "passes": ["ankieta"], "pass_ids": ["survey"]}])
+    assert measurement_status(stats, PS_OK)["survey"]["failed"] == 2
+
+
+# --- the first impression names its weak device ---------------------------------------
+
+FI_SPLIT = {"avg_score": 2.27, "scored": 6, "of": 6, "device_gap": 1.6, "device_dependent": True,
+            "weakest_device": "mobile",
+            "by_device": {"desktop": {"avg_score": 3.07, "n": 3}, "mobile": {"avg_score": 1.47, "n": 3}}}
+
+
+def _fi_stats(**fi):
+    return _stats(audit_failures=[], survey={}, first_impression={**FI_SPLIT, **fi})
+
+
+def test_a_blended_first_impression_gets_the_per_device_line_appended():
+    narr = guard_unmeasured(_narr(first_impression_assessment="Pierwsze wrażenie 2,27/5 — negatywne."),
+                            _fi_stats(), PS_OK)
+    text = narr["first_impression_assessment"]
+    assert text.startswith("Pierwsze wrażenie 2,27/5 — negatywne.")
+    assert "Pierwsze wrażenie według urządzenia: komputer 3,07 (n=3) · telefon 1,47 (n=3)" in text
+    assert "wynik zależy od urządzenia" in text
+    assert guard_unmeasured(copy.deepcopy(narr), _fi_stats(), PS_OK) == narr, "appended once"
+
+
+@pytest.mark.parametrize("text", [
+    "Na telefonie pierwsze wrażenie jest słabe.",
+    "Komputer 3,07, ale tylko 1,47 na ekranie mobilnym.",
+    "Ocena na urządzeniach mobilnych wynosi 1.47.",
+])
+def test_an_assessment_that_names_the_weak_device_or_its_average_is_left_alone(text):
+    narr = guard_unmeasured(_narr(first_impression_assessment=text), _fi_stats(), PS_OK)
+    assert narr["first_impression_assessment"] == text
+
+
+def test_a_gap_under_a_point_or_no_split_adds_no_device_line():
+    close = _fi_stats(device_dependent=False, device_gap=0.4)
+    close.pop("weakest_device", None)
+    assert guard_unmeasured(_narr(), close, PS_OK)["first_impression_assessment"] == "Pierwsze wrażenie jest dobre."
+    one_device = _stats(audit_failures=[], survey={}, first_impression={"avg_score": 3.4, "scored": 3, "of": 3})
+    assert guard_unmeasured(_narr(), one_device, PS_OK)["first_impression_assessment"] == "Pierwsze wrażenie jest dobre."
+    assert guard_unmeasured(_narr(first_impression_assessment=""), _fi_stats(), PS_OK)[
+        "first_impression_assessment"] == "", "no assessment to qualify"

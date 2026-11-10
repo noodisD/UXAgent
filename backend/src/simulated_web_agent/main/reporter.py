@@ -1734,16 +1734,20 @@ def _failed_pass_ids(s) -> set[str]:
     """The stable ids of the passes that failed or crashed for one participant.
 
     analysis_status.json (analysis_runner) names the crashes, which wrote no
-    artifact at all. The artifacts still decide for sessions analysed before it
-    existed, and for a survey or scan that returned an error instead of raising.
+    artifact at all. A ledger entry stands only while no artifact contradicts
+    it: the repair scripts (reaudit_run, resurvey_report, reanalyze_report) re-run
+    one pass and never touch the ledger, so a repaired pass has a good artifact
+    beside its stale crash entry. The artifacts alone decide for sessions
+    analysed before the ledger existed, and for a survey or scan that returned
+    an error instead of raising.
     """
     ledger = s.read_analysis_status()
     failed: set[str] = set()
-    if ledger.get("audit"):
+    status = s.read_audit_status() or {}
+    if ledger.get("audit") and not status:
         # It raised before writing anything, audit_status.json included.
         failed.update(_AUDIT_PASS_IDS)
     else:
-        status = s.read_audit_status() or {}
         if not status:
             fi = s.read_first_impression() or {}
             acc = s.read_accessibility_findings() or {}
@@ -1751,15 +1755,16 @@ def _failed_pass_ids(s) -> set[str]:
                       "accessibility": acc.get("error") if isinstance(acc, dict) else None}
         failed.update(k for k in _AUDIT_PASS_IDS
                       if status.get(k) and status.get(k) != "no_evidence")
+    survey = s.read_survey_result()
     # A truncated session's survey is left out of the averages on purpose
     # (aggregate_statistics), so it is not a failed one.
-    if ((ledger.get("survey") or _survey_failure(s.read_survey_result()))
+    if ((_survey_failure(survey) or (ledger.get("survey") and not survey))
             and not _is_truncated_session(s.read_ux_report() or {})):
         failed.add("survey")
-    if ledger.get("viewport_scan") or _scan_failure(s.read_viewport_findings()):
-        failed.add("viewport_scan")
-    if ledger.get("link_check") or _scan_failure(s.read_link_findings()):
-        failed.add("link_check")
+    for pass_id, findings in (("viewport_scan", s.read_viewport_findings()),
+                              ("link_check", s.read_link_findings())):
+        if _scan_failure(findings) or (ledger.get(pass_id) and not findings):
+            failed.add(pass_id)
     return failed
 
 
@@ -1822,7 +1827,9 @@ def measurement_status(stats: dict, pagespeed: dict | None, links: dict | None =
         out[pid] = {"failed": _pass_failures(stats, pid), "of": n,
                     "scored": (stats.get(pid) or {}).get("scored")}
     survey = [f for f in (stats.get("survey") or {}).get("failed_surveys") or [] if isinstance(f, dict)]
-    out["survey"] = {"failed": len(survey), "of": n}
+    # failed_surveys is read off the artifact, so a survey that raised and wrote
+    # none is only in the ledger.
+    out["survey"] = {"failed": max(len(survey), _pass_failures(stats, "survey")), "of": n}
     scanned = _scanned_devices(stats.get("viewport") or {})
     out["viewport"] = (None if scanned is None else {
         "missing": [d for d in ("mobile", "tablet") if d not in scanned],
@@ -1871,21 +1878,210 @@ def measurement_status_text(status: dict) -> str:
             + "\n".join(f"- {i}" for i in items))
 
 
+# What a claim about each area looks like in the narrative's free text. Narrow on
+# purpose: a word that also means something else in a shop ("dostępność produktu",
+# "na telefonie baner zasłania ekran", "timeout sesji") would take a real finding
+# out of the report together with the claim.
 _PERFORMANCE_WORDS = re.compile(
-    r"pagespeed|page speed|lighthouse|core web vitals|wydajno|czas\w*\s+ładowania"
-    r"|szybko\w*\s+(?:ładowania|strony|serwisu|witryny)"
-    r"|time(?:d)?[\s-]?out|przekroczeni\w*\s+(?:limitu\s+)?czasu", re.IGNORECASE)
+    r"pagespeed|page speed|lighthouse|web vitals|speed index|\b(?:LCP|FCP|TBT|CLS|TTI)\b"
+    r"|wydajno|czas\w*\s+(?:ładowania|wczytywania)"
+    r"|(?:szybk|woln|powoln)\w*\s+(?:ładowani|wczytywani)\w*"
+    r"|szybk\w*\s+(?:strony|strona|serwisu|serwis|witryny|witryna)\b"
+    r"|(?:ładowani|wczytywani)\w*\s+(?:strony|serwisu|witryny)\s+(?:jest\s+|trwa\s+)?(?:\w+\s+)?"
+    r"(?:szybk|woln|powoln|długo)"
+    r"|(?:ładuj|wczytuj)\w*\s+się\s+(?:\w+\s+)?(?:szybko|wolno|powoli|długo)"
+    r"|(?:szybko|wolno|powoli|długo)\s+się\s+(?:ładuj|wczytuj)", re.IGNORECASE)
+# A timeout is about speed only beside a speed word: "timeout sesji po 15 minutach" is a setting.
+_TIMEOUT_WORDS = re.compile(r"time(?:d)?[\s-]?out|przekroczeni\w*\s+(?:limitu\s+)?czasu", re.IGNORECASE)
+_SPEED_WORDS = re.compile(
+    r"szybk|szybsz|woln[aeoy]|wolni|powoln|opóźnien|czas\w*\s+odpowiedzi|ładowan|ładuj|wczytywan|wczytuj",
+    re.IGNORECASE)
+# "dostępność serwisu" is also the site being up (an archived run's Cloudflare block was filed
+# under it) and WCAG is cited by the contrast and tap-target scans too, so neither is a claim
+# of this pass on its own: only what the accessibility audit itself narrates.
+_ACCESSIBILITY_WORDS = re.compile(
+    r"dostępno\w*\s+cyfrow|dostępn\w*\s+dla\s+czytnik"
+    r"|niepełnospraw|niewidom|niedowidz|słabowidz|czytnik\w*\s+ekran|technologi\w*\s+asystując"
+    r"|(?:tekst|opis)\w*\s+alternatywn|\balt[- ]?tekst|aria[- ]label|nazw\w*\s+dostępnościow",
+    re.IGNORECASE)
+# Only the scan is the source of a tablet and of "works fine on phones"; a defect seen
+# on a phone in a session is a finding and stays.
+_RESPONSIVENESS_WORDS = re.compile(
+    r"responsywn|\btablet\w*|\bRWD\b"
+    r"|dostosowan\w*\s+do\s+(?:różnych\s+)?(?:urządzeń|ekran\w*)"
+    r"|(?:działa|wygląda)\w*\s+(?:\w+\s+)?(?:poprawnie|dobrze|prawidłowo|sprawnie)\s+na\s+"
+    r"(?:urządzeni\w*\s+mobiln\w*|telefon\w*|smartfon\w*)", re.IGNORECASE)
+# A verdict on the first-impression test, not a section label: "problemy na etapie pierwszego
+# wrażenia" can rest on a heuristic finding that is still there.
+_FIRST_IMPRESSION_WORDS = re.compile(
+    r"(?:pozytywn|negatywn|dobr|słab|mocn|świetn|umiarkowan|neutraln)\w*\s+pierwsz\w*\s+wrażeni"
+    r"|pierwsz\w*\s+wrażeni\w*\s+(?:było|jest|wypadło|oceniono|uczestników)"
+    r"|(?:test|ocen|wynik|średni)\w*\s+(?:\w+\s+){0,2}pierwsz\w*\s+wrażeni"
+    r"|first impression", re.IGNORECASE)
 
-_PERF_REPEAT_ACTION = "Powtórzyć pomiar PageSpeed — poprzedni się nie powiódł (błąd pomiaru, nie wada strony)."
-_PERF_CAVEAT = ("Rekomendacja dotyczyła wydajności strony, ale pomiar PageSpeed nie powiódł się — "
-                "nie ma dowodu na problem z wydajnością.")
-_PERF_METHOD_NOTE = ("Pomiar PageSpeed nie powiódł się (usterka narzędzia, nie wada strony), więc "
-                     "wydajności strony nie oceniono; stwierdzenia o niej usunięto z podsumowania.")
+_PS_DEVICE_WORDS = {"mobile": re.compile(r"mobil|telefon|smartfon", re.IGNORECASE),
+                    "desktop": re.compile(r"desktop|komputer|stacjonarn", re.IGNORECASE)}
+_PS_DEVICE_PL = {"mobile": "telefonie", "desktop": "komputerze"}
+_PS_DEVICE_AREA = {"mobile": "telefon", "desktop": "komputer"}
 
 
-def _without_sentences(text: str, pattern: re.Pattern) -> str:
-    parts = re.split(r"(?<=[.!?])\s+", text.strip())
-    return " ".join(p for p in parts if not pattern.search(p))
+def _is_performance_claim(text: str) -> bool:
+    return bool(_PERFORMANCE_WORDS.search(text)
+                or (_TIMEOUT_WORDS.search(text) and _SPEED_WORDS.search(text)))
+
+
+def _performance_retraction(unmeasured: list[str], states: dict) -> dict:
+    """What to take back when PageSpeed has no result for the strategies in `unmeasured`.
+
+    Both unmeasured: every performance claim. One: only the claims that name that
+    device, because the other one's score still stands behind the rest (the score
+    itself counts the mobile run only, scoring.py). Said as a failed measurement, or
+    as one that does not exist when no PageSpeed result was stored or it was skipped.
+    """
+    one = len(unmeasured) == 1
+    device = unmeasured[0] if one else None
+    where = f" na {_PS_DEVICE_PL[device]}" if one else ""
+    never_ran = all(states[d] in ("missing", "skipped") for d in unmeasured)
+    if never_ran:
+        measure = f"nie ma wyniku pomiaru PageSpeed{where}"
+        action = f"Wykonać pomiar PageSpeed{where} — nie został przeprowadzony (brak wyniku, nie wada strony)."
+        what = f"Pomiaru PageSpeed{where} nie ma (nie został wykonany lub nie dał wyniku)"
+    else:
+        measure = f"pomiar PageSpeed{where} nie powiódł się"
+        action = f"Powtórzyć pomiar PageSpeed{where} — poprzedni się nie powiódł (błąd pomiaru, nie wada strony)."
+        what = f"Pomiar PageSpeed{where} nie powiódł się (usterka narzędzia, nie wada strony)"
+    return {
+        "claim": ((lambda t: _is_performance_claim(t) and _PS_DEVICE_WORDS[device].search(t))
+                  if one else _is_performance_claim),
+        "area": "Pomiar PageSpeed" + (f" ({_PS_DEVICE_AREA[device]})" if one else ""),
+        "action": action,
+        "caveat": (f"Rekomendacja dotyczyła wydajności strony{where}, ale {measure} — "
+                   f"nie ma dowodu na problem z wydajnością{where}."),
+        "note": (f"{what}, więc wydajności strony{where} nie oceniono; "
+                 "stwierdzenia o niej usunięto z podsumowania."),
+        "empty": f"Nie zmierzono wydajności strony{where}.",
+    }
+
+
+# Analyses with no result for anyone: what to take back besides the assessment field.
+_AREA_RETRACTIONS = {
+    "accessibility": {
+        "claim": _ACCESSIBILITY_WORDS.search,
+        "area": "Analiza dostępności",
+        "action": "Powtórzyć analizę dostępności — poprzednia się nie powiodła (usterka narzędzia, nie wada strony).",
+        "caveat": ("Rekomendacja dotyczyła dostępności strony, ale analiza dostępności nie powiodła się — "
+                   "nie ma dowodu na problem z dostępnością."),
+        "note": ("Analiza dostępności nie powiodła się (usterka narzędzia, nie wada strony), więc dostępności "
+                 "strony nie oceniono; stwierdzenia o niej usunięto z podsumowania i mocnych stron."),
+        "empty": "Nie oceniono dostępności strony.",
+    },
+    "first_impression": {
+        "claim": _FIRST_IMPRESSION_WORDS.search,
+        "area": "Test pierwszego wrażenia",
+        "action": "Powtórzyć test pierwszego wrażenia — nie powiódł się (usterka narzędzia, nie wada strony).",
+        "caveat": ("Rekomendacja dotyczyła pierwszego wrażenia, ale test pierwszego wrażenia nie powiódł się — "
+                   "nie ma dowodu na problem z pierwszym wrażeniem."),
+        "note": ("Test pierwszego wrażenia nie powiódł się (usterka narzędzia, nie wada strony), więc pierwszego "
+                 "wrażenia nie oceniono; stwierdzenia o nim usunięto z podsumowania i mocnych stron."),
+        "empty": "Nie oceniono pierwszego wrażenia.",
+    },
+    "responsiveness": {
+        "claim": _RESPONSIVENESS_WORDS.search,
+        "area": "Skan responsywności",
+        "action": "Powtórzyć skan responsywności — nie dał wyników (usterka narzędzia, nie wada strony).",
+        "caveat": ("Rekomendacja dotyczyła responsywności, ale skan responsywności nie dał wyników — "
+                   "nie ma dowodu na problem z responsywnością."),
+        "note": ("Skan responsywności nie dał wyników (usterka narzędzia, nie wada strony), więc responsywności "
+                 "nie oceniono; stwierdzenia o niej usunięto z podsumowania i mocnych stron."),
+        "empty": "Nie zmierzono responsywności strony.",
+    },
+}
+
+
+def _without_sentences(text: str, claim) -> str | None:
+    """`text` without the sentences that make `claim`, in its own spacing (paragraph
+    breaks stay); None when no sentence does."""
+    parts = re.split(r"(?<=[.!?])(\s+)", text.strip())
+    sentences, gaps = parts[0::2], parts[1::2] + [""]
+    kept = [(s, g) for s, g in zip(sentences, gaps) if not claim(s)]
+    if len(kept) == len(sentences):
+        return None
+    return "".join(s + g for s, g in kept).strip()
+
+
+def _retract(narr: dict, r: dict) -> None:
+    """Take back what the narrator wrote about an area that has no result.
+
+    Recommendations about it become "repeat the measurement", in place and with the
+    caveat beside them (two that end up the same are one row); sentences of the
+    summary and strengths that claim something about it go, and the methodology note
+    says so once. Runs on its own output unchanged.
+    """
+    claim = r["claim"]
+    recs = narr.get("priority_recommendations")
+    if isinstance(recs, list):
+        kept, seen = [], set()
+        for rec in recs:
+            if isinstance(rec, dict) and claim(
+                    " ".join(str(rec.get(k) or "") for k in ("area", "action", "expected_impact"))):
+                rec["area"], rec["action"] = r["area"], r["action"]
+                rec["expected_impact"], rec["measurement_caveat"] = "", r["caveat"]
+                if (rec["area"], rec["action"]) in seen:
+                    continue
+                seen.add((rec["area"], rec["action"]))
+            kept.append(rec)
+        if len(kept) != len(recs):
+            recs[:] = kept
+            for i, rec in enumerate(recs, 1):
+                if isinstance(rec, dict) and "priority" in rec:
+                    rec["priority"] = i
+    stripped = False
+    summary = narr.get("executive_summary")
+    if isinstance(summary, str):
+        rest = _without_sentences(summary, claim)
+        if rest is not None:
+            narr["executive_summary"] = rest or r["empty"]
+            stripped = True
+    strengths = narr.get("key_strengths")
+    if isinstance(strengths, list):
+        kept = [x for x in strengths if not (isinstance(x, str) and claim(x))]
+        stripped = stripped or len(kept) != len(strengths)
+        narr["key_strengths"] = kept
+    note = str(narr.get("methodology_note") or "")
+    if stripped and r["note"] not in note:
+        narr["methodology_note"] = (note + " " + r["note"]).strip()
+
+
+_FI_DEVICE_WORDS = {"desktop": ("komputer", "desktop", "stacjonarn"),
+                    "mobile": ("telefon", "mobile", "mobiln", "smartfon"),
+                    "tablet": ("tablet",)}
+
+
+def _name_the_weak_device(narr: dict, stats: dict) -> None:
+    """Say which device the first impression is weak on, when the model did not.
+
+    The prompt asks the assessment to name the device and give each average; a
+    model that wrote the blended mean anyway gets the report's own per-device line
+    appended. Only when the averages are `FI_DEVICE_GAP` apart (device_dependent)
+    and the text names neither the weakest device nor its average.
+    """
+    fi = stats.get("first_impression")
+    weakest = fi.get("weakest_device") if isinstance(fi, dict) and fi.get("device_dependent") is True else None
+    current = str(narr.get("first_impression_assessment") or "").strip()
+    if not weakest or not current:
+        return
+    from .reporter_html import avg_text, first_impression_device_line
+    entry = (fi.get("by_device") or {}).get(weakest)
+    avg = entry.get("avg_score") if isinstance(entry, dict) else None
+    low = current.lower()
+    if any(w in low for w in _FI_DEVICE_WORDS.get(weakest, (weakest,))):
+        return
+    if isinstance(avg, (int, float)) and not isinstance(avg, bool) and (
+            avg_text(avg) in current or f"{avg:.2f}" in current):
+        return
+    line = first_impression_device_line(stats)
+    if line:
+        narr["first_impression_assessment"] = f"{current} Pierwsze wrażenie według urządzenia: {line}."
 
 
 # pass id -> (narrative field, what nothing scored reads, what a partial one reads)
@@ -1917,6 +2113,8 @@ def guard_unmeasured(narr: dict, stats: dict, pagespeed: dict | None = None,
     stance), and the function can run on its own output. A report stored without
     a failure ledger keeps its accessibility and first-impression text (it cannot
     tell failed from not recorded); PageSpeed is judged from its own file.
+    An area nobody has a result for loses its claims in the summary, the
+    strengths and the recommendations too, not only its assessment field.
     Mutates and returns `narr`.
     """
     if not isinstance(narr, dict):
@@ -1933,14 +2131,17 @@ def guard_unmeasured(narr: dict, stats: dict, pagespeed: dict | None = None,
             # Nothing was scored, so whatever the narrator wrote has no
             # measurement under it: replaced, not qualified.
             narr[field] = none_scored.format(k=k, n=n)
+            _retract(narr, _AREA_RETRACTIONS[pid])
         else:
             sentence = partial.format(k=k, n=n, covered=covered)
             current = str(narr.get(field) or "")
             if sentence not in current:
                 narr[field] = (current + " " + sentence).strip()
+    _name_the_weak_device(narr, stats)
 
     missing = (status["viewport"] or {}).get("missing") or []
     if len(missing) == 2:
+        _retract(narr, _AREA_RETRACTIONS["responsiveness"])
         narr["responsiveness_assessment"] = (
             "Nie zmierzono responsywności: skan ekranów nie dał żadnego wyniku — to brak "
             "pomiaru, a nie brak problemów.")
@@ -1954,32 +2155,13 @@ def guard_unmeasured(narr: dict, stats: dict, pagespeed: dict | None = None,
     ps = status["pagespeed"]
     has_deduction = any(isinstance(d, dict) and d.get("kind") == "performance"
                         for d in (stats.get("score_breakdown") or {}).get("deductions") or [])
-    if ps["mobile"] == "failed" and ps["desktop"] == "failed" and not has_deduction:
-        # No score from either strategy: a claim about performance has no
-        # measurement under it. Recommendations are rewritten into "repeat the
-        # measurement"; issues are already set aside by _attach_issue_evidence.
-        for rec in narr.get("priority_recommendations") or []:
-            if not isinstance(rec, dict):
-                continue
-            text = " ".join(str(rec.get(k) or "") for k in ("area", "action", "expected_impact"))
-            if _PERFORMANCE_WORDS.search(text):
-                rec["area"], rec["action"] = "Pomiar PageSpeed", _PERF_REPEAT_ACTION
-                rec["expected_impact"], rec["measurement_caveat"] = "", _PERF_CAVEAT
-        stripped = False
-        summary = narr.get("executive_summary")
-        if isinstance(summary, str) and _PERFORMANCE_WORDS.search(summary):
-            narr["executive_summary"] = (_without_sentences(summary, _PERFORMANCE_WORDS)
-                                         or "Nie zmierzono wydajności strony.")
-            stripped = True
-        strengths = narr.get("key_strengths")
-        if isinstance(strengths, list):
-            kept = [x for x in strengths
-                    if not (isinstance(x, str) and _PERFORMANCE_WORDS.search(x))]
-            stripped = stripped or len(kept) != len(strengths)
-            narr["key_strengths"] = kept
-        note = str(narr.get("methodology_note") or "")
-        if stripped and _PERF_METHOD_NOTE not in note:
-            narr["methodology_note"] = (note + " " + _PERF_METHOD_NOTE).strip()
+    # A strategy with no score has no measurement under a claim about it. The
+    # mobile one is what the score counts, so a performance deduction means it was
+    # measured. Issues are already set aside by _attach_issue_evidence.
+    unmeasured = [d for d in ("mobile", "desktop")
+                  if ps[d] != "ok" and not (d == "mobile" and has_deduction)]
+    if unmeasured:
+        _retract(narr, _performance_retraction(unmeasured, ps))
     return narr
 
 
@@ -2238,7 +2420,9 @@ async def generate_aggregated_report(
 
     stats = aggregate_statistics(reports, outcomes=outcomes, q_meta=q_meta, stores=stores)
     stats["excluded_sessions"] = excluded_sessions
-    stats["audit_failures"] = _audit_failures(stores)
+    # Only the participants the statistics count: the "k of n" sentences compare
+    # a failure count with n, and a persona with no report is not in n.
+    stats["audit_failures"] = _audit_failures([s for s in stores if s.read_ux_report()])
     n = stats["participant_count"]
 
     # Determine runs/ dir and read page speed (must happen before prompt build)
