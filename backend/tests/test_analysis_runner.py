@@ -23,11 +23,14 @@ async def test_all_three_analyses_are_called_with_store(store: TraceStore):
     viewport_mock = AsyncMock(return_value=[])
     report_mock = AsyncMock(return_value={"heuristic_findings": []})
 
-    with (
-        patch(_PATCH.format("run_survey"), survey_mock),
-        patch(_PATCH.format("run_audit_analysis"), audit_mock),
-        patch(_PATCH.format("run_viewport_scan"), viewport_mock),
-        patch(_PATCH.format("generate_per_agent_report"), report_mock),
+    # Every pass patched: the ones this test does not name (cognitive walkthrough,
+    # objective reflection, bias audit) call the model, and unpatched they made real
+    # calls that retried for minutes when the provider was unreachable.
+    with _passes(
+        run_survey=survey_mock,
+        run_audit_analysis=audit_mock,
+        run_viewport_scan=viewport_mock,
+        generate_per_agent_report=report_mock,
     ):
         await run_all_analyses(store, questionnaire={"q1": "?"}, headless=True)
 
@@ -56,11 +59,11 @@ async def test_per_agent_report_generated_after_analyses(store: TraceStore):
         call_order.append("report")
         return expected_report
 
-    with (
-        patch(_PATCH.format("run_survey"), side_effect=survey_side),
-        patch(_PATCH.format("run_audit_analysis"), side_effect=audit_side),
-        patch(_PATCH.format("run_viewport_scan"), side_effect=viewport_side),
-        patch(_PATCH.format("generate_per_agent_report"), side_effect=report_side),
+    with _passes(
+        run_survey=AsyncMock(side_effect=survey_side),
+        run_audit_analysis=AsyncMock(side_effect=audit_side),
+        run_viewport_scan=AsyncMock(side_effect=viewport_side),
+        generate_per_agent_report=AsyncMock(side_effect=report_side),
     ):
         result = await run_all_analyses(store, questionnaire={}, headless=True)
 
