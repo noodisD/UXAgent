@@ -28,7 +28,7 @@ from .severity import (
     heuristic_id as _heuristic_id,
     severity_rank,
 )
-from .a11y_checks import a11y_topic, measure_names, merge_pages
+from .a11y_checks import a11y_topic, measure_names, merge_pages, restate_spread
 from .evidence import page_quote, pages_contain, rendering_artifact
 from .obstacles import repeated_obstacles
 from .conflicts import annotate_recommendations, clicked_names, find_conflicts, prompt_text as _conflicts_text
@@ -1279,6 +1279,7 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
         except Exception:
             continue
     a11y_measured = merge_pages(_measured)
+    restate_spread(a11y_findings, a11y_measured)
 
     # Viewport — count sessions (not pages) with at least one overflow
     mobile_overflow = 0

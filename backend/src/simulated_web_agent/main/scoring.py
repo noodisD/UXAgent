@@ -64,9 +64,13 @@ _CONFIDENCE_PL = {"high": "wysoka", "medium": "średnia", "low": "niska"}
 
 # What the unnamed-control deduction covers. It was labelled by the narrator's own
 # category ("Brak nazwy dostępnej dla linku") although the line merges sliders,
-# lists, text fields and links.
-_CONTROL_NAME_LABEL = "kontrolki bez nazwy dostępnej (suwaki, listy, pola, linki)"
+# lists, text fields, buttons and links.
+_CONTROL_NAME_LABEL = "kontrolki bez nazwy dostępnej"
 _ALT_ICONS_LABEL = "obrazy bez atrybutu alt (głównie ikony i tła)"
+# Findings about unnamed controls that are not the site's own (a hidden duplicate of a named
+# link, a consent notice's bare controls): listed apart, and not charged again on top of the
+# unnamed-control line, which the old scan charged once for all of them.
+_APART_TOPICS = ("redundant_link", "consent_notice")
 
 
 def _g(value) -> str:
@@ -260,10 +264,10 @@ def _accessibility_lines(stats: dict) -> list[dict]:
     controls = measured_stats.get("controls") or {}
     share = alt_text_share(images)
     counted = images.get("unnamed_content", images.get("unnamed"))
+    findings = [f for f in a11y.get("findings") or [] if isinstance(f, dict) and f.get("verified")]
+    covered = any(f.get("topic") == "control_name" for f in findings)
     lines = []
-    for f in a11y.get("findings") or []:
-        if not isinstance(f, dict) or not f.get("verified"):
-            continue
+    for f in findings:
         sev, measured = accessibility_severity(f, images)
         label, note = f.get("category"), ""
         if measured:
@@ -278,14 +282,19 @@ def _accessibility_lines(stats: dict) -> list[dict]:
                 ("unnamed_redundant_link", "zduplikowanych linków graficznych"),
                 ("unnamed_consent", "elementów banera zgody")) if controls.get(key)]
             if apart:
-                note = f"; bez {', '.join(apart)} (osobne, drobne pozycje)"
+                note = f"; bez {', '.join(apart)} (wymienione osobno, bez kary)"
         base = RULES["accessibility"].get(sev, RULES["accessibility"]["drobny"])
+        basis = f"skan automatyczny, {sev} ({_g(base)}){note}"
+        if covered and f.get("topic") in _APART_TOPICS:
+            base = 0.0
+            basis = (f"skan automatyczny, {sev}; bez osobnej kary: kontrolki bez nazwy są już "
+                     f"policzone w pozycji „{_CONTROL_NAME_LABEL}”")
         lines.append({
             "kind": "accessibility",
             "severity": sev,
             "label": f"Dostępność: {label}",
             "amount": round(base, 2),
-            "basis": f"skan automatyczny, {sev} ({_g(base)}){note}",
+            "basis": basis,
         })
     return lines
 

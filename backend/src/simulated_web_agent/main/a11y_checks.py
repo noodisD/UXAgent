@@ -194,8 +194,8 @@ _TEXTLESS_TAGS = frozenset({"script", "style", "template", "noscript"})
 _NAME_ATTRS = ("aria-label", "aria-labelledby", "title")
 # How far above a control a notice may sit: the reach consent_present gives it.
 _CONSENT_REACH = 8
-# Class words that make a no-alt <img> sized by CSS an icon or a backdrop.
-_ICONISH = ("icon", "tile", "background", "bgvisual")
+# Class words that make a no-alt <img> sized by CSS an icon, a backdrop or a loading indicator.
+_ICONISH = ("icon", "tile", "background", "bgvisual", "loader", "spinner")
 # What the page hides from view, which the snapshot (on-screen elements only) never lists.
 _HIDDEN_CLASSES = frozenset({"hidden", "hide", "d-none", "is-hidden"})
 _HIDDEN_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.I)
@@ -244,14 +244,13 @@ def _norm_text(text: str) -> str:
 class _Consent:
     """The harness's own idea of a consent notice (experiment.py), read from its constants.
 
-    A container named for consent counts at once. A generic dialog counts only when an
-    acceptance control sits inside it, as dismiss_cookie_banners requires: a product modal
-    with a bare close button is not a cookie notice. Without experiment.py's constants
-    nothing is recognised, which leaves every control where it was."""
+    A container counts as a notice only when an acceptance control sits inside it, as
+    consent_present requires: a name alone made pepco's footer cookie-policy link a banner,
+    and a product modal with a bare close button is not a cookie notice. Without
+    experiment.py's constants nothing is recognised, which leaves every control where it was."""
 
     def __init__(self):
-        self.names: list[dict] = []
-        self.dialogs: list[dict] = []
+        self.containers: list[dict] = []
         self.accepts: list[dict] = []
         self.consentish = None
         self.labels: frozenset = frozenset()
@@ -262,24 +261,19 @@ class _Consent:
             log.warning("[a11y_checks] consent selectors unavailable: consent notice items "
                         "are not told apart from the rest")
             return
-        for rule in filter(None, map(_selector_rule, _CONSENT_CONTAINERS)):
-            (self.names if rule["attr"] in ("id", "class", "aria-label") else self.dialogs).append(rule)
+        self.containers = [r for r in map(_selector_rule, _CONSENT_CONTAINERS) if r]
         self.accepts = [r for r in map(_selector_rule, _CMP_SELECTORS) if r]
         m = re.search(r"CONSENTISH\s*=\s*/([^/]+)/i", _CONSENT_PRESENT_JS)
         self.consentish = re.compile(m.group(1), re.I) if m else None
         self.labels = frozenset(_norm_text(label) for label in _CONSENT_LABELS)
 
-    def container(self, tag: str, attrs: dict) -> str | None:
+    def container(self, tag: str, attrs: dict) -> bool:
         # The document root cannot be a notice, whatever class a script gave it.
         if tag in ("html", "body"):
-            return None
+            return False
         sig = f"{attrs.get('id', '')} {attrs.get('class', '')}"
-        if (any(_rule_hits(r, tag, attrs) for r in self.names)
-                or (self.consentish and self.consentish.search(sig))):
-            return "name"
-        if any(_rule_hits(r, tag, attrs) for r in self.dialogs):
-            return "dialog"
-        return None
+        return (any(_rule_hits(r, tag, attrs) for r in self.containers)
+                or bool(self.consentish and self.consentish.search(sig)))
 
     def accepts_control(self, tag: str, attrs: dict, text: str) -> bool:
         return (any(_rule_hits(r, tag, attrs) for r in self.accepts)
@@ -340,19 +334,20 @@ class _RawControls(HTMLParser):
         if tag in _VOID_TAGS:
             return
         if tag == "svg":
-            if parent_control is not None:
-                parent_control["attr_named" if named_by_attr else "svg"] = True
-            else:
+            if parent_control is None:
                 entry["svg"] = {"named": named_by_attr}
+            elif named_by_attr:
+                parent_control["attr_named"] = True
         kind = ("link" if tag == "a" and "href" in a
                 else "button" if tag == "button" or role == "button" else None)
         if kind:
             entry["ctl"] = {
                 "kind": kind, "tag": tag, "attrs": a, "href": a.get("href", ""),
                 "tabindex": a.get("tabindex", "").strip(), "aria_hidden": aria_hidden,
-                "attr_named": named_by_attr, "svg": False, "imgs": [], "text": [],
-                "ctx": [e for e in self._stack[-(_CONSENT_REACH - 1):] if e["cs"]]
-                       + ([entry] if entry["cs"] else []),
+                "attr_named": named_by_attr, "imgs": [], "text": [],
+                # The control's own class is not its container: "cookie-settings" on a link
+                # says what it opens, not that it sits in a notice.
+                "ctx": [e for e in self._stack[-(_CONSENT_REACH - 1):] if e["cs"]],
             }
         self._stack.append(entry)
 
@@ -466,8 +461,14 @@ def _href_key(href: str, base: str) -> str:
     return joined.rstrip("/") or "/"
 
 
+def _names_destination(key: str) -> bool:
+    """False for the placeholders a scripted control carries as its address ("#", "#!",
+    "javascript:..."): two links that share one are not twins."""
+    return bool(key.strip("#!")) and not key.lower().startswith("javascript:")
+
+
 def _in_notice(ctl: dict) -> bool:
-    return any(e["cs"] == "name" or (e["cs"] == "dialog" and e["accept"]) for e in ctl["ctx"])
+    return any(e["accept"] for e in ctl["ctx"])
 
 
 def _named_by_image(ctl: dict) -> bool:
@@ -481,12 +482,10 @@ def _raw_link_kind(ctl: dict) -> str | None:
     nameless = not _named_by_image(ctl)
     if _in_notice(ctl) and nameless:
         return "consent"
-    # An image link sitting out of tab order or hidden from assistive technology, or one
-    # whose only content is an image its author declared decorative (alt="" or a
-    # presentation role). No alt attribute at all is not that: the author said nothing.
-    if (ctl["tabindex"] == "-1" or ctl["aria_hidden"]
-            or (ctl["imgs"] and not ctl["svg"]
-                and all(i["alt"] == "" or i["deco"] for i in ctl["imgs"]))):
+    # Out of tab order or hidden from assistive technology: the keyboard and the screen
+    # reader both skip it. An alt="" image does not do that: a link left in tab order with
+    # no name is a keyboard stop with no name (WCAG F89), whatever else names the address.
+    if ctl["tabindex"] == "-1" or ctl["aria_hidden"]:
         return "decorative"
     return "serious" if nameless else None
 
@@ -501,7 +500,8 @@ def _classify(controls: list[dict], scan: _RawControls | None, base_url: str) ->
     """Each unnamed link or button of a snapshot with a `kind`, in document order.
 
       redundant — a link whose address another NAMED link on the page also has, that is
-                  out of tab order, hidden, or only a decorative image
+                  out of tab order or hidden from assistive technology (a placeholder
+                  address such as "#" names no destination, so it never pairs)
       consent   — an unnamed link or button inside a consent notice
       serious   — an unnamed control nothing else on the page makes up for
       unknown   — the capture cannot say (none stored, no address in the snapshot, or more
@@ -516,8 +516,9 @@ def _classify(controls: list[dict], scan: _RawControls | None, base_url: str) ->
         return []
     if scan is None:
         return [{**c, "kind": "unknown"} for c in unnamed]
-    twins = {_href_key(c["url"], base_url) for c in controls
-             if c["role"] == "link" and c["name"] and c["url"] is not None}
+    twins = {key for key in (_href_key(c["url"], base_url) for c in controls
+                             if c["role"] == "link" and c["name"] and c["url"] is not None)
+             if _names_destination(key)}
     links: dict[str, Counter] = {}
     for ctl in scan.links:
         kind = _raw_link_kind(ctl)
@@ -570,18 +571,22 @@ def _classify_step(store: TraceStore, step: int, text: str, base_url: str | None
 
 
 def classify_content_images(unnamed_content: int, scan: _RawControls | None) -> int | None:
-    """How many of a page's unnamed content images are decorative or unknown.
+    """How many of a page's unnamed content images are certainly decorative or unknown.
 
-    An <img> with no alt attribute that is a CSS-sized tile icon or backdrop, an inline
-    <svg>, or inside an aria-hidden or presentation container. At most as many as the
-    snapshot counted, and only those the page shows. None without a raw capture.
+    Decorative: an <img> with no alt attribute that is a CSS-sized tile icon or backdrop, an
+    inline <svg>, or inside an aria-hidden or presentation container; only those the page
+    shows. The snapshot lists what is on screen and the markup everything, so icons in a
+    footer the snapshot never listed cannot stand in for the photos it did. The plain
+    no-alt images of the markup may be among the snapshot's, so only what they cannot
+    account for counts. None without a raw capture.
 
-    Unlike links this reading does not lean towards the serious one: the finding is minor
-    either way, and the 20% rule that decides its severity is not touched; this only
-    decides whether it may be worded as icons and backdrops."""
+    The finding is minor either way and the 20% rule that decides its severity is not
+    touched; this only decides whether it may be worded as icons and backdrops."""
     if scan is None:
         return None
-    return min(unnamed_content, sum(1 for i in scan.images if i["decor"]))
+    decorative = sum(1 for i in scan.images if i["decor"])
+    plain = len(scan.images) - decorative
+    return min(decorative, max(0, unnamed_content - plain))
 
 
 def _steps(raw) -> list[tuple[int, object]]:
@@ -829,12 +834,53 @@ def extract_generic_name_findings(store: TraceStore) -> list[dict]:
     }]
 
 
+# The closing sentence of those two findings, which says how widespread the item is, with
+# the nouns it counts and the measured.controls keys of the same count across the audit.
+_SPREAD_NOUNS = {
+    "redundant_link": ("taki link", "takie linki", "takich linków"),
+    "consent_notice": ("taki element", "takie elementy", "takich elementów"),
+}
+_SPREAD_MEASURED = {
+    "redundant_link": ("unnamed_redundant_link", "pages_with_unnamed_redundant_link"),
+    "consent_notice": ("unnamed_consent", "pages_with_unnamed_consent"),
+}
+_SPREAD_TAIL = re.compile(r"\s*(?:Łącznie \d+ [^.]+? na \d+ z \d+ odwiedzonych stron\."
+                          r"|Występuje na jedynej odwiedzonej stronie\.)\s*$")
+
+
+def _spread_sentence(topic: str, total: int, pages: int, all_pages: int) -> str:
+    from .textutil import pl_plural
+
+    if all_pages == 1:
+        return "Występuje na jedynej odwiedzonej stronie."
+    return (f"Łącznie {total} {pl_plural(total, *_SPREAD_NOUNS[topic])} na {pages} z {all_pages} "
+            "odwiedzonych stron.")
+
+
+def restate_spread(findings: list[dict], measured: dict | None) -> None:
+    """Give the merged redundant-link and consent entries the audit's own count.
+
+    The aggregate keeps the first participant's detail, whose closing sentence counts that
+    participant's pages ("6 takich linków na 2 z 9 stron") beside the score line and
+    measured.controls that count every participant's, once per page (26 on 10 pages)."""
+    controls = (measured or {}).get("controls") or {}
+    all_pages = (measured or {}).get("pages_counted") or 0
+    for f in findings:
+        keys = _SPREAD_MEASURED.get(f.get("topic"))
+        tail = _SPREAD_TAIL.search(str(f.get("detail") or ""))
+        total = controls.get(keys[0]) if keys else 0
+        if not (total and all_pages and tail):
+            continue
+        f["detail"] = (f["detail"][:tail.start()] + " "
+                       + _spread_sentence(f["topic"], total, controls.get(keys[1], 0), all_pages)).strip()
+
+
 def extract_unnamed_link_findings(store: TraceStore) -> list[dict]:
     """Findings for unnamed controls that are not unnamed controls of the site.
 
-    A link that only duplicates a named link to the same address (out of tab order,
-    hidden, or just a decorative image), and the bare links and buttons of a consent
-    notice. Decided by code from the snapshot and raw_html and reported as minor
+    A link that only duplicates a named link to the same address and that the keyboard and
+    the screen reader both skip (out of tab order or hidden), and the bare links and buttons
+    of a consent notice. Decided by code from the snapshot and raw_html and reported as minor
     (drobny), each on its own: they are no reason to call the site's controls unnamed
     ("poważny"), and the narrator is not handed them as candidates.
 
@@ -861,13 +907,9 @@ def extract_unnamed_link_findings(store: TraceStore) -> list[dict]:
                 key = (page, role, ident)
                 elements[kind][key] = max(elements[kind].get(key, 0), k)
 
-    def spread(kind: str, one: str, few: str, many: str) -> str:
-        total = sum(elements[kind].values())
-        pages = len({p for p, _role, _ident in elements[kind]})
-        if len(all_pages) == 1:
-            return "Występuje na jedynej odwiedzonej stronie."
-        return (f"Łącznie {total} {pl_plural(total, one, few, many)} na {pages} z {len(all_pages)} "
-                "odwiedzonych stron.")
+    def spread(kind: str, topic: str) -> str:
+        return _spread_sentence(topic, sum(elements[kind].values()),
+                                len({p for p, _role, _ident in elements[kind]}), len(all_pages))
 
     def worst_of(kind: str) -> tuple[int, Counter]:
         steps = per_step[kind]
@@ -888,11 +930,11 @@ def extract_unnamed_link_findings(store: TraceStore) -> list[dict]:
             "step": worst,
             "url": store.url_at_step(worst),
             "detail": (f"Na najgorszej stronie (krok {worst}) {k} {sub} nazwy dostępnej, ale każdy "
-                       f"z nich dubluje nazwany link do tego samego adresu ({addresses}): jest poza "
-                       "kolejnością tabulatora, ukryty albo zawiera tylko ozdobny obraz. Adres "
+                       f"z nich dubluje nazwany link do tego samego adresu ({addresses}) i jest poza "
+                       "kolejnością tabulatora albo ukryty przed technologiami wspomagającymi. Adres "
                        "jest dostępny przez nazwany link, a pusty duplikat tylko wydłuża listę "
                        "linków czytnika ekranu. "
-                       + spread("redundant", "taki link", "takie linki", "takich linków")),
+                       + spread("redundant", "redundant_link")),
             "recommendation": ("Ukryć duplikat przed technologiami wspomagającymi (aria-hidden=\"true\" "
                                "i tabindex=\"-1\") albo włączyć obraz do nazwanego linku; dodanie "
                                "aria-label sprawiłoby, że czytnik ekranu odczyta ten sam cel dwa razy."),
@@ -915,7 +957,7 @@ def extract_unnamed_link_findings(store: TraceStore) -> list[dict]:
                        f"{k} {pl_plural(k, 'element nie ma', 'elementy nie mają', 'elementów nie ma')} "
                        f"nazwy dostępnej: {listing}. To elementy samego banera zgody, a nie "
                        "nawigacji ani treści strony. "
-                       + spread("consent", "taki element", "takie elementy", "takich elementów")),
+                       + spread("consent", "consent_notice")),
             "recommendation": ("Nadać tym elementom nazwę (aria-label albo widoczny tekst) w "
                                "konfiguracji narzędzia zgód albo usunąć z banera pusty link."),
             "instances": sum(elements["consent"].values()),
