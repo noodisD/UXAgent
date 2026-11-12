@@ -19,6 +19,7 @@ from . import cancellation
 from ..executor.env import WebAgentEnv
 from ..config import load_cfg
 from .abort import abandon_threshold
+from .landing_facts import capture_landing_facts
 from .loop_guards import (
     FAILED_THOUGHT,
     REFUSED_THOUGHT,
@@ -764,6 +765,9 @@ async def _run_for_persona_and_intent(
             await env.page.screenshot(path=store.landing_screenshot_path())
         except Exception as exc:
             log.warning("landing screenshot failed: %s", exc)
+        # Measured on the same frame, so the first-impression pass describes the screen
+        # from numbers and not from what a model thinks it sees. Never fails the session.
+        await capture_landing_facts(env.page, store)
 
         obs = await env.observation()
 

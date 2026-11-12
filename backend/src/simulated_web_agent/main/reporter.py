@@ -44,6 +44,8 @@ from .attribution import (
     unseen_last_action, without_dead_address_blame,
 )
 from .iso_metrics import current_effectiveness, effective_outcome
+from .landing_facts import landing_notice_rollup
+from .mandated_notice import guard_narrative as guard_mandated_notice
 from .premise_check import LABELS as _PREMISE_LABELS, ensure_premise_check, run_gaps
 from .site_scope import declared_site_context, site_context_for
 from .redaction import (
@@ -2458,6 +2460,11 @@ async def generate_aggregated_report(
     # Only the participants the statistics count: the "k of n" sentences compare
     # a failure count with n, and a persona with no report is not in n.
     stats["audit_failures"] = _audit_failures([s for s in stores if s.read_ux_report()])
+    # What the landing measurements say about notices the site must show: the guard below
+    # reads it, and so does a stored report when it is rendered again.
+    landing_notices = landing_notice_rollup([s for s in stores if s.read_ux_report()])
+    if landing_notices:
+        stats["landing_notices"] = landing_notices
     n = stats["participant_count"]
 
     # Determine runs/ dir and read page speed (must happen before prompt build)
@@ -2568,6 +2575,7 @@ async def generate_aggregated_report(
     if isinstance(narrative, dict) and "error" not in narrative:
         narrative = clean_narrative(narrative)
         guard_unmeasured(narrative, stats, pagespeed_data, link_data)
+        guard_mandated_notice(narrative, stats.get("landing_notices"))
         narrative["overall_ux_score"] = score_result["score"]
         # The explanation too: the files take it from the breakdown at render
         # time, but the dashboard shows the stored narrative, and the model's
@@ -3083,6 +3091,7 @@ def resolve_narrative(agg: dict) -> dict:
     # After the evidence join, which already sets aside an issue no measurement
     # backs; stored runs get the same rule as new ones.
     guard_unmeasured(narr, stats, agg.get("pagespeed"), agg.get("links"))
+    guard_mandated_notice(narr, stats.get("landing_notices"))
     return narr
 
 

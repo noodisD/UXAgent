@@ -29,7 +29,9 @@ from .claim_verifier import persona_disposition, run_claim_verification
 from .confidence import cap_confidence
 from .evidence import resolve_all, resolve_evidence
 from .iso_metrics import page_view_stats
+from .landing_facts import summarize_landing_facts
 from .loop_phrases import injected_kind, intended_action, is_tool_trouble_injection
+from .mandated_notice import guard_first_impression
 from .premise_check import ensure_premise_check
 from .site_scope import flag_off_site, site_context_for, target_url_for
 from .trace_store import TraceStore, parse_action
@@ -155,8 +157,13 @@ async def _run_first_impression(store: TraceStore) -> dict:
     # judged against an implicit "this is an online shop" frame — a
     # catalog/store-locator site like pepco.pl then gets marked down for having no
     # cart. See site_scope.site_context_for.
+    # What the screen measurably is. The screenshot alone gets geometry invented onto it: an
+    # in-flow notice became a pop-up that "covers the screen". Without the file (an older
+    # run) the prompt says so, and forbids describing geometry, colour or font size.
+    facts = store.read_landing_facts()
     prompt = _prompts.get("first_impression").format(
-        persona=persona, site_context=site_context_for(store))
+        persona=persona, site_context=site_context_for(store),
+        landing_facts=summarize_landing_facts(facts))
 
     messages = [
         {
@@ -174,10 +181,14 @@ async def _run_first_impression(store: TraceStore) -> dict:
         # same flash entry as "small" (see CLAUDE.md); "report" is the only real
         # lever. Scoring a page as a specific person is exactly the nuanced
         # judgement that the cheap tier renders shallowly.
-        return await _chat_json(messages, model="report", prefer=dict,
-                                label="first_impression")
+        result = await _chat_json(messages, model="report", prefer=dict,
+                                  label="first_impression")
     except _UnusableReply as e:
         return {"error": str(e)}
+    # A notice the site must show is not the thing to hide: the prompt says so and the code
+    # takes back the recommendation when the model proposes it anyway.
+    guard_first_impression(result, facts)
+    return result
 
 
 async def _run_heuristic_evaluation(store: TraceStore) -> list:

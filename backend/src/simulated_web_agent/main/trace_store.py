@@ -79,6 +79,18 @@ class TraceStore:
     def scroll_top_path(self, step: int) -> Path:
         return self.trace_dir / "screenshot" / f"scroll_top_{step}.txt"
 
+    def write_landing_facts(self, data: dict) -> None:
+        """What the landing screen measurably is, beside its screenshot (main/landing_facts.py)."""
+        (self.trace_dir / "landing_facts.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def read_landing_facts(self) -> dict | None:
+        """The landing measurements; None for a session that has none (an older run, a failed
+        measurement) - the first-impression pass then makes no claim about geometry."""
+        data = self._read_json(self.trace_dir / "landing_facts.json")
+        return data if isinstance(data, dict) else None
+
     # ------------------------------------------------------------------
     # HTML artifacts
     # ------------------------------------------------------------------

@@ -77,5 +77,6 @@ def test_the_word_report_carries_it(tmp_path):
 
 
 def test_the_prompt_still_formats():
-    prompt = prompts.get("first_impression").format(persona="Marta", site_context="Sklep")
+    prompt = prompts.get("first_impression").format(
+        persona="Marta", site_context="Sklep", landing_facts="(brak pomiarów)")
     assert '"suggested_changes"' in prompt and "{persona}" not in prompt

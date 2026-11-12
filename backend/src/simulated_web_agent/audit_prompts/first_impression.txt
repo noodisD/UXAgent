@@ -19,6 +19,34 @@ e-commerce — it was never trying to be one. Do not penalize the absence of a
 cart, a "buy now" button, or a checkout flow unless the site context above says
 the site is meant to sell online.
 
+## ZMIERZONE FAKTY O STRONIE STARTOWEJ
+
+{landing_facts}
+
+WAŻNE (zmierzone fakty a to, co widać na zrzucie): geometrię i wygląd opisuj według pomiarów
+powyżej, nie według wrażenia ze zrzutu. Zrzut ekranu mówi, CO jest na stronie; pomiary mówią,
+JAK to wygląda i czy coś zasłania.
+- Nie nazywaj bloku okienkiem, pop-upem, nakładką ani oknem modalnym, jeśli pomiar nie wykazał
+  nakładki. Blok „w przepływie strony" przesuwa treść w dół, ale niczego nie zasłania i nie
+  wymusza zamknięcia.
+- Nie pisz, że element zasłania, ukrywa albo blokuje treść, menu lub przycisk, jeśli pomiary nie
+  mówią, że zasłania nawigację albo przyciski, ani nie wymieniają, co zasłania.
+- Rozmiary czcionek, kolory i procenty w Twoim tekście muszą zgadzać się z pomiarami: nie pisz
+  o „drobnym druku", „szarym oknie" ani „grubej ramce" wbrew zmierzonym wartościom. Zarzut
+  nakładania się elementów musi podawać zmierzony procent; kilka procent to drobna usterka, nie
+  „prawie całkowite zasłonięcie" ani „krytyczny błąd".
+- Gdy pomiarów brak (blok mówi „brak pomiarów"), nie charakteryzuj geometrii, koloru ani rozmiaru
+  czcionki żadnego elementu.
+- Komunikat oznaczony jako OBOWIĄZKOWY (narzucony przez organ lub przepis) ma narzuconą treść,
+  ramkę i obecność: stoi, dopóki odwiedzający go nie zamknie. NIE zalecaj, by go ukryć, zmniejszyć,
+  złagodzić, zwinąć, usunąć, odłożyć, uczynić mniej widocznym ani przestylizować na „mniej
+  alarmujący". Wolno zalecać wyłącznie czytelność: kontrast, rozmiar tekstu, długość linii,
+  łatwo dostępny przycisk zamknięcia, krótkie streszczenie prostym językiem obok tekstu prawnego.
+  Kod usuwa zalecenia niezgodne z tą regułą. Komunikat nieobowiązkowy (baner aplikacji, reklama,
+  promocja) oceniaj jak każdy inny element.
+- Test pięciu sekund widzi tylko pierwszy ekran: nie opisuj, co osoba zrobiła, zauważyła ani
+  zamknęła, i nie przypisuj jej zachowań (nie ma żadnej akcji do opisania).
+
 ## Your task
 
 Reason briefly IN ENGLISH as this person. For EACH dimension, first state what
@@ -94,7 +122,7 @@ fences). Every <...> is a placeholder you must replace:
     "visual_hierarchy": "<IN POLISH: one concrete change, or \"\">",
     "trustworthiness": "<IN POLISH: one concrete change, or \"\">"
   }},
-  "persona_lens": "<1 sentence IN POLISH: what this person noticed that a different person would not>",
+  "persona_lens": "<1 sentence IN POLISH: a hypothesis about what this person would plausibly pay attention to first - never a record of what they did or noticed>",
   "strengths": ["<2–4 specific, concrete items IN POLISH>"],
   "weaknesses": ["<2–4 specific, concrete items IN POLISH>"]
 }}
@@ -109,3 +137,8 @@ Rules:
   enlarge, rename, add, remove, reword) — quoting its visible text where it has
   any. Advice that would fit any website ("poprawić nawigację", "zwiększyć
   przejrzystość") is not a change: say what, and where.
+- The element a suggested change names must exist in the measured facts above or
+  in the screenshot: do not propose a change to an icon or control that is not
+  there (a magnifier in a phone header, a phone icon beside it), and do not
+  propose fixing a problem the measurements do not confirm. For a notice marked
+  OBOWIĄZKOWY a suggested change may only improve legibility.
