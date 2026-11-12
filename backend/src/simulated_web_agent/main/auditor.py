@@ -18,7 +18,9 @@ from typing import Any
 
 from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
-from .a11y_checks import extract_a11y_candidates, extract_generic_name_findings
+from .a11y_checks import (
+    extract_a11y_candidates, extract_generic_name_findings, extract_unnamed_link_findings,
+)
 from .attribution import (
     flag_harness_suspects, guessed_address_steps, session_blocked_by_bot_wall, session_end_note,
     tool_failed_actions, unperceived_steps,
@@ -335,9 +337,10 @@ async def _run_accessibility_summary(store: TraceStore) -> dict:
     # Names that describe nothing ("Pasek zadań", "Flyout") are decided by code
     # and added here, not offered to the model as a candidate: a finding the
     # model could reword, drop or duplicate does not belong in a scan whose point
-    # is that the answer is decidable.
+    # is that the answer is decidable. So are the unnamed links that only
+    # duplicate a named one and the bare controls of a consent notice.
     if isinstance(result, dict) and "error" not in result:
-        extra = extract_generic_name_findings(store)
+        extra = extract_generic_name_findings(store) + extract_unnamed_link_findings(store)
         if extra:
             result["findings"] = list(result.get("findings") or []) + extra
     return result

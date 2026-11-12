@@ -62,6 +62,12 @@ RULES = {
 _SEVERITY_PL = {"krytyczny": "krytyczny", "poważny": "poważny", "drobny": "drobny"}
 _CONFIDENCE_PL = {"high": "wysoka", "medium": "średnia", "low": "niska"}
 
+# What the unnamed-control deduction covers. It was labelled by the narrator's own
+# category ("Brak nazwy dostępnej dla linku") although the line merges sliders,
+# lists, text fields and links.
+_CONTROL_NAME_LABEL = "kontrolki bez nazwy dostępnej (suwaki, listy, pola, linki)"
+_ALT_ICONS_LABEL = "obrazy bez atrybutu alt (głównie ikony i tła)"
+
 
 def _g(value) -> str:
     """A weight or factor as the report prints it: no trailing zeros, Polish comma."""
@@ -87,6 +93,15 @@ def _pct(share: float) -> str:
     if 0 < value < 10 and round(value) != round(value, 1):
         return f"{value:.1f}".replace(".", ",")
     return str(round(value))
+
+
+def mostly_decorative_images(images: dict | None) -> bool:
+    """Are most of the unnamed content images icons, backdrops or inline graphics?
+
+    Only measured where raw_html was stored; a run without the split says nothing."""
+    images = images or {}
+    content, decorative = images.get("unnamed_content"), images.get("unnamed_content_decorative")
+    return bool(content) and _is_number(decorative) and 2 * decorative >= content
 
 
 def alt_text_measured_text(images: dict | None) -> str:
@@ -116,7 +131,11 @@ def alt_text_measured_text(images: dict | None) -> str:
                      f"{images['unnamed_outside_content']}")
     if split:
         text += " Z tego: " + "; ".join(split) + "."
-    return text + f" Obrazy w treści strony bez opisu: {content} ({_pct(content / total)}%)."
+    text += f" Obrazy w treści strony bez opisu: {content} ({_pct(content / total)}%)"
+    decorative = images.get("unnamed_content_decorative")
+    if decorative:
+        text += f", z czego {decorative} to ikony, grafiki SVG i tła (dekoracyjne lub nieznane)"
+    return text + "."
 
 
 def accessibility_severity(finding: dict, images: dict | None) -> tuple[str, str]:
@@ -236,7 +255,9 @@ def _task_line(outcomes: dict, sources: dict, held: set | None = None) -> dict |
 
 def _accessibility_lines(stats: dict) -> list[dict]:
     a11y = stats.get("accessibility") or {}
-    images = (a11y.get("measured") or {}).get("images") or {}
+    measured_stats = a11y.get("measured") or {}
+    images = measured_stats.get("images") or {}
+    controls = measured_stats.get("controls") or {}
     share = alt_text_share(images)
     counted = images.get("unnamed_content", images.get("unnamed"))
     lines = []
@@ -244,16 +265,25 @@ def _accessibility_lines(stats: dict) -> list[dict]:
         if not isinstance(f, dict) or not f.get("verified"):
             continue
         sev, measured = accessibility_severity(f, images)
-        note = ""
+        label, note = f.get("category"), ""
         if measured:
             what = "obrazów treści" if "unnamed_content" in images else "obrazów"
             note = (f"; zmierzono {counted} z {images.get('total')} {what} bez opisu "
                     f"({_pct(share)}%) — liczone jako drobny")
+            if mostly_decorative_images(images):
+                label = _ALT_ICONS_LABEL
+        elif f.get("topic") == "control_name":
+            label = _CONTROL_NAME_LABEL
+            apart = [f"{what}: {controls[key]}" for key, what in (
+                ("unnamed_redundant_link", "zduplikowanych linków graficznych"),
+                ("unnamed_consent", "elementów banera zgody")) if controls.get(key)]
+            if apart:
+                note = f"; bez {', '.join(apart)} (osobne, drobne pozycje)"
         base = RULES["accessibility"].get(sev, RULES["accessibility"]["drobny"])
         lines.append({
             "kind": "accessibility",
             "severity": sev,
-            "label": f"Dostępność: {f.get('category')}",
+            "label": f"Dostępność: {label}",
             "amount": round(base, 2),
             "basis": f"skan automatyczny, {sev} ({_g(base)}){note}",
         })
