@@ -20,7 +20,7 @@ import logging
 import re
 from urllib.parse import unquote, urljoin
 
-from .evidence import _QUOTED, _visible_text, following_observation_step
+from .evidence import _QUOTED, _visible_text
 from .loop_phrases import FORCED_BACK_MARKERS, injected_kind, intended_action
 from .textutil import display_url, view_key
 from .trace_store import TraceStore, parse_action as _parse_action
@@ -855,21 +855,15 @@ def quotes_visible_at_step(store: TraceStore, finding: dict) -> list[str]:
         return []
     if not quotes:
         return []
-    # The cited page, then the page its action loaded: a finding that cites the step of a
-    # typed action has its evidence one observation on.
-    nxt = following_observation_step(store, step)
-    for at in (step,) if nxt is None else (step, nxt):
-        texts = [_step_text(store, at)]
-        try:
-            raw = store.read_raw_html(at)
-        except Exception:
-            raw = None
-        if raw:
-            texts.append(_visible_text(raw))
-        page = _squeeze(_html.unescape(" ".join(t for t in texts if t)))
-        if page and all(_squeeze(q) in page for q in quotes):
-            return quotes
-    return []
+    texts = [_step_text(store, step)]
+    try:
+        raw = store.read_raw_html(step)
+    except Exception:
+        raw = None
+    if raw:
+        texts.append(_visible_text(raw))
+    page = _squeeze(_html.unescape(" ".join(t for t in texts if t)))
+    return quotes if page and all(_squeeze(q) in page for q in quotes) else []
 
 
 def _page_changed_throughout(store: TraceStore, start: int, end: int) -> bool:

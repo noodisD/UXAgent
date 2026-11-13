@@ -10,6 +10,7 @@ grounded are kept but must be rendered with an "unverified" label.
 import html as _html
 import logging
 import re
+from urllib.parse import unquote
 
 from .trace_store import TraceStore
 
@@ -188,7 +189,10 @@ def resolve_evidence(store: TraceStore, finding: dict) -> dict:
             if quote:
                 break
         shown = page_quote(store, nxt, evidence_text)
-        if quote or shown:
+        # An address the action loaded is evidence too (a locator redirect carries it in the URL).
+        in_address = any(
+            fr.strip() and fr.strip() in unquote(store.url_at_step(nxt) or "") for fr in fragments)
+        if quote or shown or in_address:
             enriched["evidence_step"] = nxt
             observation = after
     if not quote:

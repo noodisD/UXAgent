@@ -183,24 +183,28 @@ def test_resolve_evidence_clears_a_stale_evidence_step(tmp_path):
     assert "evidence_step" not in out
 
 
-# --- the quote check that releases a held finding ----------------------------
+# --- the quote check that releases a harness-suspect hold stays on the cited page --
 
 ONE_QUOTE = f"Wyszukiwarka wskazała '{QUOTE}' zamiast placówki w Krakowie."
 
 
-def test_quotes_visible_at_step_accepts_the_result_page(tmp_path):
+def test_quotes_visible_at_step_reads_only_the_cited_page(tmp_path):
+    # repeated clicks loaded the result page; its text cannot release the hold on the click
     store = _marta(tmp_path)
     for i, html in enumerate(["<p>x</p>"] * 3 + [f"<main>{QUOTE}</main>"]):
         store.write_simp_html(i, html)
-    assert attribution.quotes_visible_at_step(store, _f(2, evidence=ONE_QUOTE)) == [QUOTE]
-    assert attribution.quotes_visible_at_step(store, _f(1, evidence=ONE_QUOTE)) == []  # step 2's page is not 1's result
-
-
-def test_quotes_visible_at_step_never_reads_two_steps_on(tmp_path):
-    store = _marta(tmp_path, texts=["a", "b", "c", "d", "e"], n_actions=5)
-    for i, html in enumerate(["<p>x</p>"] * 4 + [f"<main>{QUOTE}</main>"]):
-        store.write_simp_html(i, html)
     assert attribution.quotes_visible_at_step(store, _f(2, evidence=ONE_QUOTE)) == []
+    assert attribution.quotes_visible_at_step(store, _f(3, evidence=ONE_QUOTE)) == [QUOTE]
+
+
+def test_resolve_evidence_finds_the_quote_in_the_address_the_action_loaded(tmp_path):
+    store = _marta(tmp_path, texts=["a", "b", "c", "Lista placówek", "d"])
+    obs = store.read_observations()
+    obs[3]["tabs"][0]["url"] = f"{SITE}/oddzialy?address=Krakowskie%20Przedmieście%2031-147,%20Warszawa"
+    (store.trace_dir / "observation_trace.jsonl").write_text(
+        "\n".join(json.dumps(o) for o in obs) + "\n", encoding="utf-8")
+    out = resolve_evidence(store, _f(2))
+    assert out["step"] == 2 and out["evidence_step"] == 3
 
 
 # --- the hold that is about the typed address stays as it was -----------------
