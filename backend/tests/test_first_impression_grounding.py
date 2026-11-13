@@ -26,7 +26,7 @@ from tests.conftest import make_agent_report, make_finding
 UOKIK = ("Komunikat o decyzji Prezesa Urzędu Ochrony Konkurencji i Konsumentów Na stronie UOKiK możesz "
          "zobaczyć decyzję zobowiązującą Prezesa UOKiK nr RKR-3/2026.")
 
-# The six real suggested changes about the notice, verbatim (run 2026-11-10_16-15-42_cfe5).
+# The eight real suggested changes about the notice, verbatim (run 2026-11-10_16-15-42_cfe5).
 REAL_SUGGESTIONS = [
     "Zmienić stylizację obowiązkowego komunikatu UOKiK (usunąć zielonkawe tło i grubą ramkę, zostawiając sam "
     "tekst na białym tle), aby wyglądał jak neutralna nota prawna, a nie systemowy alarm bezpieczeństwa banku.",
@@ -41,6 +41,8 @@ REAL_SUGGESTIONS = [
     "pod głównym menu, a nie wielki popup zasłaniający ekran.",
     "Przeredagować (w ramach możliwości prawnych) lub wizualnie stonować nagłówek komunikatu UOKiK, aby nie "
     "wyglądał jak ostrzeżenie o krytycznym błędzie bezpieczeństwa na powitaniu.",
+    "Zminimalizować wizualnie ramkę 'Komunikat o decyzji...', ponieważ wyeksponowane słowa o 'transakcjach "
+    "nieautoryzowanych' odstraszają na samym wejściu.",
 ]
 REAL_RECOMMENDATION = ("Zmienić stylizację komunikatu o decyzji UOKiK na bardziej dyskretną i mniej alarmującą "
                        "(np. płaski pasek do rozwinięcia zamiast okna z ramką na górze ekranu).")

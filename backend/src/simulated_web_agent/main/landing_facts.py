@@ -151,11 +151,22 @@ LANDING_FACTS_JS = r"""
       }
     }
     const navCount = (el) => navItems.filter((n) => el.contains(n.el)).length;
+    // A fixed or sticky site header is navigation, not a notice, whatever it is built from: a
+    // header or nav element in it, or a row that is nothing but links.
+    const NAV_SEL = 'header, nav, [role="banner"], [role="navigation"], [role="menubar"]';
+    const MODAL_SEL = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog';
+    const isNavigation = (el) => {
+      if (el.matches(MODAL_SEL)) return false;
+      if (el.matches(NAV_SEL) || el.querySelector(NAV_SEL) || navCount(el) > 0) return true;
+      const links = Array.from(el.querySelectorAll('a, [role="menuitem"]'));
+      const linkText = links.reduce((n, a) => n + textOf(a).length, 0);
+      return links.length >= 2 && linkText >= 0.7 * textOf(el).length;
+    };
     for (const el of fixedEls) {
       const st = style(el);
       if (st.zIndex === 'auto' || !isVisible(el)) continue;
       const c = clipped(el.getBoundingClientRect());
-      if (c.area / vpArea <= 0.02 || textOf(el).length < 15 || navCount(el) >= 5) continue;
+      if (c.area / vpArea <= 0.02 || textOf(el).length < 15 || isNavigation(el)) continue;
       add(el, 'fixed');
     }
     const closeText = /^(zamknij|close|dismiss|akceptuj\w*|ok|rozumiem|zgadzam się|[×xX✕✖✗])(\s*[×xX✕✖✗])?$/i;
@@ -268,7 +279,8 @@ LANDING_FACTS_JS = r"""
       const fixedAnc = hasFixedAncestor(el);
       const positioned = st.position === 'fixed' || st.position === 'absolute' || fixedAnc || sources.includes('dialog');
       const isOverlay = positioned && coversContent;
-      const kind = isOverlay ? 'overlay' : ((st.position === 'fixed' || st.position === 'sticky' || fixedAnc) ? 'fixed_bar' : 'in_flow');
+      const kind = isOverlay ? 'overlay' : ((st.position === 'fixed' || st.position === 'sticky' || fixedAnc) ? 'fixed_bar'
+                   : (st.position === 'absolute' ? 'absolute' : 'in_flow'));
       result.notices.push({
         text: full.slice(0, 240), text_full: full.slice(0, 1500),
         tag: el.tagName.toLowerCase(), id: (el.id || '').slice(0, 80), class: (el.getAttribute('class') || '').slice(0, 80),
@@ -474,6 +486,13 @@ NO_FACTS = ("(brak pomiarów strony startowej: nie opisuj geometrii, kolorów an
             "elementu - oceniaj tylko to, co widać i da się nazwać, np. tekst elementu i to, że jest u góry)")
 
 
+# The script finds dialogs, fixed bars and blocks with a close control; a notice without one
+# in the flow of the page, or in an iframe, is not seen, so "none found" is not "none there".
+NO_NOTICE_DETECTED = ("- Pomiar nie wykrył komunikatu z przyciskiem zamknięcia, okna dialogowego ani przyklejonego "
+                      "paska; nie oznacza to, że na zrzucie ekranu nie ma komunikatu - opisz taki element "
+                      "tylko tym, co widać (tekst, miejsce), bez podawania jego wymiarów, kolorów i rozmiaru czcionki.")
+
+
 def _pct(share: Any) -> str:
     try:
         return f"{round(float(share) * 100)}%"
@@ -497,6 +516,8 @@ def _notice_line(n: dict) -> str:
     elif kind == "fixed_bar":
         where = (f"pasek przyklejony do krawędzi ekranu (position: {n.get('position')}), "
                  "który niczego nie zasłania")
+    elif kind == "absolute":
+        where = "blok pozycjonowany bezwzględnie (position: absolute), który niczego nie zasłania"
     else:
         where = "blok w przepływie strony (NIE jest oknem, pop-upem ani nakładką; przesuwa treść w dół, niczego nie zasłania)"
     parts = [f"- Komunikat „{title}”: {where}",
@@ -553,8 +574,7 @@ def summarize_landing_facts(facts: dict | None) -> str:
     lines = [f"Pomiar w przeglądarce, ekran {_px(vp.get('width'))}×{_px(vp.get('height'))}, przed jakąkolwiek "
              "akcją (jedyne wiarygodne źródło geometrii, kolorów i rozmiarów):"]
     notices = [n for n in facts.get("notices") or [] if isinstance(n, dict)]
-    lines += [_notice_line(n) for n in notices] or [
-        "- Nie wykryto żadnego komunikatu, okna ani nakładki na pierwszym ekranie."]
+    lines += [_notice_line(n) for n in notices] or [NO_NOTICE_DETECTED]
     widgets = [w for w in facts.get("floating_widgets") or [] if isinstance(w, dict)]
     lines += [_widget_line(w) for w in widgets] or ["- Nie wykryto pływających elementów (czat, przycisk „do góry”)."]
     if facts.get("nav_labels"):

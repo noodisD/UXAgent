@@ -64,10 +64,29 @@ def test_regulator_prescribed_notices_are_mandated(text):
     "Szlachetna Paczka w banku BNP - zostań darczyńcą.",
     "Kredyt hipoteczny z oprocentowaniem od 5,9%. Sprawdź ofertę.",
     "Win a prize: open an account today and get a free card.",
+    # a promotion hooked on a decision, an address that looks like a decision number
+    "Po decyzji NBP obniżamy oprocentowanie kredytów gotówkowych. Sprawdź nową ofertę!",
+    "Na podstawie decyzji Prezesa NBP zmieniliśmy oprocentowanie lokat - zobacz promocję.",
+    "Szczegóły oferty na bank.pl/dok/123 i bank.pl/RKR-5.",
+    # a request for consent is not the information duty, even with the RODO in it
+    "Zapisz się do newslettera i odbierz 10 zł. Wyrażam zgodę na przetwarzanie danych osobowych.",
+    "Dbamy o Twoją prywatność. Akceptuję przetwarzanie danych osobowych zgodnie z RODO.",
+    "Ta strona używa cookies. Przetwarzamy dane zgodnie z RODO - wybierz ustawienia i wyraź zgodę.",
+    "We use cookies and process data under the GDPR. Accept all to continue.",
 ])
 def test_an_ordinary_promotion_or_banner_is_not_mandated(text):
     assert is_mandated_notice(text) is False
     assert mandated_notice_reason(text) is None
+
+
+@pytest.mark.parametrize("text", [
+    "Komunikat o decyzji Prezesa UOKiK. Zobacz szczegóły i promocję banku.",
+    "Wykonujemy obowiązek publikacyjny wynikający z decyzji RKR-3/2026, sprawdź też ofertę.",
+    "Sprawa RKR-3/2026 zakończyła się zobowiązaniem banku.",
+    "Zob. DOZIK-12/2025.",
+])
+def test_a_decision_notice_stays_mandated_beside_a_promotional_word(text):
+    assert is_mandated_notice(text) is True
 
 
 def test_a_legal_basis_alone_does_not_shield_a_promotion():
@@ -92,6 +111,18 @@ def test_the_real_recommendation_dilutes_a_mandated_notice():
     "Uczynić komunikat UOKiK dyskretnym.",
     "Make the UOKiK notice less prominent.",
     "Collapse the legal notice into a discreet bar.",
+    # the one of the eight suggestions of the real run that the first rules let through (Tomasz)
+    "Zminimalizować wizualnie ramkę 'Komunikat o decyzji...', ponieważ wyeksponowane słowa o "
+    "'transakcjach nieautoryzowanych' odstraszają na samym wejściu.",
+    "Zminimalizuj komunikat UOKiK.",
+    "Przenieść komunikat UOKiK do stopki.",
+    "Przesunąć komunikat UOKiK na dół strony.",
+    "Przenieść komunikat o decyzji Prezesa UOKiK pod fold.",
+    "Zastąpić komunikat UOKiK małym linkiem.",
+    "Zamienić okno z komunikatem UOKiK na ikonę.",
+    "Uczynić komunikat UOKiK mniejszym.",
+    "Komunikat UOKiK powinien być kompaktowy.",
+    "Wyświetlać komunikat UOKiK dopiero po przewinięciu strony.",
 ])
 def test_every_way_of_asking_to_dilute_it_is_caught(sentence):
     assert dilutes_mandated_notice(sentence) is True
@@ -116,6 +147,14 @@ def test_the_same_words_about_a_banner_an_ad_or_a_promotion_are_untouched(senten
     "Umieścić przycisk „Zamknij” komunikatu UOKiK w łatwo dostępnym miejscu.",
     "Powiększyć czcionkę komunikatu UOKiK na urządzeniach mobilnych.",
     "Mały, gęsty tekst komunikatu UOKiK budzi podejrzenie, że bank chce coś ukryć.",
+    "Zmniejszyć długość linii w komunikacie UOKiK.",
+    "Skrócić długość linii komunikatu UOKiK do 70 znaków.",
+    "Zwiększyć kontrast przycisku zamknięcia, aby łatwo było ukryć komunikat UOKiK.",
+    "Brak łatwego sposobu, by ukryć komunikat UOKiK.",
+    "Dodać ikonę „X” w rogu banera z decyzją UOKiK, aby użytkownik mógł ukryć ten komunikat.",
+    "Brak łatwej możliwości ukrycia komunikatu UOKiK na telefonie.",
+    "Przesunąć przycisk „Zamknij” poza obrys ramki komunikatu UOKiK i powiększyć go.",
+    "To zmniejszy czytelność komunikatu UOKiK.",
 ])
 def test_legibility_advice_is_never_taken_back(sentence):
     assert recommends_dilution(sentence) is False
@@ -330,3 +369,100 @@ def test_the_landing_facts_extend_the_guard_to_a_plain_word():
     assert guarded["priority_recommendations"][0]["action"] == LEGIBILITY_ONLY
     beside_banner = guard_narrative(copy.deepcopy(narr), {"only_mandated": False, "mandated": True})
     assert beside_banner["priority_recommendations"][0]["action"] == "Zwinąć komunikat do paska."
+
+
+# --- advice that only mentions the RODO, the NBP or a regulator is not about the notice ---------
+
+@pytest.mark.parametrize("sentence", [
+    "Zmniejszyć liczbę zgód RODO w formularzu wniosku, zostawiając tylko wymagane.",
+    "Uprość formularz: usuń zbędne pola i dodaj zwięzłą klauzulę RODO.",
+    "Usuń zbędne kroki z formularza i zostaw tylko komunikat o zgodzie RODO.",
+    "Zbyt wiele zgód RODO; zredukować ich liczbę.",
+    "Uczyń okno zgody RODO mniej inwazyjnym i zamknij popup newslettera.",
+    "Zmniejszyć okno wyboru zgód RODO na telefonie.",
+    "Usunąć z kalkulatora tabelę kursów NBP, która rozprasza.",
+    "Ukryć kurs NBP z nagłówka kalkulatora kredytu walutowego.",
+])
+def test_advice_about_a_form_or_a_consent_box_is_not_advice_about_the_regulators_notice(sentence):
+    assert dilutes_mandated_notice(sentence) is False
+    assert dilutes_mandated_notice(sentence, only_mandated=False) is False
+
+
+def test_a_recommendation_about_rodo_consents_survives_the_guards_untouched():
+    rec = "Zmniejszyć liczbę zgód RODO w formularzu wniosku, zostawiając tylko wymagane."
+    narr = _narr(priority_recommendations=[
+        {"priority": 1, "area": "Formularz", "action": rec, "expected_impact": "Krótszy wniosek."}])
+    for landing in (None, {"only_mandated": True}):
+        out = guard_narrative(copy.deepcopy(narr), landing)
+        assert out["priority_recommendations"] == narr["priority_recommendations"]
+    fi = {"suggested_changes": {"call_to_action": "Usuń zbędne pola z formularza i zachowaj tylko zgodę RODO."},
+          "weaknesses": ["Zbyt wiele zgód RODO; zredukować ich liczbę."]}
+    before = copy.deepcopy(fi)
+    assert guard_first_impression(fi, {"notices": [{"mandated": True}]}) is False
+    assert fi == before
+
+
+@pytest.mark.parametrize("sentence", [
+    "Zwinąć okno komunikatu NBP do paska.",
+    "Zmniejszyć komunikat regulatora.",
+    "Make the regulatory notice less prominent.",
+])
+def test_the_nbp_or_a_regulator_next_to_a_notice_still_names_it(sentence):
+    assert dilutes_mandated_notice(sentence) is True
+
+
+@pytest.mark.parametrize("sentence", [
+    "Ukryć pasek promocyjny z komunikatem o rabacie, który wypycha ofertę poniżej pierwszego ekranu.",
+    "Należy usunąć komunikat o rabacie z góry strony.",
+    "Odłóż wyświetlanie pop-upu z ankietą satysfakcji.",
+    "Zwinąć komunikat o konkursie do wąskiego paska.",
+    "Zmniejszyć baner z komunikatem o kampanii.",
+])
+def test_when_the_only_notice_is_mandated_a_promotion_or_a_survey_is_still_fair_game(sentence):
+    assert dilutes_mandated_notice(sentence, only_mandated=True) is False
+    narr = _narr(priority_recommendations=[{"priority": 1, "area": "UI", "action": sentence, "expected_impact": "x"}])
+    out = guard_narrative(copy.deepcopy(narr), {"only_mandated": True})
+    assert out["priority_recommendations"] == narr["priority_recommendations"]
+
+
+def test_a_promotion_sentence_in_the_summary_is_not_dropped_beside_a_measured_mandated_notice():
+    text = "Serwis działa. Należy usunąć komunikat o rabacie z góry strony. Koniec."
+    out = guard_narrative(_narr(executive_summary=text), {"only_mandated": True})
+    assert out["executive_summary"] == text
+
+
+# --- the issues of the narrative carry a recommendation of their own ------------------------
+
+def _issue(recommendation, **over):
+    base = {"heuristic_id": 8, "heuristic_name": "Estetyka i minimalizm",
+            "impact": "Komunikat UOKiK zajmuje dużą część pierwszego ekranu.",
+            "recommendation": recommendation, "evidence_ids": ["H8-e1"]}
+    base.update(over)
+    return base
+
+
+def test_the_recommendation_of_an_issue_about_the_notice_is_held_to_the_same_rule():
+    narr = _narr(
+        critical_issues=[_issue("Zwinąć lub zmniejszyć okno komunikatu UOKiK. Dodać streszczenie obok tekstu.")],
+        serious_issues=[_issue("Zminimalizować wizualnie ramkę komunikatu o decyzji.")],
+        minor_issues=[_issue("Dodać numer infolinii obok przycisku „Kontakt”.", impact="Brak numeru.")])
+    guard_narrative(narr)
+    crit, serious, minor = narr["critical_issues"][0], narr["serious_issues"][0], narr["minor_issues"][0]
+    assert crit["recommendation"] == LEGIBILITY_ONLY + " Dodać streszczenie obok tekstu."
+    assert serious["recommendation"] == LEGIBILITY_ONLY
+    assert minor["recommendation"] == "Dodać numer infolinii obok przycisku „Kontakt”."
+    assert crit["impact"] == "Komunikat UOKiK zajmuje dużą część pierwszego ekranu.", "the complaint stays"
+    assert crit["evidence_ids"] == ["H8-e1"] and crit["heuristic_id"] == 8
+    assert narr["methodology_note"].endswith(LEFT_OUT_NOTE)
+
+
+def test_an_issue_guard_runs_on_its_own_output_unchanged_and_ignores_malformed_issues():
+    narr = _narr(critical_issues=[_issue("Zwinąć okno komunikatu UOKiK."), "tekst", None, {"recommendation": 5}],
+                 serious_issues="nie lista")
+    once = guard_narrative(narr)
+    assert guard_narrative(copy.deepcopy(once)) == once
+    assert once["critical_issues"][1:] == ["tekst", None, {"recommendation": 5}]
+
+
+def test_the_note_names_neither_a_single_regulator_nor_a_single_decision():
+    assert "UOKiK" not in LEFT_OUT_NOTE and "regulatora" in LEFT_OUT_NOTE

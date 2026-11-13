@@ -171,6 +171,54 @@ async def test_a_site_header_that_sticks_is_not_a_notice():
     assert facts["notices"] == []
 
 
+HERO = '<div style="height:500px;background:#ccd"></div>'
+
+
+@pytest.mark.parametrize("header", [
+    # hyundai.com/pl: a fixed wrapper with z-index around a header with its own nav
+    ('<div class="fixed-container" style="position:fixed;top:0;left:0;width:100%;height:72px;z-index:29;'
+     'background:#fff"><header><nav><button>Modele</button> <button>Wszystkie SUV Electric</button> '
+     '<button>Znajdź swojego Hyundaia</button></nav></header></div>'),
+    # no header or nav element at all: a sticky row of three links
+    ('<div style="position:sticky;top:0;z-index:5;background:#fff"><a href="#a">Modele samochodów</a> '
+     '<a href="#b">Znajdź dealera</a> <a href="#c">Konfigurator online</a></div>'),
+    # a transparent header over the hero image, two links
+    ('<div style="position:fixed;top:0;left:0;width:100%;height:80px;z-index:50;background:transparent">'
+     '<a href="#a">Logo Hyundai Motor</a> <a href="#b">Oferta i promocje</a></div>'),
+])
+async def test_a_fixed_site_header_with_a_few_links_is_not_a_notice_or_an_overlay(header):
+    facts = await _measure(header + HERO + FILLER)
+    assert facts["notices"] == []
+    assert "Komunikat „" not in summarize_landing_facts(facts)
+
+
+async def test_a_fixed_notice_with_one_link_is_still_a_notice():
+    bar = ('<div style="position:fixed;bottom:0;left:0;width:100%;z-index:9;background:#eef;padding:10px">'
+           'Nowy regulamin obowiązuje od 1 stycznia. <a href="#z">Szczegóły zmian</a> <button>OK</button></div>')
+    facts = await _measure(NAV + CTA + bar + FILLER)
+    (n,) = facts["notices"]
+    assert n["kind"] == "fixed_bar" and n["text"].startswith("Nowy regulamin")
+
+
+async def test_a_notice_that_is_out_of_flow_but_covers_nothing_is_not_said_to_push_the_content_down():
+    absolute = NOTICE.replace("position:relative", "position:absolute;top:150px;left:0;width:600px")
+    facts = await _measure(NAV + absolute + FILLER)
+    (n,) = facts["notices"]
+    assert n["kind"] == "absolute" and n["covers_content"] is False
+    text = summarize_landing_facts(facts)
+    assert "pozycjonowany bezwzględnie (position: absolute)" in text and "przesuwa treść w dół" not in text
+
+
+async def test_an_in_flow_notice_without_a_close_control_is_not_seen_and_is_not_declared_absent():
+    bare = NOTICE.replace('<button style="position:absolute;right:4px;top:4px">Zamknij<span>×</span></button>', "")
+    assert bare != NOTICE
+    facts = await _measure(bare + NAV + CTA + FILLER)
+    assert facts["notices"] == []
+    text = summarize_landing_facts(facts)
+    assert "Nie wykryto żadnego komunikatu" not in text
+    assert "nie oznacza to, że na zrzucie ekranu nie ma komunikatu" in text
+
+
 # --- capture: never fails or holds up the session -----------------------------------
 
 async def test_capture_stores_the_facts_beside_the_screenshot(tmp_path):
@@ -271,10 +319,12 @@ def test_no_facts_means_no_geometry_claims():
     assert "nie opisuj geometrii, kolorów ani rozmiaru czcionki" in NO_FACTS
 
 
-def test_a_page_with_no_notice_says_so():
+def test_a_page_with_no_detected_notice_does_not_say_there_is_none():
     facts = _facts()
     facts["notices"] = []
-    assert "Nie wykryto żadnego komunikatu" in summarize_landing_facts(facts)
+    text = summarize_landing_facts(facts)
+    assert "Pomiar nie wykrył komunikatu z przyciskiem zamknięcia" in text
+    assert "nie oznacza to, że na zrzucie ekranu nie ma komunikatu" in text
 
 
 # --- the run-level roll-up the aggregate guard reads ------------------------------------

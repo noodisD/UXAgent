@@ -21,22 +21,35 @@ _ORGAN = (r"UOKiK|KNF|UODO|GIODO|NBP|Urz[ęe]d\w*\s+Ochrony\s+(?:Konkurencji|Dan
           r"|Komisj\w*\s+Nadzoru\s+Finansowego|Narodow\w*\s+Bank\w*\s+Polsk\w*"
           r"|Office\s+of\s+Competition\s+and\s+Consumer\s+Protection|Financial\s+Supervision")
 
-# A notice that is mandated whatever else it says.
+_PROMOTIONAL = re.compile(
+    r"promocj|promocyj|rabat|zniżk|bonus|nagrod|konkurs|taniej|gratis|darmow|wygraj|zyskaj|"
+    r"oprocentowan|\bofert|\bsale\b|discount|\bwin\b|\bfree\b", re.IGNORECASE)
+# A request for consent or a subscription ("zgodnie z" is not one).
+_CONSENT_ASK = re.compile(
+    r"\bzgod(?:a|ę|y|ą|zie)\b|zgadzam|wyrażam|akceptuj|newsletter|subskry|zapisz\s+się|cooki|ciasteczk"
+    r"|\bconsent\b|\bsubscribe\b|\baccept\b", re.IGNORECASE)
+_PROMOTIONAL_OR_CONSENT = re.compile(f"{_PROMOTIONAL.pattern}|{_CONSENT_ASK.pattern}", re.IGNORECASE)
+
+# A notice that is mandated whatever else it says, or - third item - unless the text has
+# that vocabulary: "Po decyzji NBP obniżamy oprocentowanie ..." is a promotion hooked on a
+# decision, and a newsletter pop-up or cookie wall that asks for consent under the RODO is
+# not the information duty.
 _STRONG = (
     ("decyzja organu (UOKiK, KNF, UODO lub NBP)", re.compile(
         rf"decyzj\w*(?:\s+\S+){{0,3}}?\s+(?:{_ORGAN})|decision\s+of\s+(?:the\s+)?(?:President\s+of\s+(?:the\s+)?)?(?:{_ORGAN})",
-        re.IGNORECASE)),
-    ("komunikat o decyzji organu", re.compile(r"komunikat\w*\s+o\s+decyzj", re.IGNORECASE)),
+        re.IGNORECASE), _PROMOTIONAL),
+    ("komunikat o decyzji organu", re.compile(r"komunikat\w*\s+o\s+decyzj", re.IGNORECASE), None),
     ("obowiązek publikacyjny", re.compile(
         r"obowi[ąa]z\w*\s+(?:publikacyjn|publikacji|opublikowania|informacyjn)\w*"
-        r"|publication\s+(?:obligation|duty)", re.IGNORECASE)),
+        r"|publication\s+(?:obligation|duty)", re.IGNORECASE), None),
     ("numer decyzji organu", re.compile(
-        r"\b(?:RKR|DOZIK|DKK|RWR|RGD|RPZ|DDK|DOK|RBG|RLU|RŁO)[-/]\s?\d+", re.IGNORECASE)),
+        r"(?<![/\w.-])(?:RKR|DOZIK|DKK|RWR|RGD|RPZ|DDK|DOK|RBG|RLU|RŁO)[-/]\s?\d+\b", re.IGNORECASE), None),
     ("na podstawie decyzji organu", re.compile(
         rf"na\s+podstawie\s+decyzji(?:\s+\S+){{0,3}}?\s+(?:prezesa|urz[ęe]du|organu|komisji|nadzor\w*|sądu|ministra|{_ORGAN})",
-        re.IGNORECASE)),
+        re.IGNORECASE), _PROMOTIONAL),
     ("RODO / GDPR", re.compile(
-        r"\bRODO\b|\bGDPR\b|klauzul\w*\s+informacyjn|przetwarzani\w*\s+danych\s+osobowych", re.IGNORECASE)),
+        r"\bRODO\b|\bGDPR\b|klauzul\w*\s+informacyjn|przetwarzani\w*\s+danych\s+osobowych", re.IGNORECASE),
+     _PROMOTIONAL_OR_CONSENT),
 )
 
 # A legal basis alone is not enough ("zgodnie z art. 5" sits on promotions too): it counts
@@ -49,9 +62,6 @@ _LEGAL_BASIS = re.compile(
 _NOTICE_FRAME = re.compile(
     r"komunikat|informuj|zawiadamia|powiadamia|obowi[ąa]z|publikuj|ogłasz|"
     r"notice|we\s+inform|obliged", re.IGNORECASE)
-_PROMOTIONAL = re.compile(
-    r"promocj|rabat|zniżk|bonus|nagrod|konkurs|taniej|gratis|darmow|wygraj|zyskaj|"
-    r"oprocentowan|\bofert|\bsale\b|discount|\bwin\b|\bfree\b", re.IGNORECASE)
 
 
 def mandated_notice_reason(text: str) -> str | None:
@@ -60,8 +70,8 @@ def mandated_notice_reason(text: str) -> str | None:
     text = " ".join(str(text or "").split())
     if not text:
         return None
-    for reason, pattern in _STRONG:
-        if pattern.search(text):
+    for reason, pattern, unless in _STRONG:
+        if pattern.search(text) and not (unless and unless.search(text)):
             return reason
     if _LEGAL_BASIS.search(text) and _NOTICE_FRAME.search(text) and not _PROMOTIONAL.search(text):
         return "podstawa prawna: ustawa, rozporządzenie lub dyrektywa"
@@ -81,36 +91,50 @@ _DILUTION = re.compile(
     r"|mniej\s+(?:alarmując|agresywn|rzucając|widoczn|inwazyjn|natarczyw|nachaln|przytłaczając|dominując)\w*"
     r"|bardziej\s+(?:neutraln|stonowan|subteln)\w*"
     r"|neutraln\w*|stonuj|stonować|stonowan\w*|złagodz\w*|złagodź|wyciszy\w*|przytłum\w*"
-    r"|zmniejsz(?:yć|aj|enie|ać)?\b|pomniejsz\w*|zredukuj|zredukować|zminimalizuj\w*"
+    r"|zmniejsz(?:yć|aj|enie|ać)?\b|\bmniejsz(?:y|ym|ą|e|a|ego)\b|pomniejsz\w*|zredukuj|zredukować|z?minimaliz\w*"
+    r"|kompaktow\w*"
     r"|ogranicz\w*\s+(?:rozmiar|wielkość|widoczność|wagę)"
     r"|ukry(?:ć|j|cie|cia)\b|schow(?:aj|ać|anie)\b|usu(?:ń|nąć|nięci\w*)|usuwa(?:ć|nie)\b|wyrzuć|zlikwiduj|zlikwidow\w*"
     r"|zwi(?:ń|nąć|nięci\w*)|rozwijan\w*|zwijan\w*|do\s+rozwini\w*|płask\w*\s+pasek"
     r"|wyłącz(?:yć|ać|enie|\b)|zrezygn\w*"
-    r"|odroczy\w*|odłóż|odłożyć|opóźni\w*|(?:pokaz|wyświetl)\w*\s+(?:dopiero|później)"
+    r"|odroczy\w*|odłóż|odłożyć|opóźni\w*|(?:pokaz|pokaż|wyświetl)\w*\s+(?:\S+\s+){0,4}?(?:dopiero|później)"
+    r"|(?:przenie|przesu)\w*\s+(?:\S+\s+){0,6}?(?:stopk|na\s+dół|pod\s+fold|poza\s+(?:pierwsz|ekran|widoczn|fold|obszar))"
+    r"|(?:zast[ąa]p|zamie[nń])\w*\s+(?:komunikat|okn|ramk|pasek|baner|informacj)\w*\s+(?:\S+\s+){0,5}?(?:ikon|link|przycisk)\w*"
     r"|skr[óo][ćc]\w*\s+(?:\S+\s+){0,3}?(?:tekst|treść|komunikat)\w*"
     r"|bez\s+(?:\S+\s+)?(?:ramk|tła)\w*|pozbaw\w*"
     r"|\b(?:hide|conceal|shrink|soften|collapse|remove|downplay|minimi[sz]e|defer|discreet|neutral)\b"
     r"|tone\s+down|less\s+alarming|less\s+prominent", re.IGNORECASE)
 
 # Words that name the notice the report is talking about, whatever the measurements say.
+# "NBP" and "regulator" are everywhere in a bank's advice (rates, forms), so they name a
+# notice only next to a word for one, and the RODO never does: a sentence about a consent
+# form must not be taken for one about the regulator's notice.
+_NOTICE_NOUN = r"(?:komunikat|informacj|ogłoszeni|okn|ramk|pasek|paska|baner|banner|notice|nota\b)\w*"
 _NAMES_REGULATOR = re.compile(
-    r"UOKiK|\bKNF\b|\bUODO\b|\bGIODO\b|\bNBP\b|regulator\w*|\bregulatory\b"
+    r"UOKiK|\bKNF\b|\bUODO\b|\bGIODO\b"
+    rf"|{_NOTICE_NOUN}(?:\s+\S+){{0,4}}?\s+(?:NBP\b|regulator\w*|regulatory\b)"
+    rf"|(?:NBP\b|regulator\w*|regulatory\b)(?:\s+\S+){{0,3}}?\s+{_NOTICE_NOUN}"
     r"|komunikat\w*\s+(?:prawn|o\s+decyzj|urz[ęe]d|regulac|nadzor)|informacj\w*\s+prawn|nota\s+prawn"
     r"|(?:tekst|okn\w+|pasek|ramk\w+)\s+prawn|decyzj\w*\s+(?:prezes|zobowiązując)"
-    r"|obowi[ąa]z\w*\s+publikac|\bRODO\b|\bGDPR\b|legal\s+notice|\bprawn\w+\s+komunikat",
+    r"|obowi[ąa]z\w*\s+publikac|legal\s+notice|\bprawn\w+\s+komunikat",
     re.IGNORECASE)
 # When the measurements say the only notice on the landing screen is a mandated one, the
 # plain words for it name it too - unless the sentence is about something else.
 _NAMES_ANY_NOTICE = re.compile(r"komunikat\w*|powiadomien\w*|pop-?up\w*|\bnotice\b", re.IGNORECASE)
 _SOMETHING_ELSE = re.compile(
-    r"aplikacj|\bapp\b|gomobile|reklam|promocj|kampani|cooki|ciasteczk|zgod\w*\s+na|czat|chat"
-    r"|błęd|walidac|formularz|logowan|koszyk|newsletter|subskrypcj", re.IGNORECASE)
+    r"aplikacj|\bapp\b|gomobile|reklam|promocj|promocyj|rabat|rabac|zniżk|kampani|cooki|ciasteczk|zgod\w*\s+na|czat|chat"
+    r"|błęd|walidac|formularz|logowan|koszyk|newsletter|subskrypcj|ankiet|konkurs|baner|banner|sond", re.IGNORECASE)
 
 
-# Not advice to dilute: "bank chce coś ukryć" says what a reader suspects, and the length of a
-# line is the legibility the site is allowed to improve.
+# Not advice to dilute: "bank chce coś ukryć" says what a reader suspects, the length of a
+# line is the legibility the site is allowed to improve, and a way to close the notice is the
+# close control the notice has to have.
 _NOT_ADVICE = re.compile(
-    r"(?:chc\w+|próbuj\w+|usiłuj\w+|coś)\s+ukry\w*|(?:długoś|szerokoś)\w+\s+(?:linii|wiersz\w*)", re.IGNORECASE)
+    r"(?:chc\w+|próbuj\w+|usiłuj\w+|coś)\s+ukry\w*"
+    r"|(?:(?:zmniejsz|skr[óo][ćc]|ogranicz)\w*\s+)?(?:długoś|szerokoś)\w+\s+(?:linii|wiersz\w*)"
+    r"|(?:by|aby|żeby)\s+(?:łatwo|można)\s+(?:było\s+)?(?:ukry|zamkn)\w*"
+    r"|\b(?:mógł|móc|mogł[aoi]?)\s+(?:ukry|zamkn)\w*"
+    r"|(?:sposob|możliwo|opcj)\w*,?\s+(?:(?:by|aby|żeby)\s+)?(?:ukry|zamkn)\w*", re.IGNORECASE)
 
 
 def recommends_dilution(text: str) -> bool:
@@ -135,7 +159,7 @@ LEGIBILITY_ONLY = ("Poprawić wyłącznie czytelność komunikatu prawnego, nie 
                    "przycisk „Zamknij” oraz krótkie streszczenie prostym językiem obok tekstu prawnego.")
 
 LEFT_OUT_NOTE = ("Pominięto rekomendację zmiany sposobu prezentacji komunikatu nałożonego przez regulatora "
-                 "(decyzja UOKiK): jego treść, forma i widoczność są narzucone, więc oceniano wyłącznie "
+                 "lub przepis: jego treść, forma i widoczność są narzucone, więc oceniano wyłącznie "
                  "jego czytelność.")
 
 _ABBREVIATIONS = ("np", "tzn", "tj", "tzw", "itp", "itd", "ok", "nr", "art", "ust", "pkt", "godz", "zł", "r",
@@ -238,10 +262,10 @@ def guard_narrative(narr: dict, landing: dict | None = None) -> dict:
     """Take back, from the aggregate narrative, a recommendation to hide, shrink, soften or
     restyle a mandated notice (`landing` is statistics.landing_notices).
 
-    A priority recommendation keeps its place with the legibility-only sentence instead;
-    sentences of the executive summary and the first-impression assessment that make it are
-    dropped; the methodology note says once, in Polish, that such a recommendation was left
-    out. A sentence about an app banner, an ad or a promotion is not touched. Mutates and
+    A priority recommendation, or the recommendation of an issue, keeps its place with the
+    legibility-only sentence instead; sentences of the executive summary and the
+    first-impression assessment that make it are dropped; the methodology note says once, in
+    Polish, that such a recommendation was left out. A sentence about an app banner, an ad or a promotion is not touched. Mutates and
     returns `narr`; runs on its own output unchanged.
     """
     if not isinstance(narr, dict):
@@ -279,6 +303,15 @@ def guard_narrative(narr: dict, landing: dict | None = None) -> dict:
         if rest is not None:
             changed = True
             narr[field] = rest or LEGIBILITY_ONLY
+    # An issue about the notice is the participants' reading and stays; what it recommends
+    # is held to the same rule.
+    for key in ("critical_issues", "serious_issues", "minor_issues"):
+        for issue in narr.get(key) or []:
+            advice = issue.get("recommendation") if isinstance(issue, dict) else None
+            new = rewrite_sentences(advice, claim, LEGIBILITY_ONLY) if isinstance(advice, str) else None
+            if new is not None:
+                changed = True
+                issue["recommendation"] = new
     if (changed or landing.get("left_out")) and LEFT_OUT_NOTE not in str(narr.get("methodology_note") or ""):
         narr["methodology_note"] = (str(narr.get("methodology_note") or "") + " " + LEFT_OUT_NOTE).strip()
     return narr

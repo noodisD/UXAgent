@@ -17,6 +17,7 @@ import asyncio
 import json
 import re
 import sys
+from html import escape as html_escape
 from pathlib import Path
 
 from playwright.async_api import TimeoutError as PlaywrightTimeout
@@ -59,7 +60,7 @@ def device_scale_factor() -> float:
 
 def with_base(html: str, href: str) -> str:
     """`html` with a <base href> first in <head>, so relative stylesheets load from the site."""
-    tag = f'<base href="{href}">'
+    tag = f'<base href="{html_escape(href, quote=True)}">'
     if re.search(r"<base\b", html, re.IGNORECASE):
         return html
     head = re.search(r"<head\b[^>]*>", html, re.IGNORECASE)
@@ -168,9 +169,13 @@ async def main(argv: list[str]) -> int:
                     print(f"\n{persona_dir.name}: already has landing_facts.json, skipped")
                     continue
                 profile = profiles.get(device) or profiles["desktop"]
-                facts = await measure(
-                    browser, store.read_raw_html(0), page_url(store, run_dir), profile, dpr,
-                    js=args.js, shot=shots / f"{persona_dir.name}.png" if shots else None)
+                try:
+                    facts = await measure(
+                        browser, store.read_raw_html(0), page_url(store, run_dir), profile, dpr,
+                        js=args.js, shot=shots / f"{persona_dir.name}.png" if shots else None)
+                except Exception as exc:  # noqa: BLE001 - one persona's page must not stop the rest
+                    print(f"\n{persona_dir.name}: not measured ({exc!r:.200})", file=sys.stderr)
+                    continue
                 describe(f"{card.get('name') or persona_dir.name} {persona_dir.name}", device, facts)
                 if facts:
                     if not args.dry_run:
