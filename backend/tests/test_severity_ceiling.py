@@ -169,3 +169,28 @@ def test_narrative_issue_is_clamped_to_its_supporting_findings():
     narr = {"serious_issues": [issue], "minor_issues": []}
     _rebucket_by_severity(narr)
     assert narr["serious_issues"] == [] and narr["minor_issues"] == [issue]
+
+
+def test_model_parse_errors_are_not_failed_actions(tmp_path):
+    store = _store(tmp_path, n=4)
+    errors = {5: "invalid json action format: {", 6: "missing required parameter in action: target"}
+    store = TraceStore(tmp_path / "m")
+    store.write_action_trace([json.dumps({"action": "click", "target": f"t{k}"}) for k in range(10)])
+    for k in range(10):
+        store.append_observation({"tabs": [{"url": PAGE, "is_active": True}], "error": errors.get(k)})
+    store.write_session_result({"steps_taken": 10, "max_steps": 40, "ended_reason": "terminated"})
+    store.write_objective_reflection({"outcome": "success"})
+    record = consequence_record(store, _finding())
+    assert record["failed_actions"] == 0 and record["blocked"] is False
+    assert apply_severity_ceiling(store, [_finding("krytyczny")])[0]["severity"] == "drobny"
+
+
+def test_findings_without_a_page_do_not_corroborate(tmp_path):
+    a, b = _finding(_persona_dir="p1", url=""), _finding(_persona_dir="p2", url="")
+    assert corroborated_findings([a, b]) == set()
+
+
+def test_note_does_not_deny_a_single_failed_action(tmp_path):
+    [f] = apply_severity_ceiling(_store(tmp_path, fail_at=(5,)), [_finding()])
+    assert f["severity"] == "drobny"
+    assert "nie nastąpiła nieudana akcja" not in f["severity_note"]

@@ -24,7 +24,7 @@ label before the cap is kept and the cap is recomputed from it.
 import logging
 import re
 
-from .attribution import _action_control, _stems4, tool_failed_actions
+from .attribution import _action_control, _observation_errors, _stems4, tool_failed_actions
 from .iso_metrics import effective_outcome
 from .severity import excluded_from_report, heuristic_id, severity_rank
 from .textutil import view_key
@@ -41,10 +41,14 @@ CAPPED_BY_OTHER = "no_blocking_consequence"
 
 _BLOCKED_OUTCOMES = frozenset({"failed", "persona_abandoned"})
 _LABELS = ("drobny", "poważny", "krytyczny")
+# The harness's own parse errors: the model's malformed action, not a failure on the page.
+_MODEL_ERRORS = ("invalid json action format:", "missing required parameter in action:")
 
 # What the report says under a lowered label.
 NOTE = ("Istotność obniżona do „drobny”: po tym kroku uczestnik nie został "
         "zablokowany i nie nastąpiła nieudana akcja, a uwagę zgłosił jeden uczestnik.")
+NOTE_ONE_FAILURE = ("Istotność obniżona do „drobny”: po tym kroku uczestnik nie został "
+                    "zablokowany, nastąpiła jedna nieudana akcja, a uwagę zgłosił jeden uczestnik.")
 
 
 def _path(url) -> str:
@@ -67,7 +71,9 @@ def consequence_record(store: TraceStore, finding: dict) -> dict | None:
         urls = store.step_urls()
         page = _path(finding.get("url") or (urls[step] if step < len(urls) else ""))
         text_stems = _stems4(finding.get("evidence"))
-        failed = tool_failed_actions(store)
+        model_errors = {i - 1 for i, err in _observation_errors(store)
+                        if any(m in err.lower() for m in _MODEL_ERRORS)}
+        failed = {k: v for k, v in tool_failed_actions(store).items() if k not in model_errors}
         hits = []
         for k in range(step, min(step + WINDOW + 1, len(actions))):
             if k not in failed:
@@ -115,10 +121,10 @@ def corroborated_findings(findings: list) -> set[int]:
     `findings` carry `_persona_dir`, as the aggregate annotates them."""
     groups: dict[tuple, set] = {}
     for f in findings:
-        if isinstance(f, dict) and not excluded_from_report(f):
+        if isinstance(f, dict) and not excluded_from_report(f) and _path(f.get("url")):
             groups.setdefault((heuristic_id(f), _path(f.get("url"))), set()).add(f.get("_persona_dir"))
     return {i for i, f in enumerate(findings)
-            if isinstance(f, dict) and not excluded_from_report(f)
+            if isinstance(f, dict) and not excluded_from_report(f) and _path(f.get("url"))
             and len(groups[(heuristic_id(f), _path(f.get("url")))]) >= 2}
 
 
@@ -144,7 +150,7 @@ def apply_severity_ceiling(store: TraceStore | None, findings: list,
             f["severity"] = ceiling
             f["severity_before_cap"] = base
             f["severity_capped_by"] = CAPPED_BY if record.get("outcome") == "success" else CAPPED_BY_OTHER
-            f["severity_note"] = NOTE
+            f["severity_note"] = NOTE_ONE_FAILURE if record.get("failed_actions") == 1 else NOTE
         if record is not None:
             f["consequence"] = record
     return findings
