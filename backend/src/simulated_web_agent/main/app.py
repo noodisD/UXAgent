@@ -12,13 +12,14 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, g, jsonify, request, send_file
 from flask_cors import CORS
 from werkzeug.exceptions import BadRequest
 
 from . import cancellation, report_docx, report_pdf, reporter_html, results_api, run_storage
 from .persona import generate_audit_settings, generate_example_persona
 from .run import mark_run_status, new_run_id, read_manifest, run, site_slug
+from .sso_auth import bearer_token, parse_domains, verify_token
 
 log = logging.getLogger("simulated_web_agent.main.app")
 
@@ -44,10 +45,11 @@ def configure_cors(flask_app, origins: list[str]) -> bool:
     CORS(
         flask_app,
         origins=origins,
-        # Both are actually sent by the frontend; without them the preflight fails.
-        allow_headers=["Content-Type", "X-API-Key", "Cache-Control"],
-        # The key travels in a header, not a cookie, so credentialed CORS (and its
-        # ban on wildcard origins) never comes into play.
+        # All are actually sent by the frontend (Authorization in SSO mode); without
+        # them the preflight fails.
+        allow_headers=["Content-Type", "X-API-Key", "Authorization", "Cache-Control"],
+        # The key / SSO token travels in a header, not a cookie, so credentialed
+        # CORS (and its ban on wildcard origins) never comes into play.
         supports_credentials=False,
     )
     return True
@@ -59,10 +61,17 @@ if configure_cors(app, _CORS_ORIGINS):
 
 _API_KEY = os.getenv("UXAGENT_API_KEY", "").strip()
 
+# SSO (csaapps.pl): the dashboard hosted there sends a short-lived signed token
+# as 'Authorization: Bearer'. An ADDITIONAL mode — the API key above keeps
+# working for scripts and local use; a request needs either.
+_AUTH_SECRET = os.getenv("AUTH_SECRET", "").strip()
+_ALLOWED_DOMAINS = parse_domains(os.getenv("ALLOWED_DOMAINS", ""))
+
 # Browsers cannot attach a custom header to an <img src>, a target="_blank"
 # navigation or a download, so these accept the key as a ?key= query parameter
-# instead. Exactly the routes the UI loads that way: the report in both
-# containers (.html to view, .pdf to download) and the three screenshot forms.
+# (or the SSO token as ?token=) instead. Exactly the routes the UI loads that
+# way: the report in all three containers (.html to view, .pdf/.docx to
+# download) and the three screenshot forms.
 _QUERY_KEY_PREFIXES = ("/runs/",)
 _QUERY_KEY_SUFFIXES = ("/report.html", "/report.pdf", "/report.docx")
 
@@ -72,8 +81,8 @@ _PUBLIC_PATHS = {"/health"}
 
 
 def _asset_route_allows_query_key(path: str) -> bool:
-    """True for the browser-loaded routes: /runs/<id>/report.{html,pdf} and the
-    three /runs/... screenshot variants."""
+    """True for the browser-loaded routes: /runs/<id>/report.{html,pdf,docx} and
+    the three /runs/... screenshot variants."""
     if not path.startswith(_QUERY_KEY_PREFIXES):
         return False
     return path.endswith(_QUERY_KEY_SUFFIXES) or "/screenshot/" in path
@@ -81,20 +90,77 @@ def _asset_route_allows_query_key(path: str) -> bool:
 
 def _key_ok(supplied: str) -> bool:
     # compare_digest, not ==, so a wrong key cannot be recovered by timing.
-    return bool(supplied) and hmac.compare_digest(supplied, _API_KEY)
+    return bool(supplied) and bool(_API_KEY) and hmac.compare_digest(supplied, _API_KEY)
+
+
+def _sso_user(token: str) -> dict | None:
+    if not _AUTH_SECRET or not token:
+        return None
+    return verify_token(token, _AUTH_SECRET, _ALLOWED_DOMAINS)
+
+
+def _log_auth_mode() -> None:
+    modes = []
+    if _AUTH_SECRET:
+        modes.append("SSO bearer token")
+    if _API_KEY:
+        modes.append("X-API-Key")
+    if modes:
+        log.info("[auth] accepted credentials: %s", " or ".join(modes))
+    if _AUTH_SECRET and not _ALLOWED_DOMAINS:
+        log.warning(
+            "[auth] AUTH_SECRET is set but ALLOWED_DOMAINS is empty — every SSO token "
+            "will be rejected. Set ALLOWED_DOMAINS (comma-separated e-mail domains)."
+        )
+    if not modes:
+        log.warning(
+            "[auth] neither UXAGENT_API_KEY nor AUTH_SECRET is set — every endpoint is "
+            "OPEN. That is fine locally, but a public deployment without one lets "
+            "anyone start runs against your LLM budget."
+        )
 
 
 @app.before_request
 def _require_api_key():
-    if not _API_KEY:
-        return None  # unset -> open API (local dev / tests); warned about at boot
+    if not (_API_KEY or _AUTH_SECRET):
+        return None  # neither set -> open API (local dev / tests); warned about at boot
     if request.method == "OPTIONS" or request.path in _PUBLIC_PATHS:
         return None
     if _key_ok(request.headers.get("X-API-Key", "")):
         return None
-    if _asset_route_allows_query_key(request.path) and _key_ok(request.args.get("key", "")):
+    user = _sso_user(bearer_token(request.headers.get("Authorization", "")))
+    if user is None and _asset_route_allows_query_key(request.path):
+        if _key_ok(request.args.get("key", "")):
+            return None
+        user = _sso_user(request.args.get("token", "").strip())
+    if user is not None:
+        g.user = {"email": user["email"], "name": user.get("name"), "sub": user.get("sub")}
         return None
     return jsonify({"status": "error", "error": "unauthorized"}), 401
+
+
+@app.after_request
+def _keep_asset_urls_private(resp):
+    """The ?key= / ?token= URLs must not leak through Referer or be cached."""
+    if (_API_KEY or _AUTH_SECRET) and _asset_route_allows_query_key(request.path):
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        if "no-store" not in resp.headers.get("Cache-Control", ""):
+            resp.headers["Cache-Control"] = "private, no-store"
+    return resp
+
+
+class _ScrubQueryCredentials(logging.Filter):
+    """Werkzeug's access log prints the request line, query string included."""
+
+    _RE = re.compile(r"([?&](?:token|key)=)[^&\s\"]*")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = self._RE.sub(r"\g<1>REDACTED", record.getMessage())
+        record.args = ()
+        return True
+
+
+logging.getLogger("werkzeug").addFilter(_ScrubQueryCredentials())
 
 
 _RUN_PATH_RE = re.compile(r"^/runs/([^/]+)(?:/|$)")
@@ -131,12 +197,7 @@ def health_endpoint():
     return jsonify({"status": "ok"})
 
 
-if not _API_KEY:
-    log.warning(
-        "[auth] UXAGENT_API_KEY is not set — every endpoint is OPEN. That is fine "
-        "locally, but a public deployment without it lets anyone start runs "
-        "against your LLM budget."
-    )
+_log_auth_mode()
 
 run_storage.startup_log()
 
@@ -393,6 +454,9 @@ def run_endpoint():
         }
         CURRENT_RUN_ID = run_id
 
+    user = getattr(g, "user", None)
+    if user:
+        log.info("[run] %s started by %s", run_id, user["email"])
     cancellation.clear(run_id)  # never inherit a stale cancel flag
     threading.Thread(target=_run_thread, args=(run_id, payload), daemon=True).start()
 

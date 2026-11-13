@@ -133,6 +133,7 @@ CMD Xvfb :99 -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & \
     --threads 8 \
     --timeout 0 \
     --access-logfile - \
+    --access-logformat '%(h)s %(m)s %(U)s %(s)s %(b)s %(L)s' \
     --error-logfile - \
     simulated_web_agent.main.app:app
 
@@ -146,12 +147,42 @@ CMD Xvfb :99 -screen 0 1440x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & \
 #     --set-env-vars VERTEXAI_PROJECT=<project>,VERTEXAI_LOCATION=<region> \
 #     --set-env-vars CORS_ORIGINS=https://<your-dashboard-host>
 #
+#   Hosted on csaapps.pl with Microsoft SSO instead of (or beside) the shared
+#   key: add the two lines below and register the app with the csaapps.pl
+#   administrators. CORS_ORIGINS must then be exactly https://csaapps.pl.
+#     --set-secrets AUTH_SECRET=<app>-auth-secret:latest \
+#     --update-env-vars "^;^ALLOWED_DOMAINS=<domain1>,<domain2>"
+#   (the "^;^" prefix makes ';' the separator so the comma list survives.)
+#
 #   Every flag above is load-bearing. This block used to list only the first
 #   four, and a deployment made from it was OOM-killed 21 seconds into every
 #   run while serving an unauthenticated API.
 #
 #   * UXAGENT_API_KEY: without it app.py leaves EVERY endpoint open — anyone
 #     with the URL can start runs against your LLM budget. It warns at boot.
+#   * AUTH_SECRET / ALLOWED_DOMAINS: SSO mode. The dashboard on csaapps.pl gets a
+#     short-lived signed token from https://csaapps.pl/auth/token.php?aud=<app>
+#     and sends it as 'Authorization: Bearer'; main/sso_auth.py checks the
+#     signature, expiry and e-mail domain. ALLOWED_DOMAINS is default-deny: with
+#     AUTH_SECRET set and no domain, every token is rejected (logged at boot).
+#     UXAGENT_API_KEY keeps working beside it; a request needs either.
+#     Register once (guide steps): (1) pick an audience name (default 'uxagent');
+#     (2) openssl rand -hex 32 | tr -d '\n' | gcloud secrets create
+#     <app>-auth-secret --data-file=- --project <P> --replication-policy=user-managed
+#     --locations=europe-central2; (3) the --set-secrets/--update-env-vars above;
+#     (4) grant the administrators roles/secretmanager.secretAccessor on that
+#     secret and tell them audience, project and secret name (never the secret
+#     itself, by mail or chat) - they add it to /auth/app_secrets.php;
+#     (5) logged in, https://csaapps.pl/auth/token.php?aud=<app> must return JSON
+#     with access_token. Get the domain for ALLOWED_DOMAINS from the 'email'
+#     field of https://csaapps.pl/auth/me.php.
+#     Rotation: add a new secret version, redeploy the service, and have the
+#     administrators swap the app_secrets.php entry at the same time - until
+#     then users get 401.
+#     Logging: ?token= / ?key= must not reach logs. gunicorn's access log is
+#     therefore configured to print the path without the query string; Cloud
+#     Run's own request log still records the full URL, which is why tokens are
+#     short-lived.
 #   * CORS_ORIGINS: without it a dashboard on another host cannot call the API,
 #     and for screenshots the failure is a silent broken image, because browsers
 #     do not apply CORS to <img src>.

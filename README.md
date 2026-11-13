@@ -96,7 +96,9 @@ Set in `backend/.env` locally; supplied as environment variables in deployment.
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to a service-account JSON. **Local only** — on GCP the attached service account supplies credentials automatically |
 | `GOOGLE_PAGESPEED_API_KEY` | Optional; enables the PageSpeed pass |
 | `UXAGENT_API_KEY` | Dashboard password. **Unset means the API is open** — fine locally, never in a deployment |
-| `CORS_ORIGINS` | Comma-separated origin allowlist, needed when the dashboard is served from another host |
+| `CORS_ORIGINS` | Comma-separated origin allowlist, needed when the dashboard is served from another host (for csaapps.pl: exactly `https://csaapps.pl`) |
+| `AUTH_SECRET` | csaapps.pl SSO: shared secret that signs the tokens from `/auth/token.php`. Cloud Run: `--set-secrets AUTH_SECRET=<app>-auth-secret:latest`. Additional to `UXAGENT_API_KEY`; a request needs either |
+| `ALLOWED_DOMAINS` | Comma-separated e-mail domains accepted in SSO tokens. Default deny: with `AUTH_SECRET` set and this empty every token is rejected. Cloud Run: `--update-env-vars "^;^ALLOWED_DOMAINS=<d1>,<d2>"` |
 | `HEADLESS` | `false` to watch the browser while agents run |
 
 The provider is chosen by `llm_provider` in `backend/conf/base.yaml`; it is

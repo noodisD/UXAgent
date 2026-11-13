@@ -78,6 +78,12 @@ Backend tests: `cd backend && uv run pytest` (in `backend/tests/`).
   logs a loud warning at boot when it is unset.
 - **`CORS_ORIGINS`** — comma-separated origin allowlist, needed once the
   dashboard is served from a different host than the API. Empty = same-origin.
+- **`AUTH_SECRET`** / **`ALLOWED_DOMAINS`** — csaapps.pl SSO (see "Auth model").
+  `AUTH_SECRET` is the HMAC key shared with the csaapps.pl administrators
+  (Secret Manager, `--set-secrets AUTH_SECRET=<app>-auth-secret:latest`);
+  `ALLOWED_DOMAINS` is the comma list of accepted e-mail domains, default deny.
+  Never commit either. Registration and rotation steps: `backend/Dockerfile`
+  deployment notes.
 - **`PORT`** — honoured by the Dockerfile's gunicorn CMD. `app.py`'s `__main__`
   block hardcodes 8000 and ignores it, so that path is dev-only.
 - **OneDrive / cloud-synced folder**: `uv sync` / `uv add` must be prefixed with
@@ -122,10 +128,16 @@ lazily on first download).
 
 ### Auth model (`app.py`, `@before_request`)
 `UXAGENT_API_KEY` unset → open. Set → every route needs `X-API-Key`, compared
-with `hmac.compare_digest`. Two deliberate exemptions:
+with `hmac.compare_digest`. `AUTH_SECRET` set → a csaapps.pl SSO token
+(`Authorization: Bearer`, verified by `main/sso_auth.py`: signature, `exp`,
+e-mail domain in `ALLOWED_DOMAINS`) is accepted as well. Both set → either one;
+neither → open. The key path is never weakened by SSO. The verified user is on
+`flask.g.user`; `POST /run` logs the e-mail. Two deliberate exemptions:
 - `OPTIONS` (a CORS preflight carries no custom header) and `/health`.
 - The browser-loaded routes — the three `/runs/.../screenshot/...` variants and
-  `/runs/<id>/report.{html,pdf}` — also accept the key as `?key=`, because a
+  `/runs/<id>/report.{html,pdf,docx}` — also accept the key as `?key=` (or the SSO
+  token as `?token=`; those responses get `Referrer-Policy: no-referrer` and
+  `private, no-store`, and werkzeug's access log is scrubbed of both), because a
   browser cannot attach a header to an `<img src>`, a `target="_blank"`
   navigation, or a download. `frontend/src/api.ts` is the only place that knows this:
   `apiFetch` sends the header, `apiAssetUrl` appends the query parameter.

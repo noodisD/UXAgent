@@ -25,7 +25,7 @@ cp .env.example .env      # then fill it in
 
 `.env.example` documents every variable. See the "Environment gotchas" section
 of `../CLAUDE.md` for which ones actually matter under the active
-`llm_provider`, and for `UXAGENT_API_KEY` / `CORS_ORIGINS`, which decide whether
+`llm_provider`, and for `UXAGENT_API_KEY` / `AUTH_SECRET` / `ALLOWED_DOMAINS` / `CORS_ORIGINS`, which decide whether
 a deployment is reachable and whether it is open to the internet.
 
 ## Run
