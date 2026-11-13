@@ -8,6 +8,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import time
 
 # No leeway on exp: the guide rejects as soon as exp < now. Both ends are on
@@ -58,6 +59,9 @@ def verify_token(token, secret, allowed_domains, now: float | None = None) -> di
         exp = payload.get("exp")
         email = payload.get("email")
         if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not isinstance(email, str):
+            return None
+        # NaN never compares less than now, so it would never expire.
+        if not math.isfinite(exp):
             return None
         if exp < (time.time() if now is None else now) - CLOCK_SKEW_SECONDS:
             return None

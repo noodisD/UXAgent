@@ -392,3 +392,9 @@ def test_preflight_rejects_other_origin_and_never_wildcards():
     assert "Access-Control-Allow-Origin" not in res.headers
     ok = c.get("/ping", headers={"Origin": ORIGIN})
     assert ok.headers["Access-Control-Allow-Origin"] != "*"
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+def test_a_non_finite_exp_is_rejected(bad):
+    body = _b64(("{\"sub\": \"ms:1\", \"email\": \"a@%s\", \"name\": \"A\", \"exp\": %s}" % (DOMAIN, bad)).encode())
+    assert sso_auth.verify_token(make_token(raw_body=body), SECRET, {DOMAIN}) is None
