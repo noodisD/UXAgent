@@ -2159,6 +2159,27 @@ _ASSESSMENT_GUARDS = {
 }
 
 
+def parse_narrative_json(raw: str) -> dict:
+    """The JSON object in a model reply, repaired when it is not valid JSON.
+
+    Raises ValueError when the reply holds no object at all, so the caller can ask
+    again instead of rendering an empty narrative."""
+    import regex
+
+    matches = regex.findall(r"\{(?:[^{}]|(?R))*\}", raw or "", regex.DOTALL)
+    if not matches:
+        raise ValueError("no JSON object in the reply")
+    try:
+        data = json.loads(matches[0])
+    except ValueError:
+        from json_repair import repair_json
+
+        data = json.loads(repair_json(matches[0]))
+    if not isinstance(data, dict) or not data:
+        raise ValueError("the reply's JSON is not a non-empty object")
+    return data
+
+
 def guard_unmeasured(narr: dict, stats: dict, pagespeed: dict | None = None,
                      links: dict | None = None) -> dict:
     """Take back what the narrator wrote about an area that has no result.
@@ -2580,15 +2601,17 @@ async def generate_aggregated_report(
     )
 
     messages = [{"role": "user", "content": prompt}]
-    try:
-        raw = await async_chat(messages, model="report", log=False)
-        # extract JSON from LLM output
-        import regex
-        matches = regex.findall(r"\{(?:[^{}]|(?R))*\}", raw, regex.DOTALL)
-        narrative = json.loads(matches[0]) if matches else {"raw": raw}
-    except Exception as e:
-        log.exception("[reporter] aggregate LLM call failed: %s", e)
-        narrative = {"error": str(e)}
+    narrative = {"error": "no attempt"}
+    for attempt in (1, 2):
+        try:
+            raw = await async_chat(messages, model="report", log=False)
+            narrative = parse_narrative_json(raw)
+            break
+        except Exception as e:
+            # A reply that is not valid JSON used to end the narrative at once and
+            # the report fell back to the mechanical summary (2026-11-13 run).
+            log.exception("[reporter] aggregate LLM call failed (attempt %d): %s", attempt, e)
+            narrative = {"error": str(e)}
 
     # The computed score is the score. The model was told it and asked to
     # explain it; if it returned something else anyway, the headline must still
