@@ -215,6 +215,17 @@ open questions carry verbatim answers):
 Question legend for THIS study (id = wording, scale):
 {survey_legend}
 
+POMIAR KOMUNIKATÓW NA STRONIE STARTOWEJ (rozmiar i zasłanianie zmierzone w przeglądarce):
+{landing_measurements}
+WAŻNE (komunikaty na stronie startowej): rozmiar, położenie i zasłanianie komunikatu opisuj WYŁĄCZNIE
+liczbami z powyższego pomiaru, osobno dla każdego urządzenia, jeśli się różnią. Komunikat zmierzony jako
+„nie zasłania nawigacji ani przycisków” nie może być opisany jako zasłaniający, ukrywający, blokujący,
+przytłaczający interfejs ani utrudniający dotarcie do nawigacji lub wezwań do działania; blok w
+przepływie strony nie jest oknem, pop-upem ani nakładką. Zamiast takich określeń podaj zmierzony
+udział pierwszego ekranu (np. „zajmuje 14-15% ekranu na komputerze i 32-34% na telefonie”). Komunikat
+zmierzony jako ZASŁANIAJĄCY możesz tak opisać. Gdy pomiaru brak, nie wypowiadaj się o geometrii
+komunikatów. Kod poprawia po Twojej odpowiedzi zdania, które przeczą pomiarowi.
+
 WAŻNE (ankieta, pytania odwrócone i SUS): niektóre pytania są sformułowane negatywnie (np. „Strona
 była niepotrzebnie skomplikowana”). Takie pytanie ma w `survey_summary` pole `reverse: true`, a w
 legendzie dopisek „odwrócone”. Dla niego WYŻSZA średnia oznacza GORSZĄ ocenę, a niższa lepszą —

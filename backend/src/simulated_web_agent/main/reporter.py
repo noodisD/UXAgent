@@ -45,7 +45,8 @@ from .attribution import (
     unseen_last_action, without_dead_address_blame,
 )
 from .iso_metrics import current_effectiveness, effective_outcome
-from .landing_facts import landing_notice_rollup
+from .landing_facts import (guard_measured_notice_claims, landing_notice_rollup,
+                            summarize_notice_rollup)
 from .mandated_notice import guard_narrative as guard_mandated_notice
 from .premise_check import LABELS as _PREMISE_LABELS, ensure_premise_check, run_gaps
 from .site_scope import declared_site_context, site_context_for
@@ -2576,6 +2577,7 @@ async def generate_aggregated_report(
         task_description=task_description,
         website_url=website_url,
         first_impression_stats=fi_stats,
+        landing_measurements=summarize_notice_rollup(stats.get("landing_notices")),
         participant_routes=_routes_text(stats.get("objective_reflections") or []),
         route_conflicts=_conflicts_text(route_conflicts),
         heuristic_summary=heuristic_summary,
@@ -2620,6 +2622,7 @@ async def generate_aggregated_report(
         narrative = clean_narrative(narrative)
         guard_unmeasured(narrative, stats, pagespeed_data, link_data)
         guard_mandated_notice(narrative, stats.get("landing_notices"))
+        guard_measured_notice_claims(narrative, stats.get("landing_notices"))
         narrative["overall_ux_score"] = score_result["score"]
         # The explanation too: the files take it from the breakdown at render
         # time, but the dashboard shows the stored narrative, and the model's
@@ -3166,6 +3169,7 @@ def resolve_narrative(agg: dict) -> dict:
     # backs; stored runs get the same rule as new ones.
     guard_unmeasured(narr, stats, agg.get("pagespeed"), agg.get("links"))
     guard_mandated_notice(narr, stats.get("landing_notices"))
+    guard_measured_notice_claims(narr, stats.get("landing_notices"))
     return narr
 
 

@@ -13,9 +13,11 @@ hold it up. `backfill_landing_facts.py` runs the same script on a stored run.
 """
 import asyncio
 import logging
+import re
 from typing import Any
 
-from .mandated_notice import mandated_notice_reason, only_mandated
+from .mandated_notice import (_SOMETHING_ELSE, mandated_notice_reason, names_mandated_notice, only_mandated,
+                              rewrite_sentences)
 from .textutil import clip_words
 
 log = logging.getLogger(__name__)
@@ -589,11 +591,29 @@ def summarize_landing_facts(facts: dict | None) -> str:
     return "\n".join(lines)
 
 
+
+
+def _device_of(viewport: Any) -> str:
+    try:
+        return "mobile" if float(viewport.get("width")) < 768 else "desktop"
+    except (AttributeError, TypeError, ValueError):
+        return "desktop"
+
+
+def _tri(current: bool | None, value: Any) -> bool | None:
+    """True once any session says True; False when some say False and none True."""
+    if value is True or current is True:
+        return True
+    return False if value is False else current
+
+
 def landing_notice_rollup(stores: list) -> dict:
     """What the landing measurements of a run say about notices, for the aggregate guard
     (statistics.landing_notices). Empty when no session was measured, so a run stored
-    before landing facts keeps its statistics unchanged."""
-    measured, notices, left_out = 0, {}, 0
+    before landing facts keeps its statistics unchanged. `devices` carries the geometry per
+    device for the narrator's prompt and the wording check; an aggregate stored before it
+    existed has none, and nothing is then claimed about geometry."""
+    measured, notices, left_out, devices = 0, {}, 0, {}
     for store in stores:
         try:
             facts = store.read_landing_facts()
@@ -605,17 +625,198 @@ def landing_notice_rollup(stores: list) -> dict:
         if not isinstance(facts, dict):
             continue
         measured += 1
+        vp = facts.get("viewport") if isinstance(facts.get("viewport"), dict) else {}
+        device = devices.setdefault(_device_of(vp), {"width": vp.get("width"), "height": vp.get("height"),
+                                                     "sessions": 0, "notices": {}})
+        device["sessions"] += 1
         for n in facts.get("notices") or []:
             if not isinstance(n, dict):
                 continue
             key = " ".join(str(n.get("text") or "").lower().split())[:80]
-            entry = notices.setdefault(key, {"title": " ".join(str(n.get("text") or "").split())[:100],
-                                             "mandated": n.get("mandated") is True,
+            title = " ".join(str(n.get("text") or "").split())[:100]
+            entry = notices.setdefault(key, {"title": title, "mandated": n.get("mandated") is True,
                                              "kind": n.get("kind"), "sessions": 0})
             entry["sessions"] += 1
+            d = device["notices"].setdefault(key, {
+                "title": title, "mandated": n.get("mandated") is True, "kind": n.get("kind"),
+                "overlay": None, "covers_navigation": None, "covers_ctas": None, "covers_content": None,
+                "closable": None, "share_min": None, "share_max": None})
+            if n.get("kind") is not None or n.get("is_overlay") is not None:
+                d["overlay"] = _tri(d["overlay"], n.get("kind") == "overlay" or n.get("is_overlay") is True)
+            for field in ("covers_navigation", "covers_ctas", "covers_content"):
+                d[field] = _tri(d[field], n.get(field))
+            if n.get("has_close_control") is True:
+                d["closable"] = True
+            elif n.get("has_close_control") is False and d["closable"] is None:
+                d["closable"] = False
+            try:
+                share = float(n["viewport_share"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            d["share_min"] = share if d["share_min"] is None else min(d["share_min"], share)
+            d["share_max"] = share if d["share_max"] is None else max(d["share_max"], share)
     if not measured:
         return {"left_out": left_out} if left_out else {}
     listed = list(notices.values())
+    rolled = [{"device": name, "width": d["width"], "height": d["height"], "sessions": d["sessions"],
+               "notices": list(d["notices"].values())}
+              for name, d in sorted(devices.items())]
     return {"measured_sessions": measured, "notices": listed, "left_out": left_out,
             "mandated": any(n["mandated"] for n in listed),
-            "only_mandated": only_mandated({"notices": listed})}
+            "only_mandated": only_mandated({"notices": listed}), "devices": rolled}
+
+
+# --- what the aggregate narrator reads, and may say, about a notice's geometry -----------
+
+NO_NOTICE_MEASUREMENTS = ("(brak pomiarów strony startowej: nie wypowiadaj się o rozmiarze, położeniu ani "
+                          "zasłanianiu żadnego komunikatu, okna czy nakładki - nazwij tylko to, co wynika z "
+                          "opisów uczestników)")
+
+_DEVICE_WORDS = {"desktop": ("komputerze", "komputer"), "mobile": ("telefonie", "telefon")}
+_KIND_WORDS = {"in_flow": "blok w przepływie strony", "fixed_bar": "pasek przyklejony do krawędzi ekranu",
+               "absolute": "blok pozycjonowany bezwzględnie", "overlay": "nakładka na treść strony"}
+
+
+def _share_range(lo: Any, hi: Any) -> str:
+    if lo is None or hi is None:
+        return ""
+    a, b = _pct(lo).rstrip("%"), _pct(hi).rstrip("%")
+    return f"{a}%" if a == b else f"{a}-{b}%"
+
+
+def _device_notices(dev: dict) -> list[dict]:
+    return [n for n in dev.get("notices") or [] if isinstance(n, dict)]
+
+
+def _plainly_not_covering(n: dict) -> bool:
+    """Measured as not an overlay and covering neither navigation, buttons nor content."""
+    return (n.get("kind") in ("in_flow", "fixed_bar", "absolute") and n.get("overlay") is not True
+            and n.get("covers_navigation") is False and n.get("covers_ctas") is False
+            and n.get("covers_content") is not True)
+
+
+def summarize_notice_rollup(landing: dict | None) -> str:
+    """The measured notice facts per device as the Polish block for the aggregate prompt
+    (`landing` is statistics.landing_notices); the "no measurements" sentence when there are none."""
+    devices = [d for d in (landing or {}).get("devices") or [] if isinstance(d, dict)]
+    if not devices:
+        return NO_NOTICE_MEASUREMENTS
+    lines = ["Pomiar w przeglądarce, przed jakąkolwiek akcją (jedyne wiarygodne źródło rozmiaru i zasłaniania):"]
+    for dev in devices:
+        word = _DEVICE_WORDS.get(dev.get("device"), ("urządzeniu", "urządzenie"))[1]
+        head = f"- {word} {_px(dev.get('width')).removesuffix(' px')}×{_px(dev.get('height'))}, {dev.get('sessions')} sesji"
+        notices = _device_notices(dev)
+        if not notices:
+            lines.append(head + ": nie wykryto komunikatu z przyciskiem zamknięcia, okna dialogowego ani paska.")
+            continue
+        for n in notices:
+            title = clip_words(" ".join(str(n.get("title") or "").split()), 80)
+            share = _share_range(n.get("share_min"), n.get("share_max"))
+            parts = [_KIND_WORDS.get(n.get("kind"), "element o nieustalonym położeniu")]
+            if share:
+                parts.append(f"zajmuje {share} powierzchni pierwszego ekranu")
+            if n.get("covers_navigation") is True or n.get("covers_ctas") is True:
+                parts.append("ZASŁANIA nawigację lub przyciski")
+            elif n.get("covers_navigation") is False and n.get("covers_ctas") is False:
+                parts.append("nie zasłania nawigacji ani przycisków")
+            if n.get("closable") is True:
+                parts.append("można go zamknąć")
+            if n.get("mandated"):
+                parts.append("komunikat OBOWIĄZKOWY (narzucony przez organ lub przepis)")
+            lines.append(f"{head}, komunikat „{title}”: " + "; ".join(parts) + ".")
+    return "\n".join(lines)
+
+
+MEASURED_NOTE = ("Opisy komunikatu na stronie startowej, które przeczyły pomiarowi (zasłanianie lub "
+                 "blokowanie nawigacji, nakładka), poprawiono na podstawie zmierzonych wartości.")
+
+# A claim that a notice covers, blocks, hides or overwhelms the page, and the words that call
+# an in-flow block a window.
+_COVER_CLAIM = re.compile(
+    r"zasłani\w*|zasłon\w*|zakry\w*|przykry\w*|blokuj\w*|zablokow\w*|blokad\w*|uniemożliwia\w*"
+    r"|utrudnia\w*(?:\s+\S+){0,3}?\s+(?:dotarci|dostęp|nawigac|korzystan|znalezien)\w*"
+    r"|przytłacz\w*|przytłocz\w*|przesłani\w*|ukrywa\w*|dominuj\w*|masywn\w*|ogromn\w*"
+    r"|pop-?up\w*|\bokn[oaeu]\w*|nakładk\w*", re.IGNORECASE)
+_NEGATED_CLAIM = re.compile(
+    r"\bnie\s+(?:\S+\s+)?(?:zasłani|zasłon|zakry|blokuj|blokow|ukrywa|przytłacz|utrudnia|przesłani)\w*",
+    re.IGNORECASE)
+_NAMES_A_NOTICE = re.compile(r"komunikat\w*|pop-?up\w*|\bokn[oaeu]\w*|nakładk\w*|\bblok\w*|\bnotice\b",
+                             re.IGNORECASE)
+_MEASURED_FIELDS = ("executive_summary", "first_impression_assessment", "responsiveness_assessment")
+
+
+def measured_notice_sentence(landing: dict | None) -> str | None:
+    """The measured wording for a notice that covers nothing; None when there are no
+    measurements or a measured notice is an overlay or covers something."""
+    devices = [d for d in (landing or {}).get("devices") or [] if isinstance(d, dict)]
+    notices = [(d, n) for d in devices for n in _device_notices(d)]
+    if not notices or not all(_plainly_not_covering(n) for _, n in notices):
+        return None
+    by_title: dict[str, list] = {}
+    for d, n in notices:
+        by_title.setdefault(n.get("title") or "", []).append((d, n))
+    # The widest notice speaks for the screen.
+    title, entries = max(by_title.items(), key=lambda kv: max((n.get("share_max") or 0) for _, n in kv[1]))
+    first = entries[0][1]
+    subject = "Obowiązkowy komunikat prawny" if first.get("mandated") else f"Komunikat „{clip_words(title, 60)}”"
+    shares = []
+    for d, n in entries:
+        share = _share_range(n.get("share_min"), n.get("share_max"))
+        if share:
+            shares.append(f"na {_DEVICE_WORDS.get(d.get('device'), ('urządzeniu',))[0]} {share}")
+    text = f"{subject} to {_KIND_WORDS.get(first.get('kind'), 'blok')}"
+    if shares:
+        text += ", który zajmuje " + ", a ".join(shares) + " pierwszego ekranu"
+    text += ", nie zasłania nawigacji ani przycisków"
+    if all(n.get("closable") is True for _, n in entries):
+        text += " i można go zamknąć"
+    return text + "."
+
+
+def guard_measured_notice_claims(narr: dict, landing: dict | None = None) -> dict:
+    """Put the measurements in place of a sentence that says a notice covers, blocks, hides or
+    overwhelms the page when they say it covers neither navigation nor buttons and is not an
+    overlay (`landing` is statistics.landing_notices).
+
+    Only a sentence that names a notice is touched: one about an app banner, a chat widget, a
+    cookie layer or a promotion stays, and so does everything when there are no measurements or
+    a measured notice is an overlay that covers something. The methodology note says once
+    that such wording was corrected. Mutates and returns `narr`; runs on its own output unchanged.
+    """
+    if not isinstance(narr, dict):
+        return narr
+    replacement = measured_notice_sentence(landing)
+    if not replacement:
+        return narr
+    only = landing.get("only_mandated") is True
+
+    def claim(s: str) -> bool:
+        if s.strip() in replacement or _SOMETHING_ELSE.search(s):
+            return False
+        names = names_mandated_notice(s, only) or bool(_NAMES_A_NOTICE.search(s))
+        return names and bool(_COVER_CLAIM.search(_NEGATED_CLAIM.sub(" ", s)))
+
+    changed = False
+
+    def fix(holder: dict, key: Any) -> None:
+        nonlocal changed
+        new = rewrite_sentences(holder[key], claim, replacement) if isinstance(holder[key], str) else None
+        if new is not None:
+            holder[key] = new
+            changed = True
+
+    for field in _MEASURED_FIELDS:
+        if field in narr:
+            fix(narr, field)
+    if isinstance(narr.get("key_weaknesses"), list):
+        for i in range(len(narr["key_weaknesses"])):
+            fix(narr["key_weaknesses"], i)
+    for key in ("critical_issues", "serious_issues", "minor_issues"):
+        for issue in narr.get(key) or []:
+            if isinstance(issue, dict):
+                for field in ("impact", "description", "title"):
+                    if field in issue:
+                        fix(issue, field)
+    if changed and MEASURED_NOTE not in str(narr.get("methodology_note") or ""):
+        narr["methodology_note"] = (str(narr.get("methodology_note") or "") + " " + MEASURED_NOTE).strip()
+    return narr
