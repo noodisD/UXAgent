@@ -29,7 +29,7 @@ export interface SsoTokenPayload { sub?: string; email?: string; name?: string; 
 export function isSsoMode(): boolean {
   if (typeof window === 'undefined') return false
   const host = (window.location?.hostname ?? '').toLowerCase()
-  if (host.endsWith('csaapps.pl')) return true
+  if (host === 'csaapps.pl' || host.endsWith('.csaapps.pl')) return true
   return (window as any).UXAGENT_AUTH === 'csaapps'
 }
 
@@ -100,6 +100,14 @@ function dropToken(): void {
   if (renewTimer) clearTimeout(renewTimer)
 }
 
+function renewInBackground(): void {
+  getSsoToken(true).catch(() => {
+    // Transient failure: try again rather than leave rendered URLs to expire.
+    if (renewTimer) clearTimeout(renewTimer)
+    renewTimer = setTimeout(renewInBackground, 30_000)
+  })
+}
+
 async function fetchToken(): Promise<string | null> {
   const res = await fetch(`/auth/token.php?aud=${encodeURIComponent(ssoAudience())}`, {
     credentials: 'include',
@@ -120,7 +128,7 @@ async function fetchToken(): Promise<string | null> {
   if (renewTimer) clearTimeout(renewTimer)
   // Renew in the background so asset URLs already rendered stay valid.
   const delay = Math.max(expiresAtMs - 2 * RENEW_MARGIN_MS - Date.now(), 30_000)
-  renewTimer = setTimeout(() => { getSsoToken(true).catch(() => {}) }, delay)
+  renewTimer = setTimeout(renewInBackground, delay)
   return token
 }
 

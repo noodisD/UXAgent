@@ -49,7 +49,7 @@ time is readable by anyone who opens devtools.
 
 **PL.** Na `https://csaapps.pl/apps/` aplikacja sama przełącza się na SSO
 Microsoft (`src/sso.ts`): `index.html` ładuje wtedy `/js/guard.js` jako pierwszy
-skrypt, nie ma ekranu z hasłem, a `api.ts` pobiera token z `/auth/token.php?aud=uxagent`
+skrypt (tylko na hostach csaapps.pl; przy wymuszonym `UXAGENT_AUTH` działa sam token i przekierowanie do logowania), nie ma ekranu z hasłem, a `api.ts` pobiera token z `/auth/token.php?aud=uxagent`
 i wysyła `Authorization: Bearer`. Linki do raportów i zrzutów dostają `?token=`.
 Poza csaapps.pl (lokalnie, inne hosty) nic się nie zmienia. Opcjonalnie w
 `config.js`: `UXAGENT_AUTH = "csaapps"`, `UXAGENT_AUDIENCE`. Audience trzeba
@@ -57,7 +57,7 @@ zarejestrować u administratora csaapps.pl, a backend potrzebuje `AUTH_SECRET`,
 `ALLOWED_DOMAINS` i `CORS_ORIGINS=https://csaapps.pl`. Sekretów nie wpisujemy do repo.
 
 **EN.** Under `https://csaapps.pl/apps/` the app switches to Microsoft SSO by
-itself (`src/sso.ts`): `index.html` loads `/js/guard.js` as the first script,
+itself (`src/sso.ts`): `index.html` loads `/js/guard.js` as the first script (only on csaapps.pl hosts; with a forced `UXAGENT_AUTH` only the token and login redirect apply),
 there is no password screen, and `api.ts` fetches a token from
 `/auth/token.php?aud=uxagent` and sends `Authorization: Bearer`. Report and
 screenshot links carry `?token=`. Anywhere else (local, other hosts) nothing

@@ -18,7 +18,7 @@
  * five composables each turning it into an opaque "HTTP 401" string.
  */
 
-import { currentSsoToken, getSsoToken, isSsoMode, withTokenParam } from './sso'
+import { currentSsoToken, getSsoToken, isRedirectingToLogin, isSsoMode, withTokenParam } from './sso'
 
 /**
  * Backend origin, in priority order:
@@ -125,7 +125,8 @@ async function ssoFetch(path: string, init: RequestInit): Promise<Response> {
   let res = await attempt(false)
   if (res && res.status === 401) res = await attempt(true)
   if (!res || res.status === 401) {
-    unauthorizedListeners.forEach(fn => fn())
+    // Mid-redirect to the login page: no 'denied' flash.
+    if (!isRedirectingToLogin()) unauthorizedListeners.forEach(fn => fn())
     throw new UnauthorizedError()
   }
   return res
