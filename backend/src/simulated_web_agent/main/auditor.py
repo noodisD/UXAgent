@@ -27,6 +27,7 @@ from .attribution import (
 )
 from .claim_verifier import persona_disposition, run_claim_verification
 from .confidence import cap_confidence
+from .consequence import apply_severity_ceiling
 from .evidence import resolve_all, resolve_evidence
 from .iso_metrics import page_view_stats
 from .landing_facts import summarize_landing_facts
@@ -406,6 +407,9 @@ async def run_audit_analysis(store: TraceStore) -> dict:
     # All stamps are now in place, so the LLM's self-reported confidence can be
     # capped at what they actually support. Must stay last.
     heuristic_findings = cap_confidence(heuristic_findings)
+    # Severity is what the participant lost: capped at the observed consequence.
+    # The aggregate lifts it again where a second participant reports the same.
+    heuristic_findings = apply_severity_ceiling(store, heuristic_findings)
     if isinstance(accessibility_findings, dict):
         accessibility_findings["findings"] = resolve_all(
             store, accessibility_findings.get("findings") or []

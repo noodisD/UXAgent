@@ -21,6 +21,7 @@ from ..agent.gpt import async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .pagespeed import format_pagespeed_summary, read_pagespeed
 from .prioritization import prioritize
+from .consequence import apply_severity_ceiling, corroborated_findings
 from .root_cause import assign_root_causes
 from .severity import (
     SEVERITY_EN,
@@ -1003,6 +1004,20 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             if isinstance(f, dict):
                 all_findings.append({**f, "_persona_dir": persona_dir, "_persona_name": persona_name})
 
+    # Severity follows what the participant lost (consequence.py). The ceiling is
+    # recomputed from the stored label before any cap, with the other
+    # participants' reports of the same issue counted this time.
+    _corroborated = corroborated_findings(all_findings)
+    _by_persona: dict[str, list[int]] = defaultdict(list)
+    for _i, _f in enumerate(all_findings):
+        _by_persona[_f.get("_persona_dir", "")].append(_i)
+    for _dir, _idx in _by_persona.items():
+        _store = _stores_by_dir.get(_dir)
+        if _store is None:
+            continue
+        for _i in _idx:
+            apply_severity_ceiling(_store, [all_findings[_i]], _corroborated, offset=_i)
+
     # Who else's pages showed the same rendering artifact. Reach counted the
     # participants who wrote a finding down, not those who met the defect:
     # "null kW (null KM)" was on the engine step in all three hyundai sessions
@@ -1109,6 +1124,11 @@ def aggregate_statistics(reports: list[dict], outcomes: dict[str, str] | None = 
             # unrelated defects under one Nielsen number lent each other their
             # severity and reach; the narrator had no way to tell them apart.
             "severity": f.get("severity", ""),
+            # Set when the observed consequence lowered it: the label the model
+            # gave and the sentence that says why.
+            **({"severity_before_cap": f["severity_before_cap"],
+                "severity_note": f.get("severity_note", "")}
+               if f.get("severity_before_cap") else {}),
         }
 
     # Everything the gate held back, with the reason and what a person should
@@ -2838,6 +2858,7 @@ def _attach_issue_evidence(narrative: dict, stats: dict, measurements: dict | No
             if group:
                 shown, others = _examples_for_issue(issue, group.get("examples", []))
                 issue["examples"] = shown
+                _clamp_issue_severity(issue, shown)
                 issue["devices"] = group.get("devices") or {}
                 # What the group holds that the issue's own text does not describe:
                 # listed as such, never shown as proof of the wrong claim.
@@ -2909,10 +2930,39 @@ def _attach_issue_evidence(narrative: dict, stats: dict, measurements: dict | No
     # Added to what an earlier pass set aside: aggregation runs this once and
     # stores the result, and every render runs it again on what is left — which
     # replaced the stored list with an empty one, so the note vanished.
+    _rebucket_by_severity(narrative)
     prior = [i for i in (narrative.get("unconfirmed_issues") or []) if isinstance(i, dict)]
     seen = {(i.get("heuristic_id"), i.get("heuristic_name"), i.get("impact")) for i in prior}
     narrative["unconfirmed_issues"] = prior + [
         i for i in unconfirmed if (i.get("heuristic_id"), i.get("heuristic_name"), i.get("impact")) not in seen]
+
+
+def _clamp_issue_severity(issue: dict, shown: list) -> None:
+    """An issue is no more severe than the worst finding that supports it.
+
+    Findings carry the label after the observed-consequence ceiling; the model
+    writes the issue's label from the group's worst one and from its own view of
+    the page. Examples with no label (older stores) leave the issue as it is."""
+    labels = [ex.get("severity") for ex in shown if isinstance(ex, dict)]
+    if not labels or any(l not in _LIST_SEVERITY.values() for l in labels):
+        return
+    worst = max(labels, key=severity_rank)
+    if severity_rank(issue.get("severity")) > severity_rank(worst):
+        issue["severity_before_cap"] = issue.get("severity")
+        issue["severity"] = worst
+
+
+def _rebucket_by_severity(narrative: dict) -> None:
+    """Move an issue whose label was lowered to the list of its new label."""
+    wanted = {v: k for k, v in _LIST_SEVERITY.items()}
+    for key in _LIST_SEVERITY:
+        for issue in list(narrative.get(key) or []):
+            if not isinstance(issue, dict) or not issue.get("severity_before_cap"):
+                continue
+            target = wanted.get(issue.get("severity"))
+            if target and target != key:
+                narrative[key].remove(issue)
+                narrative.setdefault(target, []).append(issue)
 
 
 def _issue_text(issue: dict) -> str:
