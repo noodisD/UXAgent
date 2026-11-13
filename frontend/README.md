@@ -45,6 +45,27 @@ form. A 401 anywhere clears the key and re-raises the gate.
 There is no key or secret in this bundle by design. Anything baked in at build
 time is readable by anyone who opens devtools.
 
+## Hosting on csaapps.pl / Hosting na csaapps.pl
+
+**PL.** Na `https://csaapps.pl/apps/` aplikacja sama przełącza się na SSO
+Microsoft (`src/sso.ts`): `index.html` ładuje wtedy `/js/guard.js` jako pierwszy
+skrypt, nie ma ekranu z hasłem, a `api.ts` pobiera token z `/auth/token.php?aud=uxagent`
+i wysyła `Authorization: Bearer`. Linki do raportów i zrzutów dostają `?token=`.
+Poza csaapps.pl (lokalnie, inne hosty) nic się nie zmienia. Opcjonalnie w
+`config.js`: `UXAGENT_AUTH = "csaapps"`, `UXAGENT_AUDIENCE`. Audience trzeba
+zarejestrować u administratora csaapps.pl, a backend potrzebuje `AUTH_SECRET`,
+`ALLOWED_DOMAINS` i `CORS_ORIGINS=https://csaapps.pl`. Sekretów nie wpisujemy do repo.
+
+**EN.** Under `https://csaapps.pl/apps/` the app switches to Microsoft SSO by
+itself (`src/sso.ts`): `index.html` loads `/js/guard.js` as the first script,
+there is no password screen, and `api.ts` fetches a token from
+`/auth/token.php?aud=uxagent` and sends `Authorization: Bearer`. Report and
+screenshot links carry `?token=`. Anywhere else (local, other hosts) nothing
+changes. Optional in `config.js`: `UXAGENT_AUTH = "csaapps"`, `UXAGENT_AUDIENCE`.
+The audience must be registered with the csaapps.pl administrator; the backend
+needs `AUTH_SECRET`, `ALLOWED_DOMAINS` and `CORS_ORIGINS=https://csaapps.pl`.
+Never commit secrets.
+
 ## Deploying
 
 `npm run build`, then upload the contents of `dist/` to the static host and set

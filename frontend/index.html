@@ -2,6 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- csaapps.pl guard (SSO): must be the first blocking script. The path is
+         absolute and the file is never copied locally, so on every other host
+         (local dev, other static hosts) requesting it would only 404. A static
+         <script src> cannot be conditional, hence this tiny inline writer. It
+         does not load /js/auth.js: src/sso.ts fetches the token itself, so no
+         window.CSA_AUTH config is needed either. -->
+    <script>
+      if (/(^|\.)csaapps\.pl$/i.test(location.hostname)) document.write('<script src="/js/guard.js"><\/script>');
+    </script>
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>UXAgent</title>

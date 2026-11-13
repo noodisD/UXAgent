@@ -3,6 +3,18 @@
        (or unauthenticated, i.e. local) backend. -->
   <div v-if="authState === 'checking'" class="boot"></div>
 
+  <div v-else-if="authState === 'denied'" class="denied">
+    <div class="denied-card">
+      <div class="denied-title">{{ t('sso.denied') }}</div>
+      <p class="denied-hint">{{ t('sso.deniedHint') }}</p>
+      <div v-if="signedIn" class="denied-user mono">{{ signedIn.email }}</div>
+      <div class="denied-actions">
+        <button class="btn" @click="reload">{{ t('sso.retry') }}</button>
+        <a class="btn btn-primary" href="/auth/logout.php">{{ t('sso.logout') }}</a>
+      </div>
+    </div>
+  </div>
+
   <AuthGate v-else-if="authState === 'locked'" @unlocked="authState = 'open'" />
 
   <div v-else class="shell">
@@ -54,6 +66,10 @@
           <div class="h-sub">{{ header.sub }}</div>
         </div>
         <div class="h-actions">
+          <template v-if="signedIn">
+            <span class="h-user mono">{{ signedIn.email }}</span>
+            <a class="btn" href="/auth/logout.php">{{ t('sso.logout') }}</a>
+          </template>
           <template v-if="app.screen === 'results'">
             <a class="btn" :href="reportPdfUrl">{{ t('btn.downloadPdf') }}</a>
             <a class="btn" :href="reportDocxUrl">{{ t('btn.downloadDocx') }}</a>
@@ -77,7 +93,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, provide, ref, watch, watchEffect } from 'vue'
-import { apiAssetUrl, apiOrigin, getKey, onUnauthorized, verifyKey } from './api'
+import { apiAssetUrl, apiOrigin, apiUrl, getKey, onUnauthorized, verifyKey } from './api'
+import { getSsoToken, isRedirectingToLogin, isSsoMode, ssoUser } from './sso'
 import AuthGate from './components/AuthGate.vue'
 import { FORM_KEY } from './types'
 import { createWizardForm } from './composables/useForm'
@@ -142,9 +159,34 @@ const reportDocxUrl = computed(() =>
 // The backend decides whether a key is required: probing /progress returns 401
 // only when UXAGENT_API_KEY is configured. So local development, where it is
 // unset, never sees the gate — no build flag needed to tell the two apart.
-const authState = ref<'checking' | 'locked' | 'open'>('checking')
+//
+// On csaapps.pl (see sso.ts) there is no password: the session decides, and a
+// 401 that survives a token refresh means the account is not allowed, not that
+// a password is needed.
+const authState = ref<'checking' | 'locked' | 'denied' | 'open'>('checking')
+const sso = isSsoMode()
+const signedIn = computed(() => (sso ? ssoUser() : null))
+const reload = () => window.location.reload()
+
+async function probeSso() {
+  let token: string | null = null
+  try { token = await getSsoToken() } catch { /* endpoint unreachable: let the screens report it */ }
+  if (!token) {
+    // null means the page is going to the login; if it is not, the login just
+    // happened and still got a 401.
+    if (!isRedirectingToLogin()) authState.value = 'denied'
+    return
+  }
+  try {
+    const res = await fetch(apiUrl('/progress'), { headers: { Authorization: `Bearer ${token}` } })
+    authState.value = res.status === 401 ? 'denied' : 'open'
+  } catch {
+    authState.value = 'open'
+  }
+}
 
 onMounted(async () => {
+  if (sso) return probeSso()
   authState.value = (await verifyKey(getKey())) ? 'open' : 'locked'
 })
 
@@ -158,7 +200,7 @@ watch(authState, (s) => (s === 'open' ? start() : stop()), { immediate: true })
 
 // Any 401 mid-session (key revoked or rotated) drops straight back to the gate
 // rather than leaving a dead screen full of failed requests.
-onUnauthorized(() => { authState.value = 'locked' })
+onUnauthorized(() => { authState.value = sso ? 'denied' : 'locked' })
 
 const header = computed(() => {
   void locale.value
@@ -180,6 +222,14 @@ const header = computed(() => {
 <style scoped lang="scss">
 .shell { display: flex; min-height: 100vh; background: var(--bg); color: var(--text); }
 .boot { min-height: 100vh; background: var(--bg); }
+.denied { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg); padding: 24px; }
+.denied-card { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 30px 28px; display: flex; flex-direction: column; gap: 10px; }
+.denied-title { font-weight: 700; font-size: 16px; color: var(--text); }
+.denied-hint { font-size: 13px; color: var(--text-3); line-height: 1.5; margin: 0; }
+.denied-user { font-size: 12px; color: var(--text-faint); }
+.denied-actions { display: flex; gap: 10px; margin-top: 8px; }
+.denied-actions .btn { text-decoration: none; }
+.h-user { font: 500 12px var(--mono); color: var(--text-muted); }
 .topbar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 60; background: var(--border); }
 .topbar-fill { height: 100%; background: var(--ac); transition: width .35s ease; }
 

@@ -18,6 +18,8 @@
  * five composables each turning it into an opaque "HTTP 401" string.
  */
 
+import { currentSsoToken, getSsoToken, isSsoMode, withTokenParam } from './sso'
+
 /**
  * Backend origin, in priority order:
  *   1. window.UXAGENT_API_BASE from public/config.js — a plain file that can be
@@ -76,6 +78,9 @@ export function apiUrl(path: string): string {
  */
 export function apiAssetUrl(path: string): string {
   const url = apiUrl(path)
+  // SSO: same reasoning, with the short-lived token. Reading it here keeps
+  // computed URLs reactive to token renewal.
+  if (isSsoMode()) return withTokenParam(url, currentSsoToken())
   const key = getKey()
   if (!key) return url
   return `${url}${url.includes('?') ? '&' : '?'}key=${encodeURIComponent(key)}`
@@ -93,6 +98,7 @@ export function apiOrigin(): string {
  * do not report an expired key as a generic network failure.
  */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  if (isSsoMode()) return ssoFetch(path, init)
   const key = getKey()
   const headers = new Headers(init.headers ?? {})
   if (key) headers.set('X-API-Key', key)
@@ -101,6 +107,24 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 
   if (res.status === 401) {
     clearKey()
+    unauthorizedListeners.forEach(fn => fn())
+    throw new UnauthorizedError()
+  }
+  return res
+}
+
+/** One request with a Bearer token; a 401 gets one retry with a fresh token. */
+async function ssoFetch(path: string, init: RequestInit): Promise<Response> {
+  const attempt = async (force: boolean): Promise<Response | null> => {
+    const token = await getSsoToken(force)
+    if (!token) return null
+    const headers = new Headers(init.headers ?? {})
+    headers.set('Authorization', `Bearer ${token}`)
+    return fetch(apiUrl(path), { ...init, headers })
+  }
+  let res = await attempt(false)
+  if (res && res.status === 401) res = await attempt(true)
+  if (!res || res.status === 401) {
     unauthorizedListeners.forEach(fn => fn())
     throw new UnauthorizedError()
   }

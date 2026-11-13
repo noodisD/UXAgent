@@ -14,3 +14,17 @@
 // Set it on the static host after uploading, e.g.
 //   window.UXAGENT_API_BASE = "https://ux-agent-xxxxx.europe-central2.run.app";
 window.UXAGENT_API_BASE = "";
+
+// Hosting on https://csaapps.pl/apps/ (company Microsoft sign-in).
+// On csaapps.pl the app switches to SSO by itself: no password screen; it gets a
+// short-lived token from /auth/token.php and sends it as "Authorization: Bearer".
+// The backend must then have AUTH_SECRET and ALLOWED_DOMAINS set, and CORS_ORIGINS
+// must be exactly https://csaapps.pl.
+//
+// UXAGENT_AUTH = "csaapps" forces SSO mode on another host that proxies the same
+// /auth/ endpoints. Leave unset everywhere else (local dev keeps the password gate).
+//   window.UXAGENT_AUTH = "csaapps";
+//
+// UXAGENT_AUDIENCE is the app name registered with the csaapps administrator for
+// the token (default "uxagent").
+//   window.UXAGENT_AUDIENCE = "uxagent";
