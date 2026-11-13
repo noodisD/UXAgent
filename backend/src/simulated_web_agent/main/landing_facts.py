@@ -16,7 +16,7 @@ import logging
 import re
 from typing import Any
 
-from .mandated_notice import (_SOMETHING_ELSE, mandated_notice_reason, names_mandated_notice, only_mandated,
+from .mandated_notice import (_NAMES_REGULATOR, _SOMETHING_ELSE, mandated_notice_reason, only_mandated,
                               rewrite_sentences)
 from .textutil import clip_words
 
@@ -593,11 +593,11 @@ def summarize_landing_facts(facts: dict | None) -> str:
 
 
 
-def _device_of(viewport: Any) -> str:
+def _device_of(viewport: Any) -> str | None:
     try:
         return "mobile" if float(viewport.get("width")) < 768 else "desktop"
     except (AttributeError, TypeError, ValueError):
-        return "desktop"
+        return None
 
 
 def _tri(current: bool | None, value: Any) -> bool | None:
@@ -626,8 +626,10 @@ def landing_notice_rollup(stores: list) -> dict:
             continue
         measured += 1
         vp = facts.get("viewport") if isinstance(facts.get("viewport"), dict) else {}
-        device = devices.setdefault(_device_of(vp), {"width": vp.get("width"), "height": vp.get("height"),
-                                                     "sessions": 0, "notices": {}})
+        kind_of_device = _device_of(vp)
+        device = (devices.setdefault(kind_of_device, {"width": vp.get("width"), "height": vp.get("height"),
+                                                      "sessions": 0, "notices": {}})
+                  if kind_of_device else {"sessions": 0, "notices": {}})
         device["sessions"] += 1
         for n in facts.get("notices") or []:
             if not isinstance(n, dict):
@@ -740,8 +742,7 @@ _COVER_CLAIM = re.compile(
 _NEGATED_CLAIM = re.compile(
     r"\bnie\s+(?:\S+\s+)?(?:zasłani|zasłon|zakry|blokuj|blokow|ukrywa|przytłacz|utrudnia|przesłani)\w*",
     re.IGNORECASE)
-_NAMES_A_NOTICE = re.compile(r"komunikat\w*|pop-?up\w*|\bokn[oaeu]\w*|nakładk\w*|\bblok\w*|\bnotice\b",
-                             re.IGNORECASE)
+_BANNER = re.compile(r"baner\w*|banner\w*", re.IGNORECASE)
 _MEASURED_FIELDS = ("executive_summary", "first_impression_assessment", "responsiveness_assessment")
 
 
@@ -788,13 +789,22 @@ def guard_measured_notice_claims(narr: dict, landing: dict | None = None) -> dic
     replacement = measured_notice_sentence(landing)
     if not replacement:
         return narr
-    only = landing.get("only_mandated") is True
+    # A measured notice's own distinctive words (not the generic nouns for a notice).
+    titles = {w[:6] for d in landing.get("devices") or [] if isinstance(d, dict)
+              for n in _device_notices(d) for w in re.findall(r"\w{7,}", str(n.get("title") or "").lower())
+              if not re.match(r"komunikat|informac|powiadom|ogłosz|okno|nakład", w)}
 
     def claim(s: str) -> bool:
-        if s.strip() in replacement or _SOMETHING_ELSE.search(s):
+        if s.strip() in replacement:
             return False
-        names = names_mandated_notice(s, only) or bool(_NAMES_A_NOTICE.search(s))
-        return names and bool(_COVER_CLAIM.search(_NEGATED_CLAIM.sub(" ", s)))
+        # Only the regulator's notice or a measured notice's own title anchors a sentence: a
+        # bare "komunikat", "okno" or "blok" is as often an error message or a calculator.
+        regulator = bool(_NAMES_REGULATOR.search(s))
+        if not regulator and not any(t in s.lower() for t in titles):
+            return False
+        if _SOMETHING_ELSE.search(_BANNER.sub(" ", s) if regulator else s):
+            return False
+        return bool(_COVER_CLAIM.search(_NEGATED_CLAIM.sub(" ", s)))
 
     changed = False
 

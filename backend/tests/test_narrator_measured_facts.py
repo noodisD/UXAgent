@@ -181,3 +181,28 @@ def test_a_notice_titled_with_a_claim_word_does_not_make_its_own_wording_a_claim
     once = guard_measured_notice_claims(narr, roll)
     assert "Okno informacyjne" in once["executive_summary"]
     assert guard_measured_notice_claims(copy.deepcopy(once), roll) == once
+
+
+def test_sentences_about_other_ui_are_not_replaced_by_the_notice_sentence(tmp_path):
+    roll = _rollup(tmp_path)
+    text = ("Komunikat o niedostępności usługi uniemożliwia dokończenie wniosku. "
+            "Ogromny blok tekstu w sekcji kredytów jest nieczytelny. Okno wyboru kwoty kredytu blokuje przewijanie. "
+            "Nakładka z kalkulatorem zasłania przycisk. Komunikat o sukcesie dominuje nad ekranem potwierdzenia.")
+    narr = guard_measured_notice_claims(_narr(executive_summary=text), roll)
+    assert narr["executive_summary"] == text
+    assert narr["methodology_note"] == "Badanie."
+
+
+def test_a_regulator_banner_claim_is_still_corrected(tmp_path):
+    roll = _rollup(tmp_path)
+    narr = guard_measured_notice_claims(_narr(executive_summary="Banner UOKiK zasłania nawigację."), roll)
+    assert "zasłania nawigację" not in narr["executive_summary"]
+    assert "blok w przepływie strony" in narr["executive_summary"]
+
+
+def test_a_session_without_viewport_width_is_not_counted_as_desktop(tmp_path):
+    stores = [_store(tmp_path, "a", _notice()),
+              TraceStore(tmp_path / "b")]
+    stores[1].write_landing_facts({"viewport": {}, "notices": [_notice()]})
+    devices = landing_notice_rollup(stores)["devices"]
+    assert [(d["device"], d["sessions"]) for d in devices] == [("desktop", 1)]
