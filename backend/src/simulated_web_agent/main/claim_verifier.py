@@ -33,10 +33,12 @@ from __future__ import annotations
 
 import json
 import logging
+from urllib.parse import unquote
 
 from ..agent.gpt import _parse_json_response, async_chat
 from ..agent.prompt_registry import registry as _prompts
 from .session_goal_state import has_marker as _has, session_capabilities
+from .evidence import following_observation_step
 from .trace_store import TraceStore, parse_action as _parse_action
 
 # `session_capabilities` is re-exported (moved to session_goal_state so there is
@@ -132,6 +134,12 @@ def _step_context(store: TraceStore, step) -> dict:
     obs = store.read_observation_step_text(step).strip()
     if len(obs) > _MAX_OBS_CHARS:
         obs = obs[:_MAX_OBS_CHARS] + "…"
+    # observation k + 1 is the result of action k: when the finding cites the step of an
+    # action, what that action did is shown there, not in observation k.
+    nxt = following_observation_step(store, step)
+    after = store.read_observation_step_text(nxt).strip() if nxt is not None else ""
+    if len(after) > _MAX_OBS_CHARS:
+        after = after[:_MAX_OBS_CHARS] + "…"
     actions = [_parse_action(a) for a in (store.read_action_trace() or [])]
 
     def _desc(i):
@@ -139,12 +147,16 @@ def _step_context(store: TraceStore, step) -> dict:
             return (actions[i].get("description") or "")[:200]
         return ""
 
-    return {
+    ctx = {
         "observation_full": obs,
         "action_before": _desc(step - 1),
         "action_at_step": _desc(step),
         "action_after": _desc(step + 1),
     }
+    if after:
+        ctx["observation_after_action_full"] = after
+        ctx["url_after_action"] = unquote(store.url_at_step(nxt))
+    return ctx
 
 
 async def run_claim_verification(store: TraceStore, findings: list) -> list:
@@ -201,6 +213,7 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
     # LLM pass — fail-open: on any error, verdicts stay empty and we fall through
     # to the deterministic override (which must run regardless of the LLM).
     by_id: dict[int, tuple[str, str]] = {}
+    from_after: set[int] = set()
     try:
         raw = await async_chat(
             [{"role": "user", "content": prompt}], model="report", log=False
@@ -218,6 +231,8 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
             try:
                 by_id[int(v.get("id"))] = (
                     verdict, str(v.get("reason", ""))[:_MAX_REASON_CHARS])
+                if str(v.get("evidence", "")).strip().lower() == "after_action":
+                    from_after.add(int(v.get("id")))
             except (TypeError, ValueError):
                 continue
     except Exception as e:
@@ -229,6 +244,9 @@ async def run_claim_verification(store: TraceStore, findings: list) -> list:
         if local_id in by_id:
             f["claim_verdict"], f["claim_verdict_reason"] = by_id[local_id]
             stamped += 1
+            nxt = following_observation_step(store, f.get("step"))
+            if local_id in from_after and nxt is not None and f["claim_verdict"] != "unsupported":
+                f["evidence_step"] = nxt
         # Deterministic override: the session/observation refutes a broken/absent
         # claim — force unsupported, winning over an LLM "supported"/"partial".
         # This is what the LLM proved unreliable at (a stale single observation

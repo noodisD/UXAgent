@@ -16,6 +16,14 @@ For each claim you get:
 - "severity" — the asserted severity
 - "observation_full" — the FULL text of what the agent's perception recorded at
   the cited step (this is the ground truth you verify against)
+- "observation_after_action_full" — (only when present) the FULL text of the
+  NEXT observation, i.e. the page that the action at the cited step LOADED.
+  Observation k+1 is the result of action k, so a claim that cites the step of
+  an action (typing, clicking, submitting) is about what that action produced:
+  check it against this text as well as observation_full. It is ground truth
+  of the same standing; use it only for the result of the cited action, never
+  as support for anything else. "url_after_action" is the address that page
+  loaded at (what a search or form sent the visitor to appears there).
 - "action_before" / "action_at_step" / "action_after" — what the agent did
   around that step
 - "url" — the page the step was on
@@ -93,6 +101,9 @@ Hard rules:
 
 Return ONLY this JSON (no markdown fences):
 
-{"verdicts": [{"id": <claim id>, "verdict": "<supported | partial | unsupported>", "reason": "<jedno zdanie po polsku>"}]}
+{"verdicts": [{"id": <claim id>, "verdict": "<supported | partial | unsupported>", "reason": "<jedno zdanie po polsku>", "evidence": "<cited | after_action>"}]}
+
+"evidence" is "after_action" only when the verdict rests on observation_after_action_full
+rather than on observation_full; otherwise "cited".
 
 Every input claim id must appear exactly once.

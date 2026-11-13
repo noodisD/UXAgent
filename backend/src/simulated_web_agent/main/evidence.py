@@ -108,14 +108,38 @@ def page_quote(store: TraceStore, step, evidence: str) -> str:
     return ""
 
 
+def following_observation_step(store: TraceStore, step) -> int | None:
+    """The observation holding the RESULT of the action at `step`, or None.
+
+    observations[k + 1] is what action k loaded (observation 0 is the landing page), so
+    a finding that cites the step of a typed action has its evidence one observation on.
+    None unless `step` is an action step and that page was read by the participant: the
+    observation a session cut short captured and nobody perceived has no text, and is
+    never evidence. Only the next step counts, never a later one."""
+    try:
+        step = int(step)
+        n_actions = len(store.read_action_trace() or [])
+        n_observations = len(store.read_observations() or [])
+    except Exception:
+        return None
+    nxt = step + 1
+    if not 0 <= step < n_actions or nxt >= n_observations:
+        return None
+    return nxt if store.read_observation_step_text(nxt).strip() else None
+
+
 def resolve_evidence(store: TraceStore, finding: dict) -> dict:
     """Enrich a finding with verified evidence from the trace.
 
     Adds/overwrites: step (int|None), url, screenshot (relative path or None),
     observation_quote, verified. When the trace URL disagrees with the
     LLM-claimed one, the trace wins and the claim is kept as `claimed_url`.
+    When what the finding quotes is on the page the cited action loaded rather
+    than on the page it was typed on, that page is the evidence and `evidence_step`
+    names it; `step` stays as cited.
     """
     enriched = dict(finding)
+    enriched.pop("evidence_step", None)
 
     step = enriched.get("step")
     try:
@@ -148,11 +172,25 @@ def resolve_evidence(store: TraceStore, finding: dict) -> dict:
     observation = store.read_observation_step_text(step).strip()
     # Centred on what the finding quotes when possible, not the first 400
     # characters, which are the page header whatever the claim is about.
+    fragments = sorted(set(_QUOTED.findall(evidence_text)), key=len, reverse=True)
     quote = ""
-    for fragment in sorted(set(_QUOTED.findall(evidence_text)), key=len, reverse=True):
+    for fragment in fragments:
         quote = _window(observation, fragment.strip(), _QUOTE_CHARS)
         if quote:
             break
+    shown = page_quote(store, step, evidence_text)
+    nxt = following_observation_step(store, step)
+    if nxt is not None and not (quote or shown):
+        # Nothing the finding quotes is on the cited page; the page its action loaded may have it.
+        after = store.read_observation_step_text(nxt).strip()
+        for fragment in fragments:
+            quote = _window(after, fragment.strip(), _QUOTE_CHARS)
+            if quote:
+                break
+        shown = page_quote(store, nxt, evidence_text)
+        if quote or shown:
+            enriched["evidence_step"] = nxt
+            observation = after
     if not quote:
         quote = observation[:_QUOTE_CHARS] + ("…" if len(observation) > _QUOTE_CHARS else "")
 
@@ -161,7 +199,7 @@ def resolve_evidence(store: TraceStore, finding: dict) -> dict:
             "step": step,
             "screenshot": screenshot,
             "observation_quote": quote,
-            "page_quote": page_quote(store, step, evidence_text),
+            "page_quote": shown,
             "verified": bool(screenshot or quote),
         }
     )
